@@ -1,0 +1,9 @@
+{
+  "name": "better-code-review-prototype",
+  "private": true,
+  "description": "Throwaway prototype pipeline for the UX proposal.",
+  "dependencies": {
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.25.10"
+  }
+}

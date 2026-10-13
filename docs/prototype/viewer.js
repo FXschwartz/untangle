@@ -1,277 +1,307 @@
-// Prototype viewer. Every count, group and hidden line comes from ReviewCore run on the
-// raw diff, plus the definition and reference results of the Dart language server.
+// Prototype viewer v3: chains first, code second. It only renders the model built by
+// analyze.js (git + tree-sitter + Dart language server) and keeps your review marks.
 (function () {
   'use strict';
   const C = window.ReviewCore;
   const $ = (sel, el) => (el || document).querySelector(sel);
-  const RAW = JSON.parse($('#d-diff').textContent);
+  const MODEL = JSON.parse($('#d-model').textContent);
   const DEFS = JSON.parse($('#d-defs').textContent);
   const REFS = JSON.parse($('#d-refs').textContent);
-  const CONFIG = {
-    generated: ['**/migrations/**'],
-    reviewedWith: [['**/migrations/**', '**/*.spy.yaml']],
-  };
-  const GEN_RES = CONFIG.generated.map(C.globToRegExp);
-  const RW = CONFIG.reviewedWith.map(([g, s]) => ({ g: C.globToRegExp(g), s: C.globToRegExp(s), gs: g, ss: s }));
-  const START_FILE = 'packages/serverpod_offline_sync/lib/src/database/database.dart';
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const fmt = (n) => n.toLocaleString('en-US');
+  const trunc = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+  const fileName = (p) => p.slice(p.lastIndexOf('/') + 1);
+  const wbr = (s) => esc(s).replace(/([.(])/g, '<wbr>$1');
 
-  const viewer = $('#viewer');
-  const side = $('#vw-side');
-  const main = $('#vw-main');
-  const qInput = $('#vw-q');
+  const viewer = $('#viewer'), side = $('#vw-side'), main = $('#vw-main'), qInput = $('#vw-q');
 
-  // ---------- state (reviewed atoms are remembered in this browser only)
+  // ---------- state
   const state = {
-    compare: 'base', keyMode: 'tokens', hideComments: false,
-    view: { kind: 'file', path: START_FILE }, prevView: null, peek: null,
-    showBlocks: new Set(), search: { q: '', scope: 'unreviewed' },
+    compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
+    view: { kind: 'chain', id: 0 }, prevView: null, peek: null,
     rev: { base: new Set(), since: new Set() },
+    blockDiff: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
+    search: { q: '', scope: 'unreviewed' },
   };
   try {
-    const saved = JSON.parse(localStorage.getItem('bcr-v2') || 'null');
+    const saved = JSON.parse(localStorage.getItem('bcr-v3') || 'null');
     if (saved) {
       state.rev.base = new Set(saved.rev.base || []);
       state.rev.since = new Set(saved.rev.since || []);
-      state.keyMode = saved.keyMode === 'next' ? 'next' : 'tokens';
-      state.hideComments = !!saved.hideComments;
+      state.layout = saved.layout === 'split' ? 'split' : 'unified';
+      state.showReviewedDiff = !!saved.showReviewedDiff;
     }
-  } catch (e) { /* storage unavailable: start fresh */ }
+  } catch (e) { /* storage unavailable */ }
   function save() {
     try {
-      localStorage.setItem('bcr-v2', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, keyMode: state.keyMode, hideComments: state.hideComments }));
+      localStorage.setItem('bcr-v3', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
     } catch (e) { /* ignore */ }
   }
 
-  // ---------- model per comparison
+  // ---------- model
   const models = {};
-  function genFolder(p) {
-    const parts = p.split('/');
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (parts[i] === 'generated') return parts.slice(0, i + 1).join('/') + '/';
-      if (parts[i] === 'migrations') return parts.slice(0, i + (i + 2 < parts.length ? 2 : 1)).join('/') + '/';
-    }
-    return parts.slice(0, -1).join('/') + '/';
-  }
-  function model(name) {
+  function M(name) {
+    name = name || state.compare;
     if (models[name]) return models[name];
-    const cmp = RAW.compares[name];
-    const files = [], generated = [];
-    cmp.files.forEach((f0) => {
-      const f = Object.assign({}, f0);
-      const byAttr = f.ga === 'true';
-      const byConfig = GEN_RES.some((rx) => rx.test(f.p));
-      if (byAttr || byConfig) { f.genSource = byAttr ? '.gitattributes' : '.review.yaml'; generated.push(f); return; }
-      C.analyzeFile(f);
-      files.push(f);
-    });
-    const head = new Map(), atoms = new Map(), blocks = new Map();
-    files.forEach((f) => {
-      f.blocks.forEach((b) => { blocks.set(b.id, b); b.rows.forEach((r) => { r.block = b; }); b.atoms.forEach((a) => atoms.set(a.id, a)); });
-      f.hunks.forEach((h) => h.rows.forEach((r) => { if (r.type !== '-') head.set(f.p + ':' + r.n, { f, row: r }); }));
-    });
-    const usageByLine = new Map();
-    Object.entries(REFS[name] || {}).forEach(([key, list]) => {
-      const [p, line] = key.split(':');
-      const k = p + ':' + line;
-      if (!usageByLine.has(k)) usageByLine.set(k, []);
-      usageByLine.get(k).push([key, list.length]);
-    });
-    const folders = new Map();
-    generated.forEach((f) => { const d = genFolder(f.p); if (!folders.has(d)) folders.set(d, []); folders.get(d).push(f); });
-    models[name] = { name, cmp, files, generated, folders, head, atoms, blocks, usageByLine, groups: {} };
-    return models[name];
-  }
-  function groupsOf(m, mode) {
-    if (!m.groups[mode]) {
-      const list = C.groupAtoms(m.files, mode);
-      const byAtom = new Map(), byId = new Map();
-      list.forEach((g, i) => {
-        g.id = mode + ':' + i;
-        g.fileCount = new Set(g.atoms.map((a) => a.block.file.p)).size;
-        g.atoms.forEach((a) => byAtom.set(a.id, g));
-        byId.set(g.id, g);
+    const raw = MODEL.compares[name];
+    const m = { name, raw, files: raw.files, edits: raw.edits, groups: raw.groups, chains: raw.chains, generated: raw.generated };
+    m.blockById = new Map();
+    m.head = new Map();
+    m.files.forEach((f, fi) => {
+      f.idx = fi;
+      f.hunks.forEach((h) => {
+        let o = h.o, n = h.n;
+        h.meta = h.rows.map(([t]) => { const r = { t, o: t !== '+' ? o : null, n: t !== '-' ? n : null, block: null }; if (t !== '+') o++; if (t !== '-') n++; return r; });
       });
-      m.groups[mode] = { list, byAtom, byId };
-    }
-    return m.groups[mode];
+      f.blocks.forEach((b) => {
+        b.file = f;
+        m.blockById.set(b.id, b);
+        const h = f.hunks[b.hunk];
+        for (let i = b.first; i < b.first + b.len; i++) h.meta[i].block = b;
+        b.firstRowOfEdit = new Map();
+        for (let i = b.first; i < b.first + b.len; i++) (h.rows[i][2] || []).forEach(([, , id]) => { if (!b.firstRowOfEdit.has(id)) b.firstRowOfEdit.set(id, i); });
+      });
+      f.hunks.forEach((h, hi) => h.meta.forEach((r, ri) => { if (r.n != null) m.head.set(f.p + ':' + r.n, { f, hi, ri, r }); }));
+    });
+    m.groupById = new Map(m.groups.map((g) => [g.id, g]));
+    m.chainsOf = new Map();
+    m.chains.forEach((c) => {
+      c.blockSet = new Set(c.blocks);
+      c.blocks.forEach((id) => { if (!m.chainsOf.has(id)) m.chainsOf.set(id, []); m.chainsOf.get(id).push(c.id); });
+      c.graph.nodes.forEach((n, i) => { n.idx = i; });
+    });
+    m.standalone = [];
+    m.files.forEach((f) => f.blocks.forEach((b) => { if (b.edits.length && !m.chainsOf.has(b.id)) m.standalone.push(b); }));
+    m.usageByLine = new Map();
+    Object.entries(REFS[name] || {}).forEach(([key, list]) => {
+      const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
+      const k = key.slice(0, i1);
+      if (!m.usageByLine.has(k)) m.usageByLine.set(k, []);
+      m.usageByLine.get(k).push([key, list.length]);
+    });
+    models[name] = m;
+    return m;
   }
 
-  // ---------- review state helpers
-  const M = () => model(state.compare);
+  // ---------- review helpers
   const rev = () => state.rev[state.compare];
-  const blockDone = (b) => b.atoms.every((a) => rev().has(a.id));
-  const blockCommentHidden = (b) => state.hideComments && !blockDone(b) && b.atoms.filter((a) => !rev().has(a.id)).every((a) => a.commentOnly);
-  const blockOpen = (b) => !blockDone(b) && !blockCommentHidden(b);
-  function setAtoms(list, on) { list.forEach((a) => (on ? rev().add(a.id) : rev().delete(a.id))); save(); }
-  function fileStats(f) {
-    const s = { open: 0, a: 0, d: 0, total: 0 };
-    f.blocks.forEach((b) => {
-      if (!b.atoms.length) return;
-      s.total++;
-      if (blockOpen(b)) { s.open++; s.a += b.adds; s.d += b.dels; }
-    });
+  const done = (b) => b.edits.every((id) => rev().has(id));
+  function setEdits(ids, on) { ids.forEach((id) => (on ? rev().add(id) : rev().delete(id))); save(); }
+  function stats(blocks) {
+    const s = { total: 0, open: 0, lines: 0, all: 0 };
+    blocks.forEach((b) => { if (!b.edits.length) return; s.total++; s.all += b.adds + b.dels; if (!done(b)) { s.open++; s.lines += b.adds + b.dels; } });
     return s;
   }
-  function totals(m) {
-    const t = { open: 0, lines: 0, files: 0, all: 0, allLines: 0, comment: 0, layout: 0 };
-    m.files.forEach((f) => {
-      const s = fileStats(f);
-      t.open += s.open; t.lines += s.a + s.d; if (s.open) t.files++;
-      f.blocks.forEach((b) => {
-        if (!b.atoms.length) { t.layout++; return; }
-        t.all++; t.allLines += b.adds + b.dels;
-        if (blockCommentHidden(b)) t.comment++;
-      });
-    });
-    return t;
-  }
-  function genStatus(m, f) {
-    const rule = RW.find((r) => r.g.test(f.p));
-    if (!rule) return { kind: 'auto' };
-    const srcs = m.files.filter((x) => rule.s.test(x.p));
-    const done = srcs.filter((x) => x.blocks.every(blockDone)).length;
-    return { kind: 'with', rule, total: srcs.length, done, ok: done === srcs.length };
-  }
-  function shortDir(dir) {
-    const parts = dir.replace(/\/$/, '').split('/');
-    return (parts.length > 4 ? parts.slice(0, 2).concat('…', parts.slice(-2)) : parts).join('/') + '/';
-  }
-  function editSide(tokens) {
-    const s = tokens.join(' ').replace(/ ([.,;:)\]]) ?/g, '$1').replace(/([(\[.]) /g, '$1').replace(/ \?\. /g, '?.');
-    return s.length > 42 ? s.slice(0, 41) + '…' : s;
-  }
-  function editLabel(g) {
-    const more = g.parts.length > 2 ? ` <span class="e-arr">+ ${g.parts.length - 2} more edits</span>` : '';
-    return g.parts.slice(0, 2).map((p) => {
-      const a = p.atoms[0];
-      const del = editSide(a.text.del), ins = editSide(a.text.ins);
-      if (!del) return `<span class="e-ins">+ ${esc(ins)}</span>`;
-      if (!ins) return `<span class="e-del">− ${esc(del)}</span>`;
-      return `<span class="e-del">${esc(del)}</span> <span class="e-arr">→</span> <span class="e-ins">${esc(ins)}</span>`;
-    }).join(' <span class="e-arr">…</span> ') + more;
+  const blocksOf = (ids) => ids.map((id) => M().blockById.get(id));
+  function toggleBlocks(blocks) {
+    const anyOpen = blocks.some((b) => !done(b));
+    setEdits(blocks.flatMap((b) => b.edits), anyOpen);
+    blocks.forEach((b) => state.blockDiff.delete(b.id));
   }
 
-  // ---------- sidebar
-  function renderSide() {
-    const m = M();
-    const t = totals(m);
-    const pct = t.allLines ? Math.round((1 - t.lines / t.allLines) * 100) : 100;
-    const cur = state.view;
-    let h = `<div class="sb-prog">
-      <div class="sb-big"><b>${fmt(t.open)}</b> changes to review</div>
-      <div class="sb-sub">${fmt(t.lines)} lines in ${t.files} files</div>
-      <div class="track" aria-hidden="true"><div class="fill" style="width:${pct}%"></div></div>
-      <div class="sb-sub">${pct}% of changed lines reviewed · <button class="linkish" data-act="reset">Reset</button></div>
-    </div>`;
-
-    h += `<div class="sb-h"><span>Files</span><span class="sb-hn">${m.files.length}</span></div>`;
-    let lastDir = null;
-    m.files.forEach((f) => {
-      const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
-      if (dir !== lastDir) { h += `<div class="sb-dir" title="${esc(dir)}">${esc(shortDir(dir))}</div>`; lastDir = dir; }
-      const s = fileStats(f);
-      const on = cur.kind === 'file' && cur.path === f.p;
-      h += `<button class="sb-row${s.open ? '' : ' done'}" data-open="${esc(f.p)}"${on ? ' aria-current="true"' : ''}>
-        <span class="st"></span><span class="nm">${esc(f.p.slice(dir.length))}</span>
-        <span class="cnt">${s.open ? `<span class="a">+${s.a}</span> <span class="d">−${s.d}</span>` : 'reviewed'}</span></button>`;
-    });
-
-    const G = groupsOf(m, state.keyMode);
-    h += `<div class="sb-h"><span>Repeated edits</span><span class="sb-hn">${G.list.length}</span></div>
-      <div class="mini-seg" role="group" aria-label="What counts as the same edit">
-        <button type="button" data-mode="tokens" aria-pressed="${state.keyMode === 'tokens'}">Same tokens</button>
-        <button type="button" data-mode="next" aria-pressed="${state.keyMode === 'next'}">+ next token</button>
-      </div>`;
-    G.list.forEach((g) => {
-      const done = g.atoms.every((a) => rev().has(a.id));
-      const on = cur.kind === 'group' && cur.id === g.id;
-      h += `<button class="sb-row grp${done ? ' done' : ''}" data-group="${g.id}"${on ? ' aria-current="true"' : ''} title="${esc(g.count + ' places in ' + g.fileCount + ' files')}">
-        <span class="st"></span><span class="nm edit">${editLabel(g)}</span><span class="cnt">×${g.count}</span></button>`;
-    });
-
-    const genLines = m.generated.reduce((s, f) => s + f.a + f.d, 0);
-    h += `<div class="sb-h"><span>Generated · not diffed</span><span class="sb-hn">${m.generated.length} files · ${fmt(genLines)} lines</span></div>`;
-    m.folders.forEach((fs, dir) => {
-      const st = genStatus(m, fs[0]);
-      const src = [...new Set(fs.map((f) => f.genSource))].join(', ');
-      const waiting = st.kind === 'with' && !st.ok;
-      const on = cur.kind === 'gen' && cur.dir === dir;
-      h += `<button class="sb-row gen${waiting ? ' waiting' : ' done'}" data-gen="${esc(dir)}"${on ? ' aria-current="true"' : ''}>
-        <span class="st"></span><span class="nm">${esc(shortDir(dir))}<span class="sub">${fs.length} file${fs.length > 1 ? 's' : ''} · ${esc(src)}${st.kind === 'with' ? ` · ${st.ok ? 'reviewed with' : 'waits on'} ${esc(st.rule.ss)} (${st.done}/${st.total})` : ''}</span></span>
-        <span class="cnt"><span class="a">+${fmt(fs.reduce((s, f) => s + f.a, 0))}</span></span></button>`;
-    });
-
-    h += `<div class="sb-h"><span>Filters</span></div>
-      <label class="sb-check"><input type="checkbox" id="vw-comments"${state.hideComments ? ' checked' : ''}> Hide changes that only touch comments${state.hideComments ? ` <span class="sb-hn">${t.comment} hidden</span>` : ''}</label>
-      <p class="sb-note">Changes that only move whitespace or line breaks are always hidden. This diff has ${t.layout}.</p>`;
-    side.innerHTML = h;
+  // ---------- labels
+  function memberParts(member) {
+    if (!member) return { owner: '', name: '' };
+    const i = member.indexOf('.');
+    return i < 0 ? { owner: '', name: member } : { owner: member.slice(0, i), name: member.slice(i + 1) };
   }
+  function editText(id) {
+    const e = M().edits[id];
+    const side = (s) => trunc(s.replace(/\s+/g, ' '), 46);
+    if (e.op === 'insert') return '+ ' + side(e.to);
+    if (e.op === 'delete') return '− ' + side(e.from);
+    return side(e.from) + ' → ' + side(e.to);
+  }
+  function groupLabel(g) { return g.parts.map(editText).join(' … '); }
+  function nodeLabels(n) {
+    if (n.group !== null && n.group !== undefined) {
+      const g = M().groupById.get(n.group);
+      return { l1: `same change · ${n.files} file${n.files > 1 ? 's' : ''}`, l2: g ? groupLabel(g) : '' };
+    }
+    const { owner, name } = memberParts(n.member);
+    if (!n.member || n.member === 'main') return { l1: /(^|\/)test\//.test(n.file) ? 'test file' : 'top level', l2: fileName(n.file), owner: '' };
+    return { l1: fileName(n.file), l2: name, owner };
+  }
+  const kindWord = { member: 'changed member', type: 'changed type', param: 'parameter ripple', local: 'variable ripple' };
 
   // ---------- code rendering
   function lineDefs(path, n) {
     const arr = n != null && DEFS.defs[path] && DEFS.defs[path][n];
     return arr ? new Map(arr.map(([c, , ti]) => [c, ti])) : null;
   }
-  function tokHtml(tk, defs) {
-    if (tk.k === 'ws') return esc(tk.t);
-    let cls = 't-' + tk.k;
-    let attrs = '';
-    // Token emphasis only where a line mixes changed and unchanged tokens; a block that
-    // only adds or only removes lines is already marked by its line color.
-    if (tk.atom && tk.atom.block.adds && tk.atom.block.dels) cls += rev().has(tk.atom.id) ? ' rv' : ' ch';
-    if (defs && (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann')) {
-      const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
-      const ti = defs.get(col);
-      if (ti !== undefined) { cls += ' ref'; attrs = ` data-ti="${ti}" data-col="${col}" title="Peek definition"`; }
-    }
-    return `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
+  function codeHtml(f, text, ranges, opts) {
+    const toks = C.tokenize(text, f.lang);
+    const marks = ranges && opts.emphasis ? new Map(ranges.map(([s, , id]) => [s, id])) : null;
+    const defs = opts.n != null && opts.refs ? lineDefs(f.p, opts.n) : null;
+    return toks.map((tk) => {
+      if (tk.k === 'ws') return esc(tk.t);
+      let cls = 't-' + tk.k, attrs = '';
+      if (marks && marks.has(tk.c)) cls += rev().has(marks.get(tk.c)) ? ' rv' : ' ch';
+      if (defs && (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann')) {
+        const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
+        const ti = defs.get(col);
+        if (ti !== undefined) { cls += ' ref'; attrs = ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-n="${opts.n}" title="Peek definition"`; }
+      }
+      return `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
+    }).join('');
   }
-  function codeHtml(f, row, noRefs) {
-    const toks = row.toks || C.tokenize(row.text, f.lang);
-    const defs = row.type !== '-' && !noRefs ? lineDefs(f.p, row.n) : null;
-    return toks.map((tk) => tokHtml(tk, defs)).join('');
-  }
-  function badgesHtml(f, row) {
+  function badgesHtml(f, b, ri, n) {
     let h = '';
-    if (row.block) {
-      const G = groupsOf(M(), state.keyMode);
+    if (b) {
       const seen = new Set();
-      row.block.atoms.forEach((a) => {
-        const first = (a.ins[0] || a.del[0]).row;
-        const g = G.byAtom.get(a.id);
-        if (first !== row || !g || seen.has(g.id)) return;
-        seen.add(g.id);
-        const ok = g.atoms.every((x) => rev().has(x.id));
-        h += `<button class="bdg grp${ok ? ' ok' : ''}" data-group="${g.id}" title="The same edit is in ${g.count} places">same edit ×${g.count}</button>`;
+      b.edits.forEach((id) => {
+        const e = M().edits[id];
+        if (e.group === undefined || e.group === null || b.firstRowOfEdit.get(id) !== ri || seen.has(e.group)) return;
+        seen.add(e.group);
+        const g = M().groupById.get(e.group);
+        const ok = g.edits.every((x) => rev().has(x));
+        h += `<button type="button" class="bdg grp${ok ? ' ok' : ''}" data-group="${g.id}" title="The same change in ${g.count} places">same change ×${g.count}</button>`;
       });
     }
-    if (row.type !== '-') {
-      (M().usageByLine.get(f.p + ':' + row.n) || []).forEach(([key, n]) => {
-        h += `<button class="bdg use" data-usage="${esc(key)}" title="Usages inside other changes, from the language server">${n} changed usage${n > 1 ? 's' : ''}</button>`;
-      });
-    }
+    if (n != null) (M().usageByLine.get(f.p + ':' + n) || []).forEach(([key, cnt]) => {
+      h += `<button type="button" class="bdg use" data-usage="${esc(key)}" title="Usages inside other changes, from the language server">${cnt} changed usage${cnt > 1 ? 's' : ''}</button>`;
+    });
     return h;
   }
-  function rowHtml(f, row, extraCls, tick) {
-    const sign = row.type === '+' ? '+' : row.type === '-' ? '−' : '';
-    const cls = row.type === '+' ? 'add' : row.type === '-' ? 'del' : 'ctx';
-    const n = row.type !== '-' ? row.n : '';
-    return `<div class="ln ${cls}${extraCls || ''}"${n ? ` data-n="${n}"` : ''}>
-      <span class="g">${tick || ''}</span><span class="no">${row.o != null ? row.o : ''}</span><span class="no">${n}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, row)}</span><span class="bdgs">${badgesHtml(f, row)}</span></div>`
-      + (state.peek && state.peek.path === f.p && row.type !== '-' && state.peek.n === row.n ? peekHtml(state.peek) : '');
+  function tickHtml(b) {
+    const d = done(b);
+    return `<button type="button" class="tick${d ? ' on' : ''}" data-act="toggle-block" data-block="${esc(b.id)}" title="${d ? 'Mark unreviewed' : 'Mark this change reviewed'}" aria-label="${d ? 'Mark unreviewed' : 'Mark this change reviewed'}">✓</button>`;
   }
+  function diffToggle(b) {
+    const shown = state.blockDiff.has(b.id) || state.showReviewedDiff;
+    return state.showReviewedDiff ? '' : `<button type="button" class="dt" data-act="toggle-diff" data-block="${esc(b.id)}">${shown ? 'Hide diff' : 'Show diff'}</button>`;
+  }
+  function peekAfter(f, n) {
+    return state.peek && state.peek.path === f.p && state.peek.n === n ? peekHtml(state.peek) : '';
+  }
+  // One unified row.
+  function uRow(f, meta, text, ranges, o) {
+    const sign = o.sign != null ? o.sign : meta.t === '+' ? '+' : meta.t === '-' ? '−' : '';
+    const n = meta.t !== '-' ? meta.n : null;
+    return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, refs: o.refs })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : '');
+  }
+  // Rows [start, end) of a hunk. Reviewed changes stay visible: by default their diff is
+  // hidden and the new code reads as muted context.
+  function rowsHtml(f, hi, start, end, ctx) {
+    ctx = ctx || {};
+    const h = f.hunks[hi];
+    let out = '';
+    const placed = new Set();
+    for (let ri = start; ri < end; ri++) {
+      const meta = h.meta[ri];
+      const [t, text, ranges] = h.rows[ri];
+      const b = meta.block;
+      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs }); continue; }
+      const d = done(b);
+      const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
+      const other = ctx.chain && !ctx.chain.blockSet.has(b.id) ? ' other' : '';
+      const emphasis = b.adds > 0 && b.dels > 0;
+      if (!showDiff) {
+        if (t === '-') {
+          if (b.adds === 0 && !placed.has(b.id)) {
+            placed.add(b.id);
+            out += `<div class="ln gone"><span class="g">${tickHtml(b)}</span><span class="no"></span><span class="no"></span><span class="sg"></span><span class="tx">${b.dels} removed line${b.dels > 1 ? 's' : ''}, reviewed</span><span class="bdgs">${diffToggle(b)}</span></div>`;
+          }
+          continue;
+        }
+        const first = !placed.has(b.id);
+        placed.add(b.id);
+        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other, sign: '', hideOld: true, tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs });
+        continue;
+      }
+      const first = !placed.has(b.id);
+      placed.add(b.id);
+      out += uRow(f, meta, text, ranges, {
+        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other, emphasis, refs: !ctx.noRefs,
+        tick: first ? tickHtml(b) : '', toggle: first && d ? diffToggle(b) : '',
+        badges: ctx.noBadges ? '' : badgesHtml(f, b, ri, t !== '-' ? meta.n : null),
+      });
+    }
+    return out;
+  }
+  // Split layout: removed lines on the left, added lines on the right, paired per change.
+  function sCell(f, meta, text, ranges, side, o) {
+    if (!meta) return `<span class="half ${side} empty"></span>`;
+    const n = side === 'r' ? meta.n : null;
+    const num = side === 'l' ? meta.o : meta.n;
+    const sign = o.sign != null ? o.sign : side === 'l' && meta.t === '-' ? '−' : side === 'r' && meta.t === '+' ? '+' : '';
+    return `<span class="half ${side} ${o.cls || ''}"><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, refs: side === 'r' && o.refs })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
+  }
+  function splitRowsHtml(f, hi, start, end, ctx) {
+    ctx = ctx || {};
+    const h = f.hunks[hi];
+    let out = '';
+    let ri = start;
+    while (ri < end) {
+      const meta = h.meta[ri];
+      const b = meta.block;
+      if (!b || !b.edits.length) {
+        const [, text] = h.rows[ri];
+        out += `<div class="sl" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx' })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '');
+        ri++;
+        continue;
+      }
+      let bEnd = ri;
+      while (bEnd < end && h.meta[bEnd].block === b) bEnd++;
+      const dels = [], adds = [];
+      for (let i = ri; i < bEnd; i++) (h.meta[i].t === '-' ? dels : adds).push(i);
+      const d = done(b);
+      const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
+      const other = ctx.chain && !ctx.chain.blockSet.has(b.id) ? ' other' : '';
+      const emphasis = b.adds > 0 && b.dels > 0;
+      if (!showDiff) {
+        if (!adds.length) {
+          out += `<div class="sl gone"><span class="g">${tickHtml(b)}</span><span class="half l"><span class="tx">${b.dels} removed line${b.dels > 1 ? 's' : ''}, reviewed</span></span><span class="half r"><span class="bdgs">${diffToggle(b)}</span></span></div>`;
+        }
+        adds.forEach((i, k) => {
+          const m2 = h.meta[i];
+          out += `<div class="sl rvd-quiet${other}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '' }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '' })}</div>` + peekAfter(f, m2.n);
+        });
+      } else {
+        const rows = Math.max(dels.length, adds.length);
+        for (let k = 0; k < rows; k++) {
+          const li = dels[k], ai = adds[k];
+          const lm = li != null ? h.meta[li] : null, am = ai != null ? h.meta[ai] : null;
+          out += `<div class="sl${d ? ' rvd' : ''}${other}" data-n="${am ? am.n : ''}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>`
+            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis })
+            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '' })
+            + '</div>' + (am ? peekAfter(f, am.n) : '');
+        }
+      }
+      ri = bEnd;
+    }
+    return out;
+  }
+  const anyRowsHtml = (f, hi, s, e, ctx) => (state.layout === 'split' ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
+  const BIG = 150;
+  const isCollapsed = (key, rows, ctx) => state.collapsed.has(key) || (!!(ctx && ctx.chain) && rows > BIG && !state.expanded.has(key));
+  function hunkHtml(f, hi, ctx) {
+    const h = f.hunks[hi];
+    const key = f.p + '#' + hi;
+    const collapsed = isCollapsed(key, h.rows.length, ctx);
+    const blocks = f.blocks.filter((b) => b.hunk === hi && b.edits.length);
+    const open = blocks.filter((b) => !done(b)).length;
+    let out = `<div class="hh"><button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(key)}" aria-expanded="${!collapsed}" title="${collapsed ? 'Expand hunk' : 'Collapse hunk'}">${collapsed ? '▸' : '▾'}</button><span class="hh-tx">@@ −${h.o} +${h.n} @@ <span class="hh-ctx">${esc(h.h)}</span></span>`;
+    if (blocks.length) out += `<button type="button" class="btn xs" data-act="mark-hunk" data-file="${f.idx}" data-hunk="${hi}">${open ? '✓ Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
+    if (collapsed) {
+      out += `<span class="hh-note">${h.rows.length} lines collapsed</span>`;
+      const focus = ctx && ctx.chain && ctx.chain.focus ? blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
+      if (focus.length) out += `<span class="hh-note">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(key)}" data-line="${ln}">line ${ln}</button>`).join('')}`;
+    }
+    out += '</div>';
+    if (!collapsed) out += anyRowsHtml(f, hi, 0, h.rows.length, ctx);
+    return out;
+  }
+
+  // ---------- peek
   function peekHtml(p) {
     let h = '<div class="peek" role="region" aria-label="Peek">';
-    if (p.ti !== undefined) {
+    if (p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti)) {
       const t = DEFS.targets[p.ti];
       const where = t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package';
       h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>
         <div class="pk-code">${t.code.map((line, i) => {
           const ln = t.s + i;
-          const toks = C.tokenize(line, 'dart');
-          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${toks.map((tk) => (tk.k === 'ws' ? esc(tk.t) : `<span class="t-${tk.k}">${esc(tk.t)}</span>`)).join('')}</span></div>`;
+          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${C.tokenize(line, 'dart').map((tk) => (tk.k === 'ws' ? esc(tk.t) : `<span class="t-${tk.k}">${esc(tk.t)}</span>`)).join('')}</span></div>`;
         }).join('')}</div>`;
       if (t.w === 'repo' && M().head.has(t.p + ':' + t.l) && !(t.p === p.path && t.l === p.n)) {
         h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
@@ -279,246 +309,416 @@
     }
     if (p.usageKey) {
       const list = REFS[state.compare][p.usageKey] || [];
-      const open = list.filter(([up, ul]) => { const hl = M().head.get(up + ':' + ul); return hl && hl.row.block && blockOpen(hl.row.block); }).length;
+      const isOpen = ([up, ul]) => { const hl = M().head.get(up + ':' + ul); return hl && hl.r.block && !done(hl.r.block); };
+      const open = list.filter(isOpen).length;
       h += `<div class="pk-h pk-h2"><b>${list.length} changed usages</b><span class="pk-src">${open} not reviewed</span><span class="sp"></span>
-        <button type="button" class="btn sm" data-act="mark-usages" data-usage="${esc(p.usageKey)}">${open ? 'Mark their changes reviewed' : 'Mark them unreviewed'}</button></div><div class="pk-list">`;
-      list.forEach(([up, ul]) => {
+        <button type="button" class="btn xs" data-act="mark-usages" data-usage="${esc(p.usageKey)}">${open ? 'Mark them reviewed' : 'Mark them unreviewed'}</button></div><div class="pk-list">`;
+      list.forEach((u) => {
+        const [up, ul] = u;
         const hl = M().head.get(up + ':' + ul);
-        const done = hl && hl.row.block && !blockOpen(hl.row.block);
-        h += `<button type="button" class="pk-use${done ? ' done' : ''}" data-open="${esc(up)}" data-line="${ul}"><span class="pk-up">${esc(up.split('/').pop())}:${ul}</span><code>${esc(hl ? hl.row.text.trim().slice(0, 110) : '')}</code></button>`;
+        h += `<button type="button" class="pk-use${isOpen(u) ? '' : ' done'}" data-open="${esc(up)}" data-line="${ul}"><span class="pk-up">${esc(fileName(up))}:${ul}</span><code>${esc(hl ? h2text(hl) : '')}</code></button>`;
       });
       h += '</div>';
     }
     return h + '</div>';
   }
+  const h2text = (hl) => hl.f.hunks[hl.hi].rows[hl.ri][1].trim().slice(0, 110);
 
-  // ---------- main views
+  // ---------- graph
+  const NW = 214, NH = 52, GX = 66, GY = 14, PAD = 16;
+  function graphSvg(c) {
+    const m = M();
+    const layers = new Map();
+    c.graph.nodes.forEach((n) => { if (!layers.has(n.layer)) layers.set(n.layer, []); layers.get(n.layer).push(n); });
+    const keys = [...layers.keys()].sort((a, b) => a - b);
+    const posOf = new Map();
+    const more = [];
+    let maxRows = 1;
+    keys.forEach((L, li) => {
+      let list = layers.get(L);
+      let hidden = 0;
+      if (list.length > 7 && !state.graphOpen.has(c.id + ':' + L)) { hidden = list.length - 6; list = list.slice(0, 6); }
+      list.forEach((n, ri) => posOf.set(n.key, { x: PAD + li * (NW + GX), y: PAD + ri * (NH + GY), n }));
+      if (hidden) more.push({ x: PAD + li * (NW + GX), y: PAD + list.length * (NH + GY), hidden, L });
+      maxRows = Math.max(maxRows, list.length + (hidden ? 1 : 0));
+    });
+    const W = PAD * 2 + keys.length * NW + Math.max(0, keys.length - 1) * GX + 40;
+    const H = PAD * 2 + maxRows * NH + (maxRows - 1) * GY;
+    let svg = `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses.">
+      <defs><marker id="gar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>`;
+    let labels = '';
+    const ports = new Map();
+    const port = (key, side, otherY) => { const k = key + side; if (!ports.has(k)) ports.set(k, []); ports.get(k).push(otherY); };
+    const visible = c.graph.edges.filter((e) => posOf.get(e.from) && posOf.get(e.to));
+    visible.forEach((e) => {
+      const a = posOf.get(e.from), b = posOf.get(e.to);
+      const fwd = a.x < b.x, same = a.x === b.x;
+      port(e.from, same || fwd ? 'R' : 'L', b.y); port(e.to, same || !fwd ? 'R' : 'L', a.y);
+    });
+    ports.forEach((list) => list.sort((x, y) => x - y));
+    const portY = (key, side, otherY, base) => {
+      const list = ports.get(key + side);
+      if (!list || list.length < 2) return base + NH / 2;
+      const i = list.indexOf(otherY);
+      return base + 10 + (i * (NH - 20)) / (list.length - 1);
+    };
+    const shown = new Set();
+    visible.forEach((e) => {
+      const a = posOf.get(e.from), b = posOf.get(e.to);
+      const fwd0 = a.x < b.x, same0 = a.x === b.x;
+      const y1 = portY(e.from, same0 || fwd0 ? 'R' : 'L', b.y, a.y), y2 = portY(e.to, same0 || !fwd0 ? 'R' : 'L', a.y, b.y);
+      let d, lx, ly;
+      if (a.x !== b.x) {
+        const fwd = a.x < b.x;
+        const x1 = fwd ? a.x + NW : a.x, x2 = fwd ? b.x - 3 : b.x + NW + 3;
+        const mx = (x1 + x2) / 2;
+        d = `M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+        lx = x1 + (x2 - x1) * 0.5; ly = y1 + (y2 - y1) * 0.5 - 5;
+      } else {
+        const x1 = a.x + NW, x2 = b.x + NW + 3, bx = x1 + 30;
+        d = `M${x1} ${y1} C ${bx} ${y1}, ${bx} ${y2}, ${x2} ${y2}`;
+        lx = x1 + 26; ly = (y1 + y2) / 2;
+      }
+      svg += `<path class="g-edge" d="${d}" marker-end="url(#gar)"/>`;
+      const text = trunc(e.labels[0], 18) + (e.labels.length > 1 ? ' +' + (e.labels.length - 1) : '');
+      if (!shown.has(e.to + '|' + text)) {
+        shown.add(e.to + '|' + text);
+        labels += `<text class="g-elabel" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`;
+      }
+    });
+    posOf.forEach(({ x, y, n }) => {
+      const s = stats(n.blocks.map((id) => m.blockById.get(id)));
+      const { l1, l2, owner } = nodeLabels(n);
+      const root = n.key === c.graph.root;
+      const tip = (owner ? owner + '.' : '') + l2 + ' · ' + n.file;
+      svg += `<g class="g-node${s.open ? '' : ' ok'}${root ? ' root' : ''}${n.group !== null && n.group !== undefined ? ' grp' : ''}" data-node="${n.idx}" tabindex="0" role="button" aria-label="${esc(l2 + ', ' + l1 + ', ' + s.total + ' changes')}"><title>${esc(tip)}</title>
+        <rect class="g-box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="8"/>
+        <rect class="g-bar" x="${x}" y="${y}" width="6" height="${NH}" rx="3"/>
+        <text class="g-l1" x="${x + 15}" y="${y + 20}">${esc(trunc(l1, 27))}</text>
+        <text class="g-l2" x="${x + 15}" y="${y + 39}">${esc(trunc(l2, 24))}</text>
+        <text class="g-cnt" x="${x + NW - 10}" y="${y + 20}" text-anchor="end">${s.open ? s.open + '/' + s.total : '✓ ' + s.total}</text>
+      </g>`;
+    });
+    more.forEach(({ x, y, hidden, L }) => {
+      svg += `<g class="g-more" data-graph-open="${c.id}:${L}" tabindex="0" role="button" aria-label="Show ${hidden} more nodes"><rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="8"/><text x="${x + NW / 2}" y="${y + NH / 2 + 4}" text-anchor="middle">+ ${hidden} more</text></g>`;
+    });
+    return svg + labels + '</svg>';
+  }
+
+  // ---------- views
+  function headerHtml(title, metaHtml, actionHtml, sub) {
+    return `<div class="fv-head"><div class="fv-title">${title}</div>${sub || ''}<div class="fv-meta">${metaHtml}<span class="sp"></span>${actionHtml || ''}</div></div>`;
+  }
+  function blocksByHunkHtml(blocks, ctx) {
+    const byFile = new Map();
+    blocks.forEach((b) => {
+      if (!byFile.has(b.file)) byFile.set(b.file, new Set());
+      byFile.get(b.file).add(b.hunk);
+    });
+    let h = '';
+    [...byFile.keys()].sort((x, y) => x.idx - y.idx).forEach((f) => {
+      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code">`;
+      [...byFile.get(f)].sort((x, y) => x - y).forEach((hi) => { h += hunkHtml(f, hi, ctx); });
+      h += '</div>';
+    });
+    return h;
+  }
+  function instancesHtml(g, blocks, key) {
+    const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
+    const showAll = state.groupAll.has(key) || list.length <= 12;
+    const shown = showAll ? list : list.slice(0, 10);
+    let h = '<div class="code inst">';
+    let lastFile = null;
+    shown.forEach((b) => {
+      const f = b.file;
+      const hunk = f.hunks[b.hunk];
+      if (f !== lastFile) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; lastFile = f; }
+      // Each edit's rows, extended to its whole syntax nodes, with one line of context.
+      // Small changes are shown whole.
+      const keep = new Set();
+      if (b.len <= 8) for (let i = b.first; i < b.first + b.len; i++) keep.add(i);
+      g.edits.forEach((id) => {
+        const ed = M().edits[id];
+        if (ed.b !== b.id) return;
+        hunk.meta.forEach((r, i) => {
+          if ((ed.ns && r.n != null && r.t !== '-' && r.n >= ed.ns[0] && r.n <= ed.ns[1]) || (ed.os && r.o != null && r.t !== '+' && r.o >= ed.os[0] && r.o <= ed.os[1])) keep.add(i);
+        });
+      });
+      const wide = new Set();
+      keep.forEach((i) => { for (let k = i - 1; k <= i + 1; k++) if (k >= 0 && k < hunk.rows.length) wide.add(k); });
+      const idx = [...wide].sort((x, y) => x - y);
+      let segStart = idx[0];
+      for (let k = 1; k <= idx.length; k++) {
+        if (k === idx.length || idx[k] !== idx[k - 1] + 1) {
+          h += anyRowsHtml(f, b.hunk, segStart, idx[k - 1] + 1, { noBadges: true });
+          if (k < idx.length) { h += `<div class="ln skip"><span class="g"></span><span class="tx">⋯ ${idx[k] - idx[k - 1] - 1} lines of the same change</span></div>`; segStart = idx[k]; }
+        }
+      }
+      h += '<div class="inst-gap"></div>';
+    });
+    h += '</div>';
+    if (!showAll) h += `<div class="more-row"><button type="button" class="btn sm" data-act="group-all" data-key="${esc(key)}">Show all ${list.length} places</button></div>`;
+    return h;
+  }
+  function renderChain(id) {
+    const m = M();
+    const c = m.chains[id];
+    if (!c) return '<div class="empty">This chain doesn’t exist in this comparison.</div>';
+    const s = stats(blocksOf(c.blocks));
+    const sub = c.also.length ? `<div class="fv-sub">Also carries ${c.also.map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : '';
+    let h = headerHtml(`<b>${wbr(c.name)}</b>`,
+      `<span>${kindWord[c.rootKind] || 'chain'}</span><span>${s.total} changes · ${c.files} file${c.files > 1 ? 's' : ''}</span><span>${s.total - s.open} reviewed</span>`,
+      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`, sub);
+    h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
+      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a node to jump to its code.</span></div>`;
+    if (c.links.length) h += `<div class="links"><span class="links-k">Linked chains</span>${c.links.slice(0, 10).map((l) => `<button type="button" class="chip-btn" data-chain="${l}">${esc(m.chains[l].name)}</button>`).join('')}${c.links.length > 10 ? `<span class="muted">+${c.links.length - 10} more</span>` : ''}</div>`;
+    h += '</div>';
+    c.graph.nodes.forEach((n) => {
+      const blocks = blocksOf(n.blocks);
+      const ns = stats(blocks);
+      const { l1, l2, owner } = nodeLabels(n);
+      const uses = c.graph.edges.filter((e) => e.from === n.key).map((e) => `uses <code>${esc(e.labels.join(', '))}</code> of ${esc(nodeLabels(c.graph.nodes.find((x) => x.key === e.to)).l2)}`);
+      const usedBy = c.graph.edges.filter((e) => e.to === n.key).length;
+      const rel = uses.concat(usedBy ? [`used by ${usedBy} node${usedBy > 1 ? 's' : ''}`] : []).join(' · ');
+      h += `<section class="sec" id="sec-${n.idx}"><div class="sec-h"><div class="sec-t"><b>${esc(l2)}</b> <span>${esc(owner ? owner + ' · ' + l1 : l1)}</span>${n.key === c.graph.root ? '<span class="root-pill">root</span>' : ''}</div>
+        <div class="sec-m"><span>${rel}</span><span class="sp"></span><span>${ns.total - ns.open}/${ns.total} reviewed</span><button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(n.blocks.join(' '))}">${ns.open ? '✓ Mark node reviewed' : 'Mark node unreviewed'}</button></div></div>`;
+      if (n.group !== null && n.group !== undefined) {
+        const g = m.groupById.get(n.group);
+        h += `<p class="sec-note">The same change in ${blocks.length} places. Each place is shown whole.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
+      } else h += blocksByHunkHtml(blocks, { chain: c });
+      h += '</section>';
+    });
+    return h;
+  }
+  function renderStandalone() {
+    const m = M();
+    const s = stats(m.standalone);
+    let h = headerHtml('<b>Not in a chain</b>', `<span>${s.total} changes</span><span>${s.total - s.open} reviewed</span>`,
+      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
+      '<div class="fv-sub">Changes that don’t use, and aren’t used by, anything changed elsewhere. Grouped by file.</div>');
+    return h + '<div class="sec">' + blocksByHunkHtml(m.standalone, {}) + '</div>';
+  }
   function renderFile(path) {
     const m = M();
     const f = m.files.find((x) => x.p === path);
     if (!f) {
       const g = m.generated.find((x) => x.p === path);
-      return `<div class="empty">${g ? `${esc(path)} is generated, so it isn't diffed.` : `${esc(path)} has no changes in this comparison.`} Pick a file on the left.</div>`;
+      return g ? renderGenerated(path) : `<div class="empty">${esc(path)} has no changes in this comparison.</div>`;
     }
-    const s = fileStats(f);
+    const s = stats(f.blocks);
     const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
-    const status = { A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s;
-    let h = `<div class="fv-head"><div class="fv-path"><span>${esc(dir)}</span><b>${esc(f.p.slice(dir.length))}</b></div>
-      <div class="fv-meta"><span>${status}</span><span>${s.open} of ${s.total} changes to review</span>${s.open ? `<span class="a">+${s.a}</span><span class="d">−${s.d}</span>` : ''}
-      <span class="sp"></span><button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button></div></div>`;
-    if (state.compare === 'since') {
-      h += `<div class="since-note">Left side: your reviewed snapshot, as if you had reviewed everything up to <code>0540639</code>. Right side: the PR head <code>a45f9ae</code>. Only what changed after you reviewed shows up.</div>`;
-    }
+    const chains = [...new Set(f.blocks.flatMap((b) => m.chainsOf.get(b.id) || []))];
+    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`,
+      `<span>${{ A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s}</span><span>${s.open} of ${s.total} changes to review</span>${s.open ? `<span class="a">+${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.adds, 0)}</span><span class="d">−${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.dels, 0)}</span>` : ''}`,
+      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
+      chains.length ? `<div class="fv-sub">In chains: ${chains.slice(0, 6).map((id) => `<button type="button" class="chip-btn" data-chain="${id}">${esc(m.chains[id].name)}</button>`).join('')}${chains.length > 6 ? ` +${chains.length - 6}` : ''}</div>` : '');
+    if (state.compare === 'since') h += '<div class="since-note">Left: your reviewed snapshot (as if you had reviewed everything up to <code>0540639</code>). Right: the PR head <code>a45f9ae</code>.</div>';
     h += '<div class="code">';
-    f.hunks.forEach((hk, hi) => {
-      const hb = f.blocks.filter((b) => b.hunk === hi && b.atoms.length);
-      const shown = hb.filter((b) => blockOpen(b) || state.showBlocks.has(b.id));
-      if (hb.length && !shown.length) {
-        const done = hb.every(blockDone);
-        h += `<div class="ln fold"><span class="g"></span><span class="fold-tx">${done ? '✓ Reviewed' : 'Only comments changed'} · @@ −${hk.o} +${hk.n} @@ ${esc(hk.h)}</span>
-          <button type="button" class="linkish" data-act="show-hunk" data-hunk="${hi}">Show</button></div>`;
-        return;
-      }
-      if (!hb.length) return; // layout-only hunk
-      h += `<div class="hh"><span class="hh-tx">@@ −${hk.o} +${hk.n} @@ <span class="hh-ctx">${esc(hk.h)}</span></span>
-        <button type="button" class="btn xs" data-act="mark-hunk" data-hunk="${hi}">✓ Mark hunk reviewed</button></div>`;
-      const rendered = new Set();
-      hk.rows.forEach((row) => {
-        const b = row.block;
-        if (!b) { h += rowHtml(f, row); return; }
-        if (!blockOpen(b) && !state.showBlocks.has(b.id)) {
-          if (!rendered.has(b.id)) {
-            rendered.add(b.id);
-            const label = !b.atoms.length ? 'Whitespace-only change' : blockDone(b) ? '✓ Reviewed' : 'Comment-only change';
-            h += `<div class="ln fold"><span class="g"></span><span class="fold-tx">${label} · ${b.rows.length} line${b.rows.length > 1 ? 's' : ''}</span>
-              <button type="button" class="linkish" data-act="show-block" data-block="${esc(b.id)}">Show</button></div>`;
-          }
-          return;
-        }
-        let tick = '';
-        if (!rendered.has(b.id)) {
-          rendered.add(b.id);
-          const done = blockDone(b);
-          tick = `<button type="button" class="tick${done ? ' on' : ''}" data-act="toggle-block" data-block="${esc(b.id)}" title="${done ? 'Mark unreviewed' : 'Mark this change reviewed'}" aria-label="${done ? 'Mark unreviewed' : 'Mark this change reviewed'}">✓</button>`;
-        }
-        h += rowHtml(f, row, blockDone(b) ? ' rvd' : '', tick);
+    f.hunks.forEach((hk, hi) => { h += hunkHtml(f, hi, {}); });
+    return h + '</div>';
+  }
+  function renderGenerated(path) {
+    const f = M().generated.find((x) => x.p === path);
+    const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
+    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`, '',
+      '<div class="gen-note">Generated: not reviewed and not counted. Shown for reference only.</div>');
+    if (!f.hunks) return h + `<div class="empty">This file has ${f.a + f.d} changed lines, too many to embed in the prototype. The tool opens it on demand.</div>`;
+    h += '<div class="code">';
+    f.hunks.forEach((hk) => {
+      h += `<div class="hh"><span class="hh-tx">@@ −${hk.o} +${hk.n} @@ <span class="hh-ctx">${esc(hk.h)}</span></span></div>`;
+      let o = hk.o, n = hk.n;
+      hk.rows.forEach(([t, text]) => {
+        const meta = { t, o: t !== '+' ? o : null, n: t !== '-' ? n : null };
+        if (t !== '+') o++;
+        if (t !== '-') n++;
+        h += uRow({ p: f.p, lang: C.langOf(f.p) }, meta, text, null, { cls: (t === '+' ? 'add' : t === '-' ? 'del' : 'ctx') + ' gen', refs: false });
       });
     });
     return h + '</div>';
   }
-
   function renderGroup(id) {
-    const m = M();
-    const g = groupsOf(m, state.keyMode).byId.get(id);
-    if (!g) return '<div class="empty">This group doesn’t exist with the current matching rule.</div>';
-    const done = g.atoms.every((a) => rev().has(a.id));
-    const byBlock = new Map();
-    g.atoms.forEach((a) => { if (!byBlock.has(a.block)) byBlock.set(a.block, []); byBlock.get(a.block).push(a); });
-    let h = `<div class="fv-head"><div class="gv-edit">${editLabel(g)}</div>
-      <div class="fv-meta"><span>Same edit in ${g.count} places · ${g.fileCount} files</span>${g.parts.length > 1 ? `<span>${g.parts.length} edits that always appear together</span>` : ''}
-      <span class="sp"></span><button type="button" class="btn sm${done ? '' : ' primary'}" data-act="mark-group" data-group-id="${g.id}">${done ? 'Mark all unreviewed' : `Mark all ${g.count} reviewed`}</button></div></div><div class="code gv">`;
-    let lastFile = null;
-    byBlock.forEach((list, b) => {
-      const f = b.file;
-      if (f !== lastFile) { h += `<div class="gv-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; lastFile = f; }
-      const first = list[0];
-      const row = (first.ins[0] || first.del[0]).row;
-      const isDone = list.every((a) => rev().has(a.id));
-      const line = row.type !== '-' ? row.n : row.o;
-      h += `<div class="ln ${row.type === '+' ? 'add' : 'del'}${isDone ? ' rvd' : ''}">
-        <span class="g"><button type="button" class="tick${isDone ? ' on' : ''}" data-act="toggle-atoms" data-atoms="${esc(list.map((a) => a.id).join(' '))}" aria-label="Mark this place reviewed">✓</button></span>
-        <span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${row.type !== '-' ? row.n : ''}" title="Open in the file">${line}</button></span>
-        <span class="sg">${row.type === '+' ? '+' : '−'}</span><span class="tx">${codeHtml(f, row, true)}</span></div>`;
-    });
-    return h + '</div>';
+    const g = M().groupById.get(Number(id));
+    if (!g) return '<div class="empty">No such group in this comparison.</div>';
+    const ok = g.edits.every((x) => rev().has(x));
+    const e0 = M().edits[g.parts[0]];
+    return headerHtml(`<b class="mono">${esc(groupLabel(g))}</b>`,
+      `<span>same change in ${g.count} places · ${g.files} files</span><span>${e0.op === 'token' ? 'token replaced, as ' + esc(e0.where) : esc(e0.op) + ' of ' + esc(e0.where)}</span>${g.parts.length > 1 ? `<span>${g.parts.length} edits that always appear together</span>` : ''}`,
+      `<button type="button" class="btn sm${ok ? '' : ' primary'}" data-act="mark-group" data-group-id="${g.id}">${ok ? 'Mark all unreviewed' : `Mark all ${g.count} reviewed`}</button>`)
+      + instancesHtml(g, null, 'group' + g.id);
   }
-
-  function renderGen(dir) {
-    const m = M();
-    const fs = m.folders.get(dir) || [];
-    const st = fs.length ? genStatus(m, fs[0]) : { kind: 'auto' };
-    let h = `<div class="fv-head"><div class="fv-path"><b>${esc(dir)}</b></div>
-      <div class="fv-meta"><span>${fs.length} generated files</span><span>${esc([...new Set(fs.map((f) => f.genSource))].join(', '))}</span></div></div><div class="gen-body">`;
-    h += st.kind === 'with'
-      ? `<p>Rule <code>reviewedWith: ${esc(st.rule.gs)} → ${esc(st.rule.ss)}</code>: these files count as reviewed once every changed <code>${esc(st.rule.ss)}</code> file is reviewed. Right now ${st.done} of ${st.total} are.</p>`
-      : '<p>Generated files are listed with their size and never enter the review queue or the line counts.</p>';
-    h += '<table class="gen-t"><thead><tr><th>File</th><th>Status</th><th class="r">+</th><th class="r">−</th></tr></thead><tbody>';
-    fs.forEach((f) => { h += `<tr><td>${esc(f.p.slice(dir.length) || f.p)}</td><td>${{ A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s}</td><td class="r a">${fmt(f.a)}</td><td class="r d">${fmt(f.d)}</td></tr>`; });
-    h += '</tbody></table><p class="muted">In the tool, opening one of these files shows its diff on demand. The prototype doesn’t embed their content.</p></div>';
-    return h;
-  }
-
   function renderSearch() {
     const q = state.search.q.trim().toLowerCase();
     const m = M();
     const res = [];
     m.files.forEach((f) => f.blocks.forEach((b) => {
-      if (!b.atoms.length) return;
-      if (state.search.scope === 'unreviewed' && !blockOpen(b)) return;
-      b.rows.forEach((r) => { if (r.text.toLowerCase().includes(q)) res.push({ f, r }); });
+      if (!b.edits.length || (state.search.scope === 'unreviewed' && done(b))) return;
+      const h = f.hunks[b.hunk];
+      for (let i = b.first; i < b.first + b.len; i++) if (h.rows[i][1].toLowerCase().includes(q)) res.push({ f, meta: h.meta[i], text: h.rows[i][1] });
     }));
-    let h = `<div class="fv-head"><div class="fv-path"><b>Search changed lines for “${esc(state.search.q)}”</b></div>
-      <div class="fv-meta"><span>${res.length} result${res.length === 1 ? '' : 's'}</span>
-      <div class="mini-seg inline" role="group" aria-label="Search scope">
-        <button type="button" data-scope="unreviewed" aria-pressed="${state.search.scope === 'unreviewed'}">Not reviewed</button>
-        <button type="button" data-scope="all" aria-pressed="${state.search.scope === 'all'}">All changes</button>
-      </div></div></div><div class="code gv">`;
-    let lastFile = null;
-    res.slice(0, 400).forEach(({ f, r }) => {
-      if (f !== lastFile) { h += `<div class="gv-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; lastFile = f; }
-      const text = r.text;
+    let h = headerHtml(`<b>Search changed lines for “${esc(state.search.q)}”</b>`, `<span>${res.length} result${res.length === 1 ? '' : 's'}</span>
+      <span class="mini-seg" role="group" aria-label="Search scope"><button type="button" data-scope="unreviewed" aria-pressed="${state.search.scope === 'unreviewed'}">Not reviewed</button><button type="button" data-scope="all" aria-pressed="${state.search.scope === 'all'}">All changes</button></span>`);
+    h += '<div class="code">';
+    let last = null;
+    res.slice(0, 400).forEach(({ f, meta, text }) => {
+      if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; last = f; }
       const i = text.toLowerCase().indexOf(q);
-      const line = r.type !== '-' ? r.n : r.o;
-      h += `<div class="ln ${r.type === '+' ? 'add' : 'del'}"><span class="g"></span>
-        <span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${r.type !== '-' ? r.n : ''}">${line}</button></span><span class="sg">${r.type === '+' ? '+' : '−'}</span>
-        <span class="tx">${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}</span></div>`;
+      const line = meta.t !== '-' ? meta.n : meta.o;
+      h += `<div class="ln ${meta.t === '+' ? 'add' : 'del'}"><span class="g"></span><span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${meta.t !== '-' ? meta.n : ''}">${line}</button></span><span class="sg">${meta.t === '+' ? '+' : '−'}</span><span class="tx">${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}</span></div>`;
     });
-    if (res.length > 400) h += `<div class="empty">Showing the first 400 of ${res.length}.</div>`;
-    if (!res.length) h += '<div class="empty">No changed line matches. In the tool, the editor’s own search still covers the whole repository.</div>';
+    if (!res.length) h += '<div class="empty">No changed line matches. In the tool, the editor’s own search covers the whole repository.</div>';
     return h + '</div>';
   }
 
-  function render(scrollLine) {
+  // ---------- sidebar
+  function renderSide() {
+    const m = M();
+    const all = m.files.flatMap((f) => f.blocks);
+    const t = stats(all);
+    const pct = t.all ? Math.round((1 - t.lines / t.all) * 100) : 100;
+    const v = state.view;
+    let h = `<div class="sb-prog"><div class="sb-big"><b>${t.open}</b> of ${t.total} changes to review</div>
+      <div class="track" aria-hidden="true"><div class="fill" style="width:${pct}%"></div></div>
+      <div class="sb-sub">${pct}% of changed lines reviewed · <button type="button" class="linkish" data-act="reset">Reset</button></div></div>
+      <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="chains" aria-selected="${state.tab === 'chains'}">Chains <span>${m.chains.length}</span></button><button type="button" role="tab" data-tab="files" aria-selected="${state.tab === 'files'}">Files <span>${m.files.length}</span></button></div>`;
+    if (state.tab === 'chains') {
+      const row = (c) => {
+        const s = stats(blocksOf(c.blocks));
+        const frac = s.total ? Math.round(((s.total - s.open) / s.total) * 100) : 100;
+        const on = v.kind === 'chain' && v.id === c.id;
+        return `<button type="button" class="sb-row chain${s.open ? '' : ' done'}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''}>
+          <span class="st"></span><span class="nm">${wbr(c.name)}<span class="sub">${s.total} change${s.total > 1 ? 's' : ''} · ${c.files} file${c.files > 1 ? 's' : ''} · ${c.graph.nodes.length} nodes</span><span class="mini-track"><span style="width:${frac}%"></span></span></span>
+          <span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
+      };
+      const multi = m.chains.filter((c) => c.files > 1), single = m.chains.filter((c) => c.files === 1);
+      h += `<div class="sb-h"><span>Across files</span><span class="sb-hn">${multi.length}</span></div>` + multi.map(row).join('');
+      if (single.length) h += `<div class="sb-h"><span>Within one file</span><span class="sb-hn">${single.length}</span></div>` + single.map(row).join('');
+      const s = stats(m.standalone);
+      h += `<div class="sb-h"><span>Outside chains</span></div><button type="button" class="sb-row chain${s.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">Not in a chain<span class="sub">${s.total} changes · grouped by file</span></span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
+    } else {
+      let lastDir = null;
+      m.files.forEach((f) => {
+        const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
+        if (dir !== lastDir) { h += `<div class="sb-dir" title="${esc(dir)}">${esc(dir)}</div>`; lastDir = dir; }
+        const s = stats(f.blocks);
+        const on = v.kind === 'file' && v.path === f.p;
+        h += `<button type="button" class="sb-row${s.open ? '' : ' done'}" data-open="${esc(f.p)}"${on ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
+      });
+      h += `<div class="sb-h"><span>Generated · not reviewed</span><span class="sb-hn">${m.generated.length}</span></div>`;
+      m.generated.forEach((f) => {
+        const on = v.kind === 'file' && v.path === f.p;
+        h += `<button type="button" class="sb-row gen" data-open="${esc(f.p)}"${on ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">${esc(fileName(f.p))}<span class="sub">${esc(f.p.slice(0, f.p.lastIndexOf('/')))}</span></span><span class="cnt"><span class="a">+${f.a}</span></span></button>`;
+      });
+    }
+    side.innerHTML = h;
+  }
+
+  // ---------- render
+  function render(opts) {
+    opts = opts || {};
     const keep = main.scrollTop;
     renderSide();
     const v = state.view;
-    main.innerHTML = v.kind === 'group' ? renderGroup(v.id) : v.kind === 'gen' ? renderGen(v.dir) : v.kind === 'search' ? renderSearch() : renderFile(v.path);
+    main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : renderFile(v.path);
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
-    if (scrollLine) {
-      const el = main.querySelector(`.ln[data-n="${scrollLine}"]`);
-      if (el) {
-        main.scrollTop = el.offsetTop - main.clientHeight / 3;
-        el.classList.add('flash');
-      }
-    } else if (scrollLine === false) {
-      main.scrollTop = 0;
-    } else {
-      main.scrollTop = keep;
-    }
+    viewer.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
+    viewer.classList.toggle('split', state.layout === 'split');
+    const rd = $('#vw-revdiff');
+    if (rd) rd.checked = state.showReviewedDiff;
+    const headH = () => { const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
+    if (opts.line) {
+      const el = main.querySelector(`[data-n="${opts.line}"]`);
+      if (el) { main.scrollTop = el.offsetTop - headH() - 60; el.classList.add('flash'); }
+    } else if (opts.section != null) {
+      const el = main.querySelector('#sec-' + opts.section);
+      if (el) { main.scrollTop = el.offsetTop - headH() - 8; el.classList.add('flash-sec'); }
+    } else if (opts.top) main.scrollTop = 0;
+    else main.scrollTop = keep;
     const cur = side.querySelector('[aria-current="true"]');
-    if (cur && scrollLine !== undefined) {
-      const top = cur.offsetTop - side.clientHeight / 3;
-      if (cur.offsetTop < side.scrollTop || cur.offsetTop > side.scrollTop + side.clientHeight - 30) side.scrollTop = top;
+    if (cur && opts.top) {
+      if (cur.offsetTop < side.scrollTop || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - side.clientHeight / 3;
     }
   }
-
   function openFile(path, line) {
     state.view = { kind: 'file', path };
     state.peek = null;
     if (line) {
       const hl = M().head.get(path + ':' + line);
-      if (hl && hl.row.block && !blockOpen(hl.row.block)) state.showBlocks.add(hl.row.block.id);
+      if (hl) state.collapsed.delete(path + '#' + hl.hi);
     }
-    render(line ? Number(line) : false);
+    render(line ? { line: Number(line) } : { top: true });
   }
 
   // ---------- events
   viewer.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-open],[data-group],[data-gen],[data-mode],[data-compare],[data-usage],[data-scope],.ref');
+    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-tab],[data-compare],[data-layout],[data-usage],[data-scope],.ref');
     if (!t || !viewer.contains(t)) return;
     const m = M();
-    if (t.dataset.compare) {
-      if (state.compare === t.dataset.compare) return;
-      state.compare = t.dataset.compare;
-      state.peek = null;
-      if (state.view.kind !== 'file' || !model(state.compare).files.some((f) => f.p === state.view.path)) state.view = { kind: 'file', path: START_FILE };
-      return render(false);
+    const d = t.dataset;
+    if (d.compare) {
+      if (state.compare === d.compare) return;
+      state.compare = d.compare; state.peek = null;
+      state.view = { kind: 'chain', id: 0 };
+      return render({ top: true });
     }
-    if (t.dataset.mode) { state.keyMode = t.dataset.mode; save(); if (state.view.kind === 'group') state.view = { kind: 'file', path: START_FILE }; return render(); }
-    if (t.dataset.scope) { state.search.scope = t.dataset.scope; return render(false); }
+    if (d.layout) { state.layout = d.layout; save(); return render(); }
+    if (d.tab) { state.tab = d.tab; return render(); }
+    if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
+    if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
+    if (d.node !== undefined && !d.act) return render({ section: Number(d.node) });
     if (t.classList.contains('ref')) {
-      if (state.view.kind !== 'file') return;
-      const ln = t.closest('.ln');
-      const n = Number(ln.dataset.n);
-      const col = Number(t.dataset.col);
-      const path = state.view.path;
+      const path = d.path, n = Number(d.n), col = Number(d.col);
       const key = `${path}:${n}:${col}`;
       const same = state.peek && state.peek.path === path && state.peek.n === n && state.peek.col === col;
-      state.peek = same ? null : { path, n, col, ti: Number(t.dataset.ti), usageKey: REFS[state.compare][key] ? key : null };
+      state.peek = same ? null : { path, n, col, ti: Number(d.ti), usageKey: REFS[state.compare][key] ? key : null };
       return render();
     }
-    if (t.dataset.usage && !t.dataset.act) {
-      const [path, n, col] = t.dataset.usage.split(':');
-      const defs = lineDefs(path, Number(n));
-      const ti = defs ? defs.get(Number(col)) : undefined;
-      const same = state.peek && state.peek.usageKey === t.dataset.usage;
-      state.peek = same ? null : { path, n: Number(n), col: Number(col), ti, usageKey: t.dataset.usage };
+    if (d.usage && !d.act) {
+      const i1 = d.usage.lastIndexOf(':'), i0 = d.usage.lastIndexOf(':', i1 - 1);
+      const path = d.usage.slice(0, i0), n = Number(d.usage.slice(i0 + 1, i1)), col = Number(d.usage.slice(i1 + 1));
+      const defs = lineDefs(path, n);
+      const same = state.peek && state.peek.usageKey === d.usage;
+      state.peek = same ? null : { path, n, col, ti: defs ? defs.get(col) : undefined, usageKey: d.usage };
       return render();
     }
-    if (t.dataset.open !== undefined && !t.dataset.act) return openFile(t.dataset.open, t.dataset.line);
-    if (t.dataset.group && !t.dataset.act) { state.view = { kind: 'group', id: t.dataset.group }; state.peek = null; return render(false); }
-    if (t.dataset.gen) { state.view = { kind: 'gen', dir: t.dataset.gen }; return render(false); }
-    const act = t.dataset.act;
-    const f = state.view.kind === 'file' ? m.files.find((x) => x.p === state.view.path) : null;
-    if (act === 'reset') { state.rev[state.compare] = new Set(); state.showBlocks.clear(); save(); return render(); }
+    if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.tab = 'chains'; return render({ top: true }); }
+    if (d.standalone) { state.view = { kind: 'standalone' }; state.peek = null; return render({ top: true }); }
+    if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
+    if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
+    const act = d.act;
+    if (act === 'reset') { state.rev[state.compare] = new Set(); state.blockDiff.clear(); save(); return render(); }
     if (act === 'close-peek') { state.peek = null; return render(); }
-    if (act === 'toggle-block') { const b = m.blocks.get(t.dataset.block); setAtoms(b.atoms, !blockDone(b)); state.showBlocks.delete(b.id); return render(); }
-    if (act === 'show-block') { state.showBlocks.add(t.dataset.block); return render(); }
-    if (act === 'show-hunk' && f) { f.blocks.filter((b) => b.hunk === Number(t.dataset.hunk)).forEach((b) => state.showBlocks.add(b.id)); return render(); }
-    if (act === 'mark-hunk' && f) {
-      const bs = f.blocks.filter((b) => b.hunk === Number(t.dataset.hunk));
-      setAtoms(bs.flatMap((b) => b.atoms), true);
-      bs.forEach((b) => state.showBlocks.delete(b.id));
+    if (act === 'toggle-block') { const b = m.blockById.get(d.block); toggleBlocks([b]); return render(); }
+    if (act === 'toggle-diff') { state.blockDiff.has(d.block) ? state.blockDiff.delete(d.block) : state.blockDiff.add(d.block); return render(); }
+    if (act === 'toggle-hunk') {
+      const btn = t.getAttribute('aria-expanded') === 'true';
+      if (btn) { state.collapsed.add(d.key); state.expanded.delete(d.key); } else { state.collapsed.delete(d.key); state.expanded.add(d.key); }
       return render();
     }
-    if (act === 'mark-file' && f) {
-      const on = fileStats(f).open > 0;
-      setAtoms(f.blocks.flatMap((b) => b.atoms), on);
-      f.blocks.forEach((b) => state.showBlocks.delete(b.id));
-      return render();
-    }
-    if (act === 'mark-group') { const g = groupsOf(m, state.keyMode).byId.get(t.dataset.groupId); setAtoms(g.atoms, !g.atoms.every((a) => rev().has(a.id))); return render(); }
-    if (act === 'toggle-atoms') { const list = t.dataset.atoms.split(' ').map((id) => m.atoms.get(id)); setAtoms(list, !list.every((a) => rev().has(a.id))); return render(); }
+    if (act === 'expand-to') { state.collapsed.delete(d.key); state.expanded.add(d.key); return render({ line: Number(d.line) }); }
+    if (act === 'mark-hunk') { const f = m.files[Number(d.file)]; toggleBlocks(f.blocks.filter((b) => b.hunk === Number(d.hunk) && b.edits.length)); return render(); }
+    if (act === 'mark-file') { toggleBlocks(m.files[Number(d.file)].blocks.filter((b) => b.edits.length)); return render(); }
+    if (act === 'mark-blocks') { toggleBlocks(blocksOf(d.blocks.split(' '))); return render(); }
+    if (act === 'mark-chain') { toggleBlocks(blocksOf(m.chains[Number(d.chainId)].blocks)); return render(); }
+    if (act === 'mark-standalone') { toggleBlocks(m.standalone); return render(); }
+    if (act === 'mark-group') { const g = m.groupById.get(Number(d.groupId)); setEdits(g.edits, !g.edits.every((x) => rev().has(x))); return render(); }
+    if (act === 'group-all') { state.groupAll.add(d.key); return render(); }
     if (act === 'mark-usages') {
-      const list = REFS[state.compare][t.dataset.usage] || [];
-      const blocks = list.map(([up, ul]) => m.head.get(up + ':' + ul)).filter((hl) => hl && hl.row.block).map((hl) => ({ hl, b: hl.row.block }));
-      const anyOpen = blocks.some(({ b }) => blockOpen(b));
-      blocks.forEach(({ hl, b }) => setAtoms(b.atoms.filter((a) => a.ins.some((d) => d.row === hl.row)), anyOpen));
+      const list = REFS[state.compare][d.usage] || [];
+      const hits = list.map(([up, ul]) => m.head.get(up + ':' + ul)).filter((hl) => hl && hl.r.block);
+      const anyOpen = hits.some((hl) => !done(hl.r.block));
+      hits.forEach((hl) => {
+        const ranges = hl.f.hunks[hl.hi].rows[hl.ri][2] || [];
+        const ids = ranges.length ? [...new Set(ranges.map((x) => x[2]))] : hl.r.block.edits;
+        setEdits(ids, anyOpen);
+      });
       return render();
     }
   });
+  viewer.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('[data-node],[data-graph-open]')) { e.preventDefault(); e.target.closest('[data-node],[data-graph-open]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+  });
   viewer.addEventListener('change', (e) => {
-    if (e.target.id === 'vw-comments') { state.hideComments = e.target.checked; save(); render(); }
+    if (e.target.id === 'vw-revdiff') { state.showReviewedDiff = e.target.checked; save(); render(); }
   });
   let qTimer = null;
   qInput.addEventListener('input', () => {
@@ -526,12 +726,12 @@
     qTimer = setTimeout(() => {
       state.search.q = qInput.value;
       if (qInput.value.trim()) { if (state.view.kind !== 'search') state.prevView = state.view; state.view = { kind: 'search' }; }
-      else if (state.view.kind === 'search') state.view = state.prevView || { kind: 'file', path: START_FILE };
-      render(false);
+      else if (state.view.kind === 'search') state.view = state.prevView || { kind: 'chain', id: 0 };
+      render({ top: true });
     }, 150);
   });
 
-  render(false);
-  const src = $('#core-src');
-  if (src) src.textContent = $('#core-script').textContent.trim();
+  render({ top: true });
+  const src = $('#analyze-src-view');
+  if (src) src.textContent = $('#analyze-src').textContent.trim();
 })();

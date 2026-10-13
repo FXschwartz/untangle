@@ -1,17 +1,23 @@
 # Prototype pipeline (throwaway)
 
 Produces the viewer published at https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB from the
-real diff of serverpod_offline_sync #168. Commit SHAs are hard-coded in `export_diff.py`.
+real diff of serverpod_offline_sync #168. Commit SHAs are hard-coded in `export_diff.py` and
+`analyze.js`.
 
-| Step | File | What it does |
+Prerequisites:
+- A blobless clone of the repo with `pull/168/head` fetched.
+- A worktree of the PR head with `dart pub get` run, used by the language server.
+- `npm install` in this folder, for `web-tree-sitter` and the prebuilt grammars.
+
+| Step | Command | What it does |
 |---|---|---|
-| 1 | `export_diff.py <repo> diff.json` | Exports `git diff -U3` hunks per file as JSON, for main→head and 0540639→head. Generated files get stats only. |
-| 2 | `core.js` | The rules: tokenizer, token LCS, edits, repeated-edit groups. Runs in node and in the page. |
-| 3 | `positions.js` | Identifier positions on the head side of the diff, for the language server. |
-| 4 | `lsp_index.py <head-worktree> positions.json defs.json` | Asks `dart language-server` for each identifier's definition. |
-| 4b | `slim_defs.py defs.json defs_slim.json` | Keeps only what the page embeds. |
-| 5 | `lsp_refs.py <head-worktree> diff.json defs.json refs.json` | References of declarations on added lines, kept when they fall on added lines elsewhere. |
-| 6 | `stats.js` | Prints the numbers quoted in `../01-ux-proposal.md`. |
-| 7 | `build.py <dir> page.html` | Inlines `core.js`, `viewer.js` and the JSON into `template.html`. |
+| 1 | `python3 export_diff.py <repo> diff.json` | Exports `git diff -U3` hunks per file for main→head and 0540639→head. Generated files get stats only. |
+| 2 | `node positions.js` | Identifier positions on the head side of the diff. |
+| 3 | `python3 lsp_index.py <head> positions.json defs.json` | Asks `dart language-server` for every identifier's definition. |
+| 4 | `python3 slim_defs.py defs.json defs_slim.json` | Keeps only what the page embeds for go to definition. |
+| 5 | `python3 lsp_refs.py <head> diff.json defs.json refs.json` | References of declarations on added lines that fall on added lines elsewhere (the "changed usages" badges). |
+| 6 | `node analyze.js <repo> <head> diff.json defs.json model.json` | The core: token edits, tree-sitter identities, same-change groups, chains and their graphs. Uses `core.js`. |
+| 7 | `node stats.js` | Prints the numbers quoted in `../01-ux-proposal.md`. |
+| 8 | `python3 build.py . page.html` | Inlines the model, `core.js`, `viewer.js` and `analyze.js` (as text) into `template.html`. |
 
-The head worktree needs `dart pub get` before steps 4 and 5.
+Set `BCR_DEPS` to another `node_modules` folder if the dependencies live elsewhere.
