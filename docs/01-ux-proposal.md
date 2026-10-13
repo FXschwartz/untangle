@@ -1,8 +1,8 @@
-# UX proposal v5: start from the chain map, end in the code
+# UX proposal v6: start from the chain map, end in the code
 
-> Draft v5, 2026-10-13. Replaces v4 (see "History" at the end).
+> Draft v6, 2026-10-13. Replaces v5 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 6).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 7).
 > Prototype sources: [prototype/](prototype/).
 
 ## Requirements
@@ -37,6 +37,10 @@ From the review of v4:
 - **Removed code links the same way as added code,** with its own language server for go
   to definition and linking.
 - **The chain map is the first screen.**
+
+From the review of v5:
+- **Generated code links back to its model** (`.spy.yaml`).
+- **Measure the cost** of the second language server.
 
 ## Decisions (answers to the v2 questions)
 
@@ -78,16 +82,22 @@ From the review of v4:
      from the imported file.
    - A Markdown change that names a chain's member or declaration in backticks joins
      that chain.
-8. A chain needs at least two members; same-change chains need two changes. Changes in
+8. **Generated code leads back to its model.** A usage that resolves into generated code
+   (`**/generated/**`) links to the change of the model field it was generated from
+   (`**/*.spy.yaml`), on either side.
+   - Serverpod adapter: generated `Table`, `Include` and `Repository` classes map to the
+     model class, and a relation's `…Id` column maps to the relation field.
+   - A doc-comment change in the model belongs to the field below it.
+9. A chain needs at least two members; same-change chains need two changes. Changes in
    no chain are listed by file.
-9. **Name:** the declaration with the most usages inside the chain, or the edit itself
+10. **Name:** the declaration with the most usages inside the chain, or the edit itself
    for a same-change chain.
-10. **Graph:**
+11. **Graph:**
     - one node per member;
     - nodes that are all the same change, 3 or more times, collapse into one;
     - arrows go from a change to what it uses;
     - layers are the distance from the root.
-11. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
+12. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
 
 ### Chain of chains
 
@@ -157,8 +167,8 @@ From the review of v4:
 | Change blocks | 387 | 180 |
 | Edits | 822 | 581 |
 | Same-change groups | 53 | 36 |
-| Chains (across files / within a file) | 64 (34 / 30) | 38 (10 / 28) |
-| Changes in a chain / not in a chain | 343 / 44 | 124 / 56 |
+| Chains (across files / within a file) | 66 (36 / 30) | 41 (13 / 28) |
+| Changes in a chain / not in a chain | 359 / 28 | 133 / 47 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
 - **Largest chain:** `OfflineSyncDatabase.mergeChanges(userId)`, with 184 changes in 38
@@ -169,16 +179,38 @@ From the review of v4:
   `− OfflineSyncSpaceManager._getOrCreate(transaction)` with 14 changes.
 - **Old-side language server:** it resolved 1,795 of 1,846 removed-line identifiers
   (main) and 1,223 of 1,246 (snapshot).
-- **Chain of chains:** the main family has 52 chains in 9 levels. Tests use
+- **Model chains:**
+
+  | Chain | Changes | Files |
+  |---|---:|---:|
+  | `− OfflineSyncSpace.currentNode` | 64 | 18 |
+  | `CrdtNode.localUserUuid` | 27 | 11 |
+  | `OfflineSyncSpace.lastHlc` | 6 | 6 |
+
+- **Chain of chains:** the main family has 58 chains in 9 levels, with the model chains at
+  the bottom. Tests use
   `mergeChanges(userId)`, which uses `_transactionAs` and the recorder wrappers. Those use
   the space manager and context locks, which use `_UserClock` and the cache fields.
-- **Still outside a chain (44):**
+- **Still outside a chain (28):**
 
   | Reason | Changes |
   |---|---:|
-  | Markdown or model YAML, naming nothing in a chain | 13 |
   | Comment-only edits of members in no chain | 12 |
-  | Dart edits that use only unchanged code (many use `OfflineSyncSpace.currentNode`, a field that only exists in generated code) | 19 |
+  | Markdown or YAML naming nothing in a chain | 9 |
+  | Dart edits using only unchanged code (test names, package imports) | 7 |
+
+## Cost of the second language server (measured on #168)
+
+- **Memory:** about 640 MB peak on the PR head and 690 MB on the old side, so roughly
+  1.3 GB for two separate servers. One server with both checkouts as workspace folders
+  peaks at about 850 MB, so the old side adds about 210 MB.
+- **Time:** the old side only resolves removed lines, 1,846 lookups in 23 s. The head
+  side's 8,526 lookups took 106 s; in the extension it's the editor's own server.
+- **Disk:** the old checkout is a git worktree sharing objects with the repo: 18 MB of
+  source plus 76 KB of `.dart_tool`. Packages come from the shared pub cache (no new ones
+  for this commit).
+- **Run once per old commit:** the old side only changes on a rebase. Its answers can be
+  computed once, cached (about 500 KB here), and the server stopped.
 
 - **Tooling limit:** the YAML grammar from `tree-sitter-wasms` doesn't load with
   `web-tree-sitter` 0.25. The `.spy.yaml` and Markdown files fall back to plain token
@@ -207,16 +239,17 @@ From the review of v4:
 
 ## Open questions
 
-- **Q1.** Should usages of generated declarations link back to the model change they come
-  from, such as the removed `currentNode` field in `space.spy.yaml`?
-- **Q2.** Member cohesion makes chains complete but larger (`persistedUserClock` spans
-  15 test nodes). Should it stay, or should those changes show as linked but outside?
-- **Q3.** How should chains inside a family be ordered: by level (as now), or by what is
-  left to review?
-- **Q4.** For large graphs, should busy levels collapse into "+N more" (as now), or
-  should nodes be grouped by file?
-- **Q5.** The old side needs its own checkout and `pub get`. Should its language server
-  run on demand, or always in the background?
+- **Q1.** How should the old-side server run: once per old commit with cached answers
+  (cheapest), or as a second root of a long-lived server (about 210 MB more, with live go
+  to definition on removed lines)?
+- **Q2.** Member cohesion makes chains complete but larger
+  (`− OfflineSyncSpace.currentNode` reaches 64 changes). Should it stay?
+- **Q3.** Model adapters: should each generator ship one (Serverpod, freezed,
+  json_serializable, protobuf), or should the mapping be declared in `.review.yaml`?
+- **Q4.** How should chains inside a family be ordered: by level, or by what is left to
+  review?
+- **Q5.** For large graphs, should busy levels collapse into "+N more", or should nodes be
+  grouped by file?
 
 ## History
 
@@ -242,6 +275,9 @@ From the review of v4:
 - **v4:** the chain map, focus on node click, auto-folding hunks, dark palette.
   - Feedback: removed code should link the same way, with a language server of its own,
     and the map should be the first screen.
+- **v5:** old-side language server, map first.
+  - Feedback: link generated code to its YAML model, and measure the cost of the second
+    server.
 
 ## References
 

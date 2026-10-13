@@ -345,11 +345,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v5 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v6 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
     <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v4: removed lines get their own language server, run on the old side of the comparison. They link into chains the same way added lines do, and have go to definition. A renamed declaration’s old and new usages are one chain. The chain map is the first screen.</p>
+    <p class="changed">Changed since v5: code that uses generated declarations now links to the model change it was generated from, so <code>− OfflineSyncSpace.currentNode</code> is a chain of 64 changes rooted in <code>space.spy.yaml</code>. A new section gives the measured cost of the second language server.</p>
   </header>
 
   <section class="section" id="try">
@@ -359,7 +359,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <p class="section-intro prose">This viewer shows <a href="https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168">serverpod_offline_sync #168</a> as the rules see it. One build-time pass ran git, tree-sitter and the Dart analysis server (the one VS Code uses) over the PR. Nothing in it was written by hand for this PR.</p>
     </header>
     <ul class="try">
-      <li><b>Start on the chain map.</b> It lays the 52 linked chains out in 9 levels. Click a chain to open it.</li>
+      <li><b>Start on the chain map.</b> It lays the 58 linked chains out in 9 levels, with the model changes at the bottom. Click a chain to open it.</li>
       <li><b>Click a node</b> in a chain’s graph to show only that member’s code. Click it again, or “Show all”, to go back.</li>
       <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted. When a hunk’s last change is reviewed, the hunk folds.</li>
       <li><b>Click an identifier</b> to peek at its definition, on added and removed lines alike. Each side has its own Dart analysis server.</li>
@@ -401,25 +401,25 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
         <div class="rule-text">
           <span class="rule-k">Chains</span>
           <p class="pain"><b>Pain:</b> one change spans files, and today you rebuild it by jumping between them.</p>
-          <p>A changed line that uses something declared on another changed line links the two changes. The language server decides what a name refers to: one runs on the PR head for added lines, another on the old side for removed lines. A declaration whose name was replaced is one declaration, so its old and new usages link to it. Changes join a chain in five ways:</p>
+          <p>A changed line that uses something declared on another changed line links the two changes. The language server decides what a name refers to: one runs on the PR head for added lines, another on the old side for removed lines. A declaration whose name was replaced is one declaration, so its old and new usages link to it. Changes join a chain in six ways:</p>
           <ul>
             <li><b>Parameters and local variables pass a chain on.</b> A new parameter, the calls that now pass it, and the parameter those calls needed are one chain.</li>
             <li><b>A changed function, method, field or type starts a chain</b> with the changes that use it. A member’s chain and the ripple of its own parameters are one chain.</li>
             <li><b>The same change in several places is a chain</b> when it names an identifier, so a rename such as <code>withCurrentNodeHlc → withUserClock</code> is tracked together.</li>
             <li><b>A chain takes every change of the members it touches.</b> In test files that means the enclosing test. A doc comment counts with the declaration it documents.</li>
             <li><b>Imports and docs follow.</b> A new import joins the chains that use what it imports in that file. A Markdown change that names a chain’s member in backticks joins that chain.</li>
+            <li><b>Generated code leads back to its model.</b> A usage that the language server resolves into generated code links to the <code>.spy.yaml</code> field it was generated from. Generated <code>Table</code>, <code>Include</code> and <code>Repository</code> classes map to the model class, and a relation’s generated <code>…Id</code> column maps to the relation field.</li>
           </ul>
-          <p class="num">In #168, 343 of the 387 changes fall into 64 chains, 34 of them across files. <code>mergeChanges(userId)</code> is the largest: 184 changes in 38 files, drawn as 11 nodes. <code>recordSyncCheckpoint(spaceId)</code>, the <code>userId → spaceId</code> rename, has 16 changes in 6 files. Ten chains start at a removed declaration, such as <code>− OfflineSyncSpaceManager._getOrCreate(transaction)</code> with its 14 changes.</p>
+          <p class="num">In #168, 359 of the 387 changes fall into 66 chains, 36 of them across files. <code>mergeChanges(userId)</code> is the largest, with 184 changes in 38 files. The model changes form three chains: <code>− OfflineSyncSpace.currentNode</code> (64 changes in 18 files), <code>CrdtNode.localUserUuid</code> (27 in 11) and <code>OfflineSyncSpace.lastHlc</code> (6 in 6). Ten chains start at a removed declaration, such as <code>− OfflineSyncSpaceManager._getOrCreate(transaction)</code>.</p>
         </div>
         <div class="rule-text">
-          <span class="rule-k">Why 44 changes stay outside</span>
-          <p>The rest have nothing a rule can link yet:</p>
+          <span class="rule-k">Why 28 changes stay outside</span>
+          <p>The rest have nothing a rule can link:</p>
           <ul>
-            <li><b>13 are Markdown or model YAML</b> with no language server, naming nothing in a chain.</li>
             <li><b>12 only change comments</b> of members that are in no chain.</li>
-            <li><b>19 are Dart edits</b> that use only unchanged code. Many use <code>OfflineSyncSpace.currentNode</code>, a field that only exists in generated code, so nothing reviewed declares it.</li>
+            <li><b>9 are Markdown or model YAML</b> that names nothing in a chain.</li>
+            <li><b>7 are Dart edits</b> that use only unchanged code, such as test names and package imports.</li>
           </ul>
-          <p>Linking through generated code back to the model it comes from (<code>space.spy.yaml</code> here) would catch most of the last group.</p>
         </div>
       </div>
 
@@ -428,7 +428,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
           <span class="rule-k">Chain of chains</span>
           <p class="pain"><b>Pain:</b> a big change is several chains that build on each other.</p>
           <p>Each chain has a core: the changes of its root’s member. Chain A uses chain B when A’s core uses a function, method, field or type in B’s core. That gives a hierarchy. Chains that nothing uses come first, and each level depends on the next.</p>
-          <p class="num">In #168 the main family has 52 chains in 9 levels. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
+          <p class="num">In #168 the main family has 58 chains in 9 levels, with the three model chains at the bottom. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
         </div>
         <div class="rule-text">
           <span class="rule-k">Same change</span>
@@ -465,7 +465,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 to v4 reviews</h2>
+      <h2>Answers from the v2 to v5 reviews</h2>
     </header>
     <ol class="decide">
       <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another.</span></li>
@@ -478,7 +478,22 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Hiding</span><span>Reviewed code is never hidden. Only hunks fold, including on their own when fully reviewed.</span></li>
       <li><span class="q">Graph</span><span>Clicking a node focuses on it and filters the code to it.</span></li>
       <li><span class="q">First screen</span><span>The chain map.</span></li>
+      <li><span class="q">Models</span><span>Generated code links back to the model file it comes from.</span></li>
     </ol>
+  </section>
+
+  <section class="section" id="cost">
+    <header>
+      <span class="eyebrow">Measured on #168</span>
+      <h2>What the second language server costs</h2>
+      <p class="section-intro prose">Measured on this machine with the Dart analysis server, resolving the identifiers of #168’s diff.</p>
+    </header>
+    <div class="musts">
+      <div class="must"><h3>Memory</h3><p>One server peaks at about 640 MB on the PR head and 690 MB on the old side. Two separate servers need about 1.3 GB at the peak. One server with both checkouts as workspace folders peaks at about 850 MB, so the old side adds about 210 MB.</p></div>
+      <div class="must"><h3>Time</h3><p>The old side only resolves removed lines: 1,846 lookups in 23 seconds. The head side’s 8,526 lookups took 106 seconds. In the extension, the head side is the editor’s own server, which is already running.</p></div>
+      <div class="must"><h3>Disk</h3><p>The old checkout is a git worktree that shares objects with the repo: 18 MB of source plus 76 KB of <code>.dart_tool</code>. Packages come from the shared pub cache, and this commit needed no new ones.</p></div>
+    </div>
+    <p class="filters"><b>It only has to run once per old commit.</b> The old side doesn’t change during a review, only on a rebase. Its answers can be computed once, cached (about 500 KB here), and the server stopped. The steady cost is then a cache file, and a burst of about 20 seconds when the base moves.</p>
   </section>
 
   <section class="section" id="musts">
@@ -513,11 +528,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <h2>Open questions</h2>
     </header>
     <ol class="q-list">
-      <li><span class="q">Q1</span><span><b>Model ripples:</b> should usages of generated declarations link back to the model change they come from, such as a removed <code>currentNode</code> field in <code>space.spy.yaml</code>?</span></li>
-      <li><span class="q">Q2</span><span><b>Member cohesion:</b> it makes chains complete but larger (<code>persistedUserClock</code> spans 15 test nodes). Keep it, or show those changes as linked but outside?</span></li>
-      <li><span class="q">Q3</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
-      <li><span class="q">Q4</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
-      <li><span class="q">Q5</span><span><b>Cost of two language servers:</b> the old side needs its own checkout and <code>pub get</code>. Run it on demand, or always in the background?</span></li>
+      <li><span class="q">Q1</span><span><b>Old-side server:</b> start it once per old commit and cache its answers (cheapest), or add the old checkout to a long-lived server (about 210 MB more, but go to definition on removed lines stays live)?</span></li>
+      <li><span class="q">Q2</span><span><b>Member cohesion:</b> it makes chains complete but larger. <code>− OfflineSyncSpace.currentNode</code> reaches 64 changes because whole members join. Keep it, or show those changes as linked but outside?</span></li>
+      <li><span class="q">Q3</span><span><b>Model adapters:</b> the generated-to-model mapping is Serverpod-specific. Should each generator ship a small adapter (Serverpod, freezed, json_serializable, protobuf), or should the mapping be declared in <code>.review.yaml</code>?</span></li>
+      <li><span class="q">Q4</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
+      <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
     </ol>
   </section>
 

@@ -23,3 +23,7 @@ Prerequisites:
 | 8 | `python3 build.py . page.html` | Inlines the model, `core.js`, `viewer.js` and `analyze.js` (as text) into `template.html`. |
 
 Set `BCR_DEPS` to another `node_modules` folder if the dependencies live elsewhere.
+
+Cost measurements: `measure_lsp.sh <worktree> <positions.json>` reports the language server's
+peak memory and time. `lsp_two_roots.py <head> <old> positions.json positions_old_base.json`
+measures one server with both checkouts as workspace folders.

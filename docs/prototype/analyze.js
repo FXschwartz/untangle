@@ -27,7 +27,14 @@ const COMPARES = {
   base: { left: 'e0598c1577db2d55c9af7d0d165be6332256910d', right: 'a45f9aee30bcb170b863373840e63a0e42a0092b', label: 'main · e0598c1' },
   since: { left: '0540639', right: 'a45f9aee30bcb170b863373840e63a0e42a0092b', label: 'Reviewed at 0540639' },
 };
-const CONFIG = { generated: ['**/migrations/**'], peekMaxLines: 2000 };
+const CONFIG = {
+  generated: ['**/migrations/**'],
+  peekMaxLines: 2000,
+  // Generated code maps back to the model it comes from (a Serverpod adapter): a usage that
+  // resolves into generated code links to the change of the model field it was generated from.
+  models: { generated: '**/generated/**', source: '**/*.spy.yaml', classSuffixes: /(Table|Include|IncludeList|Repository|AttachRepository|AttachRowRepository|DetachRepository|DetachRowRepository)$/ },
+};
+const MODEL_GEN = C.globToRegExp(CONFIG.models.generated), MODEL_SRC = C.globToRegExp(CONFIG.models.source);
 const GEN_RES = CONFIG.generated.map(C.globToRegExp);
 
 const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { return null; } };
@@ -252,18 +259,69 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       }
     }
 
+    const decls = new Map();
+    const usesOf = new Map();
+    // ---------- model fields changed in this comparison: Class.field -> blocks of the .spy.yaml
+    const modelFields = new Map();
+    files.filter((f) => MODEL_SRC.test(f.p)).forEach((f) => {
+      const cls = (src) => { const m = src && /^(?:class|exception):\s*(\w+)/m.exec(src); return m ? m[1] : null; };
+      const name = cls(f.newSrc) || cls(f.oldSrc);
+      if (!name) return;
+      const fieldOf = (text) => { const m = /^  ([A-Za-z_]\w*):/.exec(text); return m && m[1] !== 'fields' && m[1] !== 'indexes' ? m[1] : null; };
+      f.blocks.forEach((b) => {
+        const touched = new Map();
+        b.rows.forEach((r) => { const fld = fieldOf(r.text); if (fld) touched.set(fld, (touched.get(fld) || new Set()).add(r.type)); });
+        if (!touched.size) {
+          // A doc-comment change belongs to the field below it.
+          const src = (f.newSrc || f.oldSrc).split('\n');
+          const last = Math.max(...b.rows.map((r) => (r.type === '-' ? 0 : r.n)).concat([0]));
+          for (let l = last + 1; l < Math.min(src.length, last + 6); l++) { const fld = fieldOf(src[l - 1]); if (fld) { touched.set(fld, new Set(['~'])); break; } if (src[l - 1].trim() && !src[l - 1].trim().startsWith('#')) break; }
+        }
+        touched.forEach((types, fld) => {
+          const k = name + '.' + fld;
+          if (!modelFields.has(k)) modelFields.set(k, { blocks: [], types: new Set(), file: f.p, cls: name, field: fld });
+          modelFields.get(k).blocks.push(b);
+          types.forEach((t) => modelFields.get(k).types.add(t));
+        });
+      });
+    });
+    const genTrees = new Map();
+    const genTarget = (abs, line, col) => {
+      if (!genTrees.has(abs)) { let src = null; try { src = fs.readFileSync(abs, 'utf8'); } catch {} genTrees.set(abs, src && { src, tree: parser.parse(src) }); }
+      const g = genTrees.get(abs);
+      if (!g) return null;
+      const text = g.src.split('\n')[line - 1] || '';
+      const id = /^[A-Za-z_$][\w$]*/.exec(text.slice(col));
+      const at = memberAt(g.tree, line, ' '.repeat(col) + 'x');
+      const owner = at && at.member ? at.member.split('.')[0].replace(CONFIG.models.classSuffixes, '') : null;
+      if (!id || !owner) return null;
+      const name = id[0];
+      return modelFields.get(owner + '.' + name) || (name.endsWith('Id') ? modelFields.get(owner + '.' + name.slice(0, -2)) : null) || null;
+    };
+    // A usage whose definition is generated from a changed model field links to that field's change.
+    const linkModel = (u, mf, removedSide) => {
+      const dk = `model:${mf.file}:${mf.cls}.${mf.field}`;
+      if (!decls.has(dk)) {
+        const onlyRemoved = mf.types.has('-') && !mf.types.has('+');
+        decls.set(dk, { key: dk, name: mf.field, kind: 'member', block: mf.blocks[0], users: new Set(), member: mf.cls + '.' + mf.field, line: 0, file: mf.file, removed: onlyRemoved, model: true });
+      }
+      if (decls.get(dk).block === u.b) return;
+      decls.get(dk).users.add(u.b);
+      if (!usesOf.has(u.b)) usesOf.set(u.b, new Map());
+      usesOf.get(u.b).set(dk, true);
+    };
+
     // ---------- usage links from the language server
     const plusRow = new Map();
     files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '+') plusRow.set(f.p + ':' + r.n, { f, b, r }); })));
     const changedCol = (r, col) => r.toks.some((tk) => tk.atom && (tk.c === col || tk.c + 1 === col));
-    const decls = new Map();
-    const usesOf = new Map();
     for (const [key, [tpath, tl, tc]] of Object.entries(defsRaw)) {
       const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
       const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
       const u = plusRow.get(p + ':' + line);
       if (!u || !tpath.startsWith(HEAD) || !changedCol(u.r, col)) continue;
       const rel = tpath.slice(HEAD.length);
+      if (MODEL_GEN.test(rel)) { const mf = genTarget(tpath, tl + 1, tc); if (mf) linkModel(u, mf, false); continue; }
       const d = plusRow.get(rel + ':' + (tl + 1));
       if (!d || d.b === u.b) continue;
       const dk = `${rel}:${tl + 1}:${tc}`;
@@ -288,6 +346,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         const u = minusRow.get(p + ':' + line);
         if (!u || !tpath.startsWith(old.dir) || !changedCol(u.r, col)) continue;
         const rel = tpath.slice(old.dir.length);
+        if (MODEL_GEN.test(rel)) { const mf = genTarget(tpath, tl + 1, tc); if (mf) linkModel(u, mf, true); continue; }
         const d = minusRow.get(rel + ':' + (tl + 1));
         if (!d || d.b === u.b) continue;
         const dk = `old:${rel}:${tl + 1}:${tc}`;
@@ -366,6 +425,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     const label = (d) => {
       if (!d) return '(changes)';
       if (d.removed) return '− ' + label({ ...d, removed: false });
+      if (d.model) return d.member;
       let m = d.member;
       const ctor = m && /^([\w$]+)\.\1$/.exec(m);
       if (ctor) m = ctor[1];
