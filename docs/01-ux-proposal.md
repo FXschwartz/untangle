@@ -1,8 +1,8 @@
-# UX proposal v4: review by chain, end in the code
+# UX proposal v5: start from the chain map, end in the code
 
-> Draft v4, 2026-10-13. Replaces v3 (see "History" at the end).
+> Draft v5, 2026-10-13. Replaces v4 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 5).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 6).
 > Prototype sources: [prototype/](prototype/).
 
 ## Requirements
@@ -33,6 +33,11 @@ From the review of v3:
 - **Chains form a hierarchy,** shown as a chain-of-chains view.
 - **Folding one hunk must never fold another.**
 
+From the review of v4:
+- **Removed code links the same way as added code,** with its own language server for go
+  to definition and linking.
+- **The chain map is the first screen.**
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
@@ -43,17 +48,22 @@ From the review of v3:
 4. **A whole chain can be marked reviewed at once.**
 5. **No `reviewedWith`.** Generated files are not reviewed, but they can be peeked for
    reference.
-6. **No language server on removed lines** for now.
+6. **Language servers on both sides.** This revises the v2 answer: removed lines get go
+   to definition and link into chains like added lines.
 7. **The diff layout is choosable,** unified by default.
 
 ## Rules
 
 ### Chains
 
-1. Each changed line's identifiers are resolved with the language server (go to
-   definition, on the head side).
+1. Each changed line's identifiers are resolved with a language server:
+   - added lines by one running on the PR head;
+   - removed lines by one running on the comparison's old side, in its own checkout.
 2. A changed token on one change that resolves to a declaration on a changed line of
-   another change links the two changes.
+   another change links the two changes, on either side.
+   - A declaration whose name token was replaced (a rename) is one declaration, so its
+     old and new usages link to it.
+   - Chains rooted at a removed declaration are named with "−".
 3. **Parameters and local variables pass a chain on.** Union-find runs over changes: a
    parameter or local declared in one change joins it with every change that uses it.
 4. **A changed function, method, field or type starts a chain:** its declaration plus the
@@ -147,25 +157,28 @@ From the review of v3:
 | Change blocks | 387 | 180 |
 | Edits | 822 | 581 |
 | Same-change groups | 53 | 36 |
-| Chains (across files / within a file) | 59 (31 / 28) | 32 (10 / 22) |
-| Changes in a chain / not in a chain | 339 / 48 | 109 / 71 |
+| Chains (across files / within a file) | 64 (34 / 30) | 38 (10 / 28) |
+| Changes in a chain / not in a chain | 343 / 44 | 124 / 56 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
 - **Largest chain:** `OfflineSyncDatabase.mergeChanges(userId)`, with 184 changes in 38
   files (+2,130 −191), drawn as 11 nodes. The 154 identical call-site edits are one node.
 - **`OfflineSyncDatabase.recordSyncCheckpoint(spaceId)`,** the `userId → spaceId`
   rename, has 16 changes in 6 files.
-- **Chain of chains:** the main family has 47 chains in 9 levels. Tests use
+- **Removed declarations:** 10 chains start at one, such as
+  `− OfflineSyncSpaceManager._getOrCreate(transaction)` with 14 changes.
+- **Old-side language server:** it resolved 1,795 of 1,846 removed-line identifiers
+  (main) and 1,223 of 1,246 (snapshot).
+- **Chain of chains:** the main family has 52 chains in 9 levels. Tests use
   `mergeChanges(userId)`, which uses `_transactionAs` and the recorder wrappers. Those use
   the space manager and context locks, which use `_UserClock` and the cache fields.
-- **Still outside a chain (48):**
+- **Still outside a chain (44):**
 
   | Reason | Changes |
   |---|---:|
-  | Removed code only (no language server on removed lines) | 14 |
-  | Markdown naming nothing in a chain | 13 |
+  | Markdown or model YAML, naming nothing in a chain | 13 |
   | Comment-only edits of members in no chain | 12 |
-  | Local edits using only unchanged code or the same change | 9 |
+  | Dart edits that use only unchanged code (many use `OfflineSyncSpace.currentNode`, a field that only exists in generated code) | 19 |
 
 - **Tooling limit:** the YAML grammar from `tree-sitter-wasms` doesn't load with
   `web-tree-sitter` 0.25. The `.spy.yaml` and Markdown files fall back to plain token
@@ -194,16 +207,16 @@ From the review of v3:
 
 ## Open questions
 
-- **Q1.** Should a removed declaration's name link the removed usages, using tree-sitter
-  on the old side? That is most of what is left outside chains.
-- **Q2.** Should the chain map be the first screen, with families leading instead of a
-  list?
-- **Q3.** Member cohesion makes chains complete but larger (`persistedUserClock` spans
+- **Q1.** Should usages of generated declarations link back to the model change they come
+  from, such as the removed `currentNode` field in `space.spy.yaml`?
+- **Q2.** Member cohesion makes chains complete but larger (`persistedUserClock` spans
   15 test nodes). Should it stay, or should those changes show as linked but outside?
-- **Q4.** How should chains inside a family be ordered: by level (as now), or by what is
+- **Q3.** How should chains inside a family be ordered: by level (as now), or by what is
   left to review?
-- **Q5.** For large graphs, should busy levels collapse into "+N more" (as now), or
+- **Q4.** For large graphs, should busy levels collapse into "+N more" (as now), or
   should nodes be grouped by file?
+- **Q5.** The old side needs its own checkout and `pub get`. Should its language server
+  run on demand, or always in the background?
 
 ## History
 
@@ -226,6 +239,9 @@ From the review of v3:
     - show a chain of chains;
     - fold hunks on review;
     - collapsing one hunk folded others.
+- **v4:** the chain map, focus on node click, auto-folding hunks, dark palette.
+  - Feedback: removed code should link the same way, with a language server of its own,
+    and the map should be the first screen.
 
 ## References
 

@@ -1,7 +1,7 @@
 // Review core, build-time pass. Deterministic: the same commits, grammar and language
 // server always produce the same model.
 //
-//   node analyze.js <repo> <head-worktree> <diff.json> <defs.json> <out.json>
+//   node analyze.js <repo> <head-worktree> <diff.json> <defs.json> <out.json> [<compare>:<old-worktree>:<old-defs.json> ...]
 //
 // 1. Edits: tokens of each change block are diffed (core.js); each run of changed tokens
 //    is an edit. For Dart, tree-sitter names the edit: one token replaced by another
@@ -17,7 +17,9 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const [REPO, HEADDIR, DIFF, DEFS, OUT] = process.argv.slice(2);
+const [REPO, HEADDIR, DIFF, DEFS, OUT, ...OLD_ARGS] = process.argv.slice(2);
+// The old side of each comparison has its own checkout and language-server answers.
+const OLD = Object.fromEntries(OLD_ARGS.map((a) => { const [name, dir, defs] = a.split(':'); return [name, { dir: path.resolve(dir) + '/', raw: JSON.parse(fs.readFileSync(defs, 'utf8')).raw }]; }));
 const HEAD = path.resolve(HEADDIR) + '/';
 const DEPS = process.env.BCR_DEPS || path.join(__dirname, 'node_modules');
 const { Parser, Language } = require(DEPS + '/web-tree-sitter/tree-sitter.cjs');
@@ -275,6 +277,51 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       usesOf.get(u.b).set(dk, true);
     }
 
+    // Removed lines link the same way, through the old side's language server.
+    const old = OLD[name];
+    const minusRow = new Map();
+    files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '-') minusRow.set(f.p + ':' + r.o, { f, b, r }); })));
+    if (old) {
+      for (const [key, [tpath, tl, tc]] of Object.entries(old.raw)) {
+        const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
+        const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
+        const u = minusRow.get(p + ':' + line);
+        if (!u || !tpath.startsWith(old.dir) || !changedCol(u.r, col)) continue;
+        const rel = tpath.slice(old.dir.length);
+        const d = minusRow.get(rel + ':' + (tl + 1));
+        if (!d || d.b === u.b) continue;
+        const dk = `old:${rel}:${tl + 1}:${tc}`;
+        if (!decls.has(dk)) {
+          const tok = d.r.toks.find((t) => t.c === tc) || d.r.toks.find((t) => t.c + 1 === tc);
+          const at = memberAt(d.f.oldTree, tl + 1, ' '.repeat(tc) + 'x');
+          decls.set(dk, { key: dk, name: tok ? tok.t.replace(/^@/, '') : '?', kind: declKind(d.f.oldTree, tl + 1, tc), block: d.b, users: new Set(), member: at && at.member, test: at && at.test, line: tl + 1, file: rel, removed: true });
+        }
+        decls.get(dk).users.add(u.b);
+        if (!usesOf.has(u.b)) usesOf.set(u.b, new Map());
+        usesOf.get(u.b).set(dk, true);
+      }
+      // A declaration whose name token was replaced is one declaration: its old usages
+      // join the new name.
+      edits.forEach((e) => {
+        if (e.op !== 'token' || e.where !== 'declaration') return;
+        const od = e.atom.del[0], nd = e.atom.ins[0];
+        const ot = old.raw[`${e.block.file.p}:${od.row.o}:${od.tk.c}`];
+        if (!ot || ot[0] !== old.dir + e.block.file.p || ot[1] !== od.row.o - 1 || ot[2] !== od.tk.c) return;
+        const ok = `old:${e.block.file.p}:${od.row.o}:${od.tk.c}`, nk = `${e.block.file.p}:${nd.row.n}:${nd.tk.c}`;
+        const oldD = decls.get(ok);
+        if (!oldD) return;
+        let newD = decls.get(nk);
+        if (!newD) {
+          const at = memberAt(e.block.file.newTree, nd.row.n, ' '.repeat(nd.tk.c) + 'x');
+          newD = { key: nk, name: nd.tk.t, kind: declKind(e.block.file.newTree, nd.row.n, nd.tk.c), block: e.block, users: new Set(), member: at && at.member, test: at && at.test, line: nd.row.n, file: e.block.file.p, renamedFrom: oldD.name };
+          decls.set(nk, newD);
+        }
+        oldD.users.forEach((u) => { newD.users.add(u); const m = usesOf.get(u); m.delete(ok); m.set(nk, true); });
+        newD.renamedFrom = oldD.name;
+        decls.delete(ok);
+      });
+    }
+
     // ---------- chains
     const allBlocks = files.flatMap((f) => f.blocks).filter((b) => b.atoms.length);
     const parent = new Map(allBlocks.map((b) => [b, b]));
@@ -318,6 +365,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     });
     const label = (d) => {
       if (!d) return '(changes)';
+      if (d.removed) return '− ' + label({ ...d, removed: false });
       let m = d.member;
       const ctor = m && /^([\w$]+)\.\1$/.exec(m);
       if (ctor) m = ctor[1];
@@ -402,7 +450,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       });
       c.focus = {};
       decls.forEach((d) => {
-        if (!c.blocks.has(d.block)) return;
+        if (!c.blocks.has(d.block) || d.removed) return;
         const inChainUsers = [...d.users].filter((u) => c.blocks.has(u));
         if (!inChainUsers.length && d !== c.root) return;
         (c.focus[d.block.id] = c.focus[d.block.id] || new Set()).add(d.line);

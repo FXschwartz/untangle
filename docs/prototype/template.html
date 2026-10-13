@@ -345,11 +345,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v4 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v5 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
-    <p class="lede">A review tool that starts from chains of related changes and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. Chains link into a map, so you can see which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
+    <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v3: renames, same changes and member edits now join chains, so 48 changes stay outside instead of 104. A chain map shows how chains use each other. Each chain shows its total diff. Clicking a graph node focuses on it. A hunk folds when its last change is reviewed, and each view has its own hunks. The palette is dark and the syntax colors are stronger.</p>
+    <p class="changed">Changed since v4: removed lines get their own language server, run on the old side of the comparison. They link into chains the same way added lines do, and have go to definition. A renamed declaration’s old and new usages are one chain. The chain map is the first screen.</p>
   </header>
 
   <section class="section" id="try">
@@ -359,10 +359,10 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <p class="section-intro prose">This viewer shows <a href="https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168">serverpod_offline_sync #168</a> as the rules see it. One build-time pass ran git, tree-sitter and the Dart analysis server (the one VS Code uses) over the PR. Nothing in it was written by hand for this PR.</p>
     </header>
     <ul class="try">
-      <li><b>Open the chain map</b> at the top of the list. It lays 47 linked chains out in 9 levels. Click one to open it.</li>
+      <li><b>Start on the chain map.</b> It lays the 52 linked chains out in 9 levels. Click a chain to open it.</li>
       <li><b>Click a node</b> in a chain’s graph to show only that member’s code. Click it again, or “Show all”, to go back.</li>
       <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted. When a hunk’s last change is reviewed, the hunk folds.</li>
-      <li><b>Click an identifier</b> to peek at its definition, as resolved by the Dart analysis server.</li>
+      <li><b>Click an identifier</b> to peek at its definition, on added and removed lines alike. Each side has its own Dart analysis server.</li>
       <li><b>Switch</b> to the split layout, search the changes, or compare with “Reviewed at 0540639”.</li>
     </ul>
 
@@ -387,7 +387,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
         <div class="vw-main" id="vw-main"><div class="empty">Loading the model…</div></div>
       </div>
     </div>
-    <p class="muted" style="font-size:13.5px">Your marks are saved in this browser only. Go to definition works on the head side (added and unchanged lines). Generated files with more than 2,000 changed lines are listed without content.</p>
+    <p class="muted" style="font-size:13.5px">Your marks are saved in this browser only. Go to definition works on both sides: the PR head for added and unchanged lines, the old side for removed ones. Generated files with more than 2,000 changed lines are listed without content.</p>
   </section>
 
   <section class="section" id="rules">
@@ -401,7 +401,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
         <div class="rule-text">
           <span class="rule-k">Chains</span>
           <p class="pain"><b>Pain:</b> one change spans files, and today you rebuild it by jumping between them.</p>
-          <p>A changed line that uses something declared on another changed line links the two changes. The language server decides what a name refers to. Changes join a chain in five ways:</p>
+          <p>A changed line that uses something declared on another changed line links the two changes. The language server decides what a name refers to: one runs on the PR head for added lines, another on the old side for removed lines. A declaration whose name was replaced is one declaration, so its old and new usages link to it. Changes join a chain in five ways:</p>
           <ul>
             <li><b>Parameters and local variables pass a chain on.</b> A new parameter, the calls that now pass it, and the parameter those calls needed are one chain.</li>
             <li><b>A changed function, method, field or type starts a chain</b> with the changes that use it. A member’s chain and the ripple of its own parameters are one chain.</li>
@@ -409,18 +409,17 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>A chain takes every change of the members it touches.</b> In test files that means the enclosing test. A doc comment counts with the declaration it documents.</li>
             <li><b>Imports and docs follow.</b> A new import joins the chains that use what it imports in that file. A Markdown change that names a chain’s member in backticks joins that chain.</li>
           </ul>
-          <p class="num">In #168, 339 of the 387 changes fall into 59 chains, 31 of them across files. <code>mergeChanges(userId)</code> is the largest: 184 changes in 38 files, drawn as 11 nodes. <code>recordSyncCheckpoint(spaceId)</code>, the <code>userId → spaceId</code> rename, has 16 changes in 6 files.</p>
+          <p class="num">In #168, 343 of the 387 changes fall into 64 chains, 34 of them across files. <code>mergeChanges(userId)</code> is the largest: 184 changes in 38 files, drawn as 11 nodes. <code>recordSyncCheckpoint(spaceId)</code>, the <code>userId → spaceId</code> rename, has 16 changes in 6 files. Ten chains start at a removed declaration, such as <code>− OfflineSyncSpaceManager._getOrCreate(transaction)</code> with its 14 changes.</p>
         </div>
         <div class="rule-text">
-          <span class="rule-k">Why 48 changes stay outside</span>
-          <p>The rest have nothing a rule can link:</p>
+          <span class="rule-k">Why 44 changes stay outside</span>
+          <p>The rest have nothing a rule can link yet:</p>
           <ul>
-            <li><b>14 only remove code.</b> There is no language server on removed lines, as decided in the v2 review.</li>
-            <li><b>13 are Markdown</b> that names nothing in a chain.</li>
+            <li><b>13 are Markdown or model YAML</b> with no language server, naming nothing in a chain.</li>
             <li><b>12 only change comments</b> of members that are in no chain.</li>
-            <li><b>9 are local edits</b> that use only unchanged code or declarations inside the same change.</li>
+            <li><b>19 are Dart edits</b> that use only unchanged code. Many use <code>OfflineSyncSpace.currentNode</code>, a field that only exists in generated code, so nothing reviewed declares it.</li>
           </ul>
-          <p>Removed code is the main gap. One way to close it is to match a removed declaration’s name with removed usages, using tree-sitter on the old side.</p>
+          <p>Linking through generated code back to the model it comes from (<code>space.spy.yaml</code> here) would catch most of the last group.</p>
         </div>
       </div>
 
@@ -429,7 +428,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
           <span class="rule-k">Chain of chains</span>
           <p class="pain"><b>Pain:</b> a big change is several chains that build on each other.</p>
           <p>Each chain has a core: the changes of its root’s member. Chain A uses chain B when A’s core uses a function, method, field or type in B’s core. That gives a hierarchy. Chains that nothing uses come first, and each level depends on the next.</p>
-          <p class="num">In #168 the main family has 47 chains in 9 levels. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
+          <p class="num">In #168 the main family has 52 chains in 9 levels. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
         </div>
         <div class="rule-text">
           <span class="rule-k">Same change</span>
@@ -466,7 +465,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 and v3 reviews</h2>
+      <h2>Answers from the v2 to v4 reviews</h2>
     </header>
     <ol class="decide">
       <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another.</span></li>
@@ -474,10 +473,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Storage</span><span>Snapshots live locally first.</span></li>
       <li><span class="q">Chains</span><span>A whole chain can be marked reviewed at once. Chains are the main navigation, each with a graph, its total diff and a place in the chain map.</span></li>
       <li><span class="q">Generated</span><span>Not reviewed, but peekable.</span></li>
-      <li><span class="q">LSP</span><span>Not on removed lines, for now.</span></li>
+      <li><span class="q">LSP</span><span>On both sides: removed lines get go to definition and link into chains like added lines.</span></li>
       <li><span class="q">Layout</span><span>Choosable, unified by default.</span></li>
       <li><span class="q">Hiding</span><span>Reviewed code is never hidden. Only hunks fold, including on their own when fully reviewed.</span></li>
       <li><span class="q">Graph</span><span>Clicking a node focuses on it and filters the code to it.</span></li>
+      <li><span class="q">First screen</span><span>The chain map.</span></li>
     </ol>
   </section>
 
@@ -489,7 +489,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
     </header>
     <div class="musts">
       <div class="must"><h3>Syntax highlighting</h3><p>The editor’s grammar colors both sides of the diff. The core uses tree-sitter for its own analysis.</p></div>
-      <div class="must"><h3>Go to definition</h3><p>The right side of the diff is the real file in a checkout of the PR head, so the project’s language server works as usual. The same server provides the links that build chains.</p></div>
+      <div class="must"><h3>Go to definition</h3><p>Both sides of the diff are real files in checkouts: the PR head on the right, the old side on the left. Each has the project’s language server, which also provides the links that build chains.</p></div>
       <div class="must"><h3>Search</h3><p>The editor’s search covers the repository. The extension adds a search over the changes you haven’t reviewed.</p></div>
     </div>
   </section>
@@ -513,11 +513,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <h2>Open questions</h2>
     </header>
     <ol class="q-list">
-      <li><span class="q">Q1</span><span><b>Removed code:</b> should a removed declaration’s name link the removed usages, using tree-sitter on the old side? That is most of what is left outside chains.</span></li>
-      <li><span class="q">Q2</span><span><b>Should the chain list lead with families?</b> The map could be the first screen, with chains inside it, instead of a list.</span></li>
-      <li><span class="q">Q3</span><span><b>Member cohesion:</b> it makes chains complete but larger (<code>persistedUserClock</code> now spans 15 test nodes). Keep it, or show those changes as linked but outside?</span></li>
-      <li><span class="q">Q4</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
-      <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
+      <li><span class="q">Q1</span><span><b>Model ripples:</b> should usages of generated declarations link back to the model change they come from, such as a removed <code>currentNode</code> field in <code>space.spy.yaml</code>?</span></li>
+      <li><span class="q">Q2</span><span><b>Member cohesion:</b> it makes chains complete but larger (<code>persistedUserClock</code> spans 15 test nodes). Keep it, or show those changes as linked but outside?</span></li>
+      <li><span class="q">Q3</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
+      <li><span class="q">Q4</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
+      <li><span class="q">Q5</span><span><b>Cost of two language servers:</b> the old side needs its own checkout and <code>pub get</code>. Run it on demand, or always in the background?</span></li>
     </ol>
   </section>
 
@@ -543,6 +543,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 <script type="application/json" id="d-model">/*MODEL*/</script>
 <script type="application/json" id="d-defs">/*DEFS*/</script>
 <script type="application/json" id="d-refs">/*REFS*/</script>
+<script type="application/json" id="d-defs-old">/*DEFSOLD*/</script>
 <script>
 /*VIEWER*/
 </script>

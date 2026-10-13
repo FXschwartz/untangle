@@ -9,7 +9,7 @@ core, viewer, analyze = read('core.js'), read('viewer.js'), read('analyze.js')
 for src in (core, viewer, analyze):
     assert '</script' not in src
 parts = (('/*CORE*/', core), ('/*ANALYZE*/', analyze.replace('&', '&amp;').replace('<', '&lt;')), ('/*VIEWER*/', viewer),
-         ('/*MODEL*/', js_json('model.json')), ('/*DEFS*/', js_json('defs_slim.json')), ('/*REFS*/', js_json('refs.json')))
+         ('/*MODEL*/', js_json('model.json')), ('/*DEFS*/', js_json('defs_slim.json')), ('/*REFS*/', js_json('refs.json')), ('/*DEFSOLD*/', js_json('defs_old_slim.json')))
 for key, val in parts:
     assert page.count(key) == 1, key
     page = page.replace(key, val)

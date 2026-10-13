@@ -1,4 +1,4 @@
-// Prototype viewer v4: chains first, code second. It only renders the model built by
+// Prototype viewer v5: the chain map first, then chains, then code. It only renders the model built by
 // analyze.js (git + tree-sitter + Dart language server) and keeps your review marks.
 (function () {
   'use strict';
@@ -7,6 +7,7 @@
   const MODEL = JSON.parse($('#d-model').textContent);
   const DEFS = JSON.parse($('#d-defs').textContent);
   const REFS = JSON.parse($('#d-refs').textContent);
+  const DEFS_OLD = JSON.parse($('#d-defs-old').textContent);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const trunc = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
   const fileName = (p) => p.slice(p.lastIndexOf('/') + 1);
@@ -22,13 +23,13 @@
   // ---------- state
   const state = {
     compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
-    view: { kind: 'chain', id: 0 }, prevView: null, peek: null, focus: null,
+    view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null,
     rev: { base: new Set(), since: new Set() },
     blockDiff: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
     search: { q: '', scope: 'unreviewed' },
   };
   try {
-    const saved = JSON.parse(localStorage.getItem('bcr-v4') || 'null');
+    const saved = JSON.parse(localStorage.getItem('bcr-v5') || 'null');
     if (saved) {
       state.rev.base = new Set(saved.rev.base || []);
       state.rev.since = new Set(saved.rev.since || []);
@@ -38,7 +39,7 @@
   } catch (e) { /* storage unavailable */ }
   function save() {
     try {
-      localStorage.setItem('bcr-v4', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
+      localStorage.setItem('bcr-v5', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
     } catch (e) { /* ignore */ }
   }
 
@@ -142,10 +143,15 @@
     const arr = n != null && DEFS.defs[path] && DEFS.defs[path][n];
     return arr ? new Map(arr.map(([c, , ti]) => [c, ti])) : null;
   }
+  function oldLineDefs(path, o) {
+    const d = DEFS_OLD[state.compare];
+    const arr = o != null && d && d.defs[path] && d.defs[path][o];
+    return arr ? new Map(arr.map(([c, , ti]) => [c, ti])) : null;
+  }
   function codeHtml(f, text, ranges, opts) {
     const toks = C.tokenize(text, f.lang);
     const marks = ranges && opts.emphasis ? new Map(ranges.map(([s, , id]) => [s, id])) : null;
-    const defs = opts.n != null && opts.refs ? lineDefs(f.p, opts.n) : null;
+    const defs = !opts.refs ? null : opts.n != null ? lineDefs(f.p, opts.n) : opts.o != null ? oldLineDefs(f.p, opts.o) : null;
     const nextCode = (i) => { for (let j = i + 1; j < toks.length; j++) if (toks[j].k !== 'ws') return toks[j]; return null; };
     return toks.map((tk, i) => {
       if (tk.k === 'ws') return esc(tk.t);
@@ -155,7 +161,7 @@
       if (defs && (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann')) {
         const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
         const ti = defs.get(col);
-        if (ti !== undefined) { cls += ' ref'; attrs = ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-n="${opts.n}" title="Peek definition"`; }
+        if (ti !== undefined) { cls += ' ref'; attrs = opts.n != null ? ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-n="${opts.n}" title="Peek definition"` : ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-o="${opts.o}" title="Peek definition (old side)"`; }
       }
       return `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
     }).join('');
@@ -187,13 +193,17 @@
     return state.showReviewedDiff ? '' : `<button type="button" class="dt" data-act="toggle-diff" data-block="${esc(b.id)}">${shown ? 'Hide diff' : 'Show diff'}</button>`;
   }
   function peekAfter(f, n) {
-    return state.peek && state.peek.path === f.p && state.peek.n === n ? peekHtml(state.peek) : '';
+    return state.peek && !state.peek.old && state.peek.path === f.p && state.peek.n === n ? peekHtml(state.peek) : '';
+  }
+  function peekAfterOld(f, o) {
+    return state.peek && state.peek.old && state.peek.path === f.p && state.peek.o === o ? peekHtml(state.peek) : '';
   }
   // One unified row.
   function uRow(f, meta, text, ranges, o) {
     const sign = o.sign != null ? o.sign : meta.t === '+' ? '+' : meta.t === '-' ? '−' : '';
     const n = meta.t !== '-' ? meta.n : null;
-    return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, refs: o.refs })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : '');
+    const oldNo = meta.t === '-' ? meta.o : null;
+    return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '');
   }
   // Rows [start, end) of a hunk. Reviewed changes stay visible: by default their diff is
   // hidden and the new code reads as muted context.
@@ -240,7 +250,8 @@
     const n = side === 'r' ? meta.n : null;
     const num = side === 'l' ? meta.o : meta.n;
     const sign = o.sign != null ? o.sign : side === 'l' && meta.t === '-' ? '−' : side === 'r' && meta.t === '+' ? '+' : '';
-    return `<span class="half ${side} ${o.cls || ''}"><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, refs: side === 'r' && o.refs })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
+    const oldNo = side === 'l' && meta.t === '-' ? meta.o : null;
+    return `<span class="half ${side} ${o.cls || ''}"><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false) })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
   }
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
@@ -280,7 +291,7 @@
           out += `<div class="sl${d ? ' rvd' : ''}${other}" data-n="${am ? am.n : ''}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>`
             + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis })
             + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '' })
-            + '</div>' + (am ? peekAfter(f, am.n) : '');
+            + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '');
         }
       }
       ri = bEnd;
@@ -337,14 +348,14 @@
   function peekHtml(p) {
     let h = '<div class="peek" role="region" aria-label="Peek">';
     if (p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti)) {
-      const t = DEFS.targets[p.ti];
-      const where = t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package';
+      const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : DEFS.targets[p.ti];
+      const where = (p.old ? `old side · ${M().raw.left} · ` : '') + (t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package');
       h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>
         <div class="pk-code">${t.code.map((line, i) => {
           const ln = t.s + i;
           return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${C.tokenize(line, 'dart').map((tk) => (tk.k === 'ws' ? esc(tk.t) : `<span class="t-${tk.k}">${esc(tk.t)}</span>`)).join('')}</span></div>`;
         }).join('')}</div>`;
-      if (t.w === 'repo' && M().head.has(t.p + ':' + t.l) && !(t.p === p.path && t.l === p.n)) {
+      if (!p.old && t.w === 'repo' && M().head.has(t.p + ':' + t.l) && !(t.p === p.path && t.l === p.n)) {
         h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
       }
     }
@@ -744,7 +755,7 @@
     if (d.compare) {
       if (state.compare === d.compare) return;
       state.compare = d.compare; state.peek = null;
-      state.view = { kind: 'chain', id: 0 }; state.focus = null;
+      state.view = { kind: 'map', family: null }; state.focus = null;
       return render({ top: true });
     }
     if (d.layout) { state.layout = d.layout; save(); return render(); }
@@ -758,6 +769,12 @@
       return render(same ? {} : { section: node });
     }
     if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
+    if (t.classList.contains('ref') && d.o !== undefined) {
+      const path = d.path, o = Number(d.o), col = Number(d.col);
+      const same = state.peek && state.peek.old && state.peek.path === path && state.peek.o === o && state.peek.col === col;
+      state.peek = same ? null : { old: true, path, o, col, ti: Number(d.ti) };
+      return render();
+    }
     if (t.classList.contains('ref')) {
       const path = d.path, n = Number(d.n), col = Number(d.col);
       const key = `${path}:${n}:${col}`;
@@ -819,7 +836,7 @@
     qTimer = setTimeout(() => {
       state.search.q = qInput.value;
       if (qInput.value.trim()) { if (state.view.kind !== 'search') state.prevView = state.view; state.view = { kind: 'search' }; }
-      else if (state.view.kind === 'search') state.view = state.prevView || { kind: 'chain', id: 0 };
+      else if (state.view.kind === 'search') state.view = state.prevView || { kind: 'map', family: null };
       render({ top: true });
     }, 150);
   });
