@@ -1,8 +1,8 @@
-# UX proposal v3: review by chain, end in the code
+# UX proposal v4: review by chain, end in the code
 
-> Draft v3, 2026-10-13. Replaces v2 (see "History" at the end).
+> Draft v4, 2026-10-13. Replaces v3 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 3).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 5).
 > Prototype sources: [prototype/](prototype/).
 
 ## Requirements
@@ -21,6 +21,17 @@ From the review of v2:
   Its diff is hidden by default, with a button to show it again.
 - **Only hunks can be collapsed.**
 - **Opening a "same edit" shows the whole edit,** including multi-line ones.
+
+From the review of v3:
+- **A hunk folds on its own** when its last change is marked reviewed.
+- **Renames and same changes belong in chains,** for example `userId → spaceId`,
+  `spaceIdFor` and `withCurrentNodeHlc → withUserClock`.
+- **Syntax highlighting** must be clearly visible.
+- **The palette is dark,** black and dark grey instead of blue.
+- **Each chain shows its total diff.**
+- **Clicking a graph node focuses on it and filters the code** instead of jumping to it.
+- **Chains form a hierarchy,** shown as a chain-of-chains view.
+- **Folding one hunk must never fold another.**
 
 ## Decisions (answers to the v2 questions)
 
@@ -45,23 +56,41 @@ From the review of v2:
    another change links the two changes.
 3. **Parameters and local variables pass a chain on.** Union-find runs over changes: a
    parameter or local declared in one change joins it with every change that uses it.
-   That way a new parameter, the calls that pass it, and the parameter those calls needed
-   in turn are one chain.
-4. **A changed function, method, field or type starts its own chain:** its declaration
-   plus the changes that use it. When all of those already sit inside one parameter
-   chain, it belongs to that chain instead.
-5. A chain needs at least two members (enclosing declarations). Chains with the same
-   root name merge.
-6. **Name:** the declaration with the most usages inside the chain, such as
-   `OfflineSyncDatabase.mergeChanges(userId)`.
-7. **Graph:**
-   - one node per changed member;
-   - changes that are all the same change, 3 or more times in the chain, collapse into
-     one node;
-   - arrows go from a change to what it uses;
-   - layers are the distance from the root;
-   - other chains that share changes or roots are listed as linked chains.
-8. Changes in no chain are listed by file under "Not in a chain".
+4. **A changed function, method, field or type starts a chain:** its declaration plus the
+   changes that use it. A member's chain and the ripple of its own parameters merge.
+5. **A same-change group that names an identifier is a chain,** so a rename like
+   `withCurrentNodeHlc → withUserClock` is tracked together.
+6. **Member cohesion.** A chain takes every change of the members it touches.
+   - In test files, the member is the enclosing `test(...)`.
+   - A comment-only change belongs to the declaration it documents.
+7. **Imports and docs.**
+   - A new relative import joins the chains that, in the same file, use declarations
+     from the imported file.
+   - A Markdown change that names a chain's member or declaration in backticks joins
+     that chain.
+8. A chain needs at least two members; same-change chains need two changes. Changes in
+   no chain are listed by file.
+9. **Name:** the declaration with the most usages inside the chain, or the edit itself
+   for a same-change chain.
+10. **Graph:**
+    - one node per member;
+    - nodes that are all the same change, 3 or more times, collapse into one;
+    - arrows go from a change to what it uses;
+    - layers are the distance from the root.
+11. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
+
+### Chain of chains
+
+- A chain's **core** is the changes of its root's member, or all its changes when it has
+  no root.
+- **Chain A uses chain B** when A's core uses a function, method, field or type in B's
+  core.
+- **Depth** is the longest path from a chain that nothing uses, ignoring back edges of
+  cycles.
+- **Families** are chains connected by "uses".
+- **The chain map** lays a family out by depth:
+  - it draws only direct dependencies (a transitive reduction);
+  - arrows that skip levels are faint.
 
 ### Same change
 
@@ -98,9 +127,15 @@ From the review of v2:
 - **Reviewed changes stay visible.** By default their diff is hidden, so the new code
   reads as muted context. Pure deletions become a single "N removed lines, reviewed" row.
   "Show diff" restores the muted diff, either per change or for all changes.
-- **Only hunks collapse.** The user can collapse any hunk. In a chain view, hunks over
-  150 lines start collapsed, with buttons that jump to the lines that belong to the
-  chain.
+- **Only hunks collapse, and they collapse automatically when their last change is
+  reviewed.** The user can reopen them or collapse any hunk by hand. In a chain view,
+  hunks over 150 lines start collapsed, with buttons that jump to the lines that belong
+  to the chain.
+- **Each view has its own hunks.** A chain section shows each change with 3 lines of
+  context, merged when they touch. Folding a hunk in one place never folds another.
+- **Clicking a graph node** shows only that node's code and dims unrelated nodes.
+- **Dark palette** with VS Code Dark+-style syntax colors. Function names are told apart
+  from other identifiers.
 - **Unified by default, split on demand.** Split pairs removed and added lines per
   change and wraps long lines.
 
@@ -112,21 +147,29 @@ From the review of v2:
 | Change blocks | 387 | 180 |
 | Edits | 822 | 581 |
 | Same-change groups | 53 | 36 |
-| Chains (across files / within a file) | 50 (26 / 24) | 28 (10 / 18) |
-| Changes in a chain / not in a chain | 283 / 104 | 64 / 116 |
+| Chains (across files / within a file) | 59 (31 / 28) | 32 (10 / 22) |
+| Changes in a chain / not in a chain | 339 / 48 | 109 / 71 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
-- **Largest chain:** `OfflineSyncDatabase.mergeChanges(userId)`, with 170 changes in 37
-  files, drawn as 9 nodes. It includes `OfflineSyncEngine.mergeInboundBatch(userId)` and
-  `_transactionAs`. The 154 identical call-site edits are one node.
-- **Largest same-change groups:**
-  - `spaceId → userId` as a named argument: 156.
-  - `hlcManagerFor → spaceIdFor` as a reference, together with removing
-    `.normalizedSpaceId`: 14.
-  - `nodeUuid → .nodeUuidFor(space)`: 15.
+- **Largest chain:** `OfflineSyncDatabase.mergeChanges(userId)`, with 184 changes in 38
+  files (+2,130 −191), drawn as 11 nodes. The 154 identical call-site edits are one node.
+- **`OfflineSyncDatabase.recordSyncCheckpoint(spaceId)`,** the `userId → spaceId`
+  rename, has 16 changes in 6 files.
+- **Chain of chains:** the main family has 47 chains in 9 levels. Tests use
+  `mergeChanges(userId)`, which uses `_transactionAs` and the recorder wrappers. Those use
+  the space manager and context locks, which use `_UserClock` and the cache fields.
+- **Still outside a chain (48):**
+
+  | Reason | Changes |
+  |---|---:|
+  | Removed code only (no language server on removed lines) | 14 |
+  | Markdown naming nothing in a chain | 13 |
+  | Comment-only edits of members in no chain | 12 |
+  | Local edits using only unchanged code or the same change | 9 |
+
 - **Tooling limit:** the YAML grammar from `tree-sitter-wasms` doesn't load with
-  `web-tree-sitter` 0.25. The `.spy.yaml` and Markdown files therefore fall back to plain
-  token edits.
+  `web-tree-sitter` 0.25. The `.spy.yaml` and Markdown files fall back to plain token
+  edits.
 
 ## Where it runs
 
@@ -151,15 +194,16 @@ From the review of v2:
 
 ## Open questions
 
-- **Q1.** Should fields pass a chain on, like parameters? In #168 that would fold
-  `_userNodes`, `_participations` and `_knownNodes` into `getOrCreateUserNode`'s chain.
-- **Q2.** How should chains be ordered: by size (as now), by dependency, or by what is
+- **Q1.** Should a removed declaration's name link the removed usages, using tree-sitter
+  on the old side? That is most of what is left outside chains.
+- **Q2.** Should the chain map be the first screen, with families leading instead of a
+  list?
+- **Q3.** Member cohesion makes chains complete but larger (`persistedUserClock` spans
+  15 test nodes). Should it stay, or should those changes show as linked but outside?
+- **Q4.** How should chains inside a family be ordered: by level (as now), or by what is
   left to review?
-- **Q3.** Should tests inside a chain be one node per test file (as now), or one node for
-  all tests?
-- **Q4.** Should changes in no chain (104 here) be listed by file (as now) or by member?
-- **Q5.** For large graphs, should busy layers collapse into "+N more" (as now), or should
-  nodes be grouped by file?
+- **Q5.** For large graphs, should busy levels collapse into "+N more" (as now), or
+  should nodes be grouped by file?
 
 ## History
 
@@ -173,6 +217,15 @@ From the review of v2:
     generated-file rules.
   - Feedback: navigate by chains with a graph, never hide reviewed code, collapse only
     hunks, and show whole edits.
+- **v3:** chains as the main navigation, tree-sitter same changes, a graph per chain.
+  - Feedback:
+    - too many changes outside chains;
+    - weak highlighting, and a blue look;
+    - add chain totals;
+    - focus on node click instead of jumping;
+    - show a chain of chains;
+    - fold hunks on review;
+    - collapsing one hunk folded others.
 
 ## References
 

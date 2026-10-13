@@ -232,7 +232,21 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         tally.forEach((n, k) => { if (n > bestN) { best = k; bestN = n; } });
         b.member = best;
         b.test = firstTest;
-        b.memberKey = f.p + '::' + (b.member || '(top)');
+        const commentOnly = b.atoms.length && b.atoms.every((a) => a.commentOnly);
+        if (commentOnly && tree) {
+          const src = tree === f.newTree ? f.newSrc : f.oldSrc;
+          const lines = src.split('\n');
+          const after = Math.max(...b.rows.filter((r) => (tree === f.newTree ? r.type === '+' : r.type === '-')).map((r) => line(r)).concat([0]));
+          for (let l = after + 1; l <= Math.min(lines.length, after + 20); l++) {
+            const t = lines[l - 1].trim();
+            if (!t || t.startsWith('//') || t.startsWith('@')) continue;
+            const at = memberAt(tree, l, lines[l - 1]);
+            if (at && at.member) { b.member = at.member; b.documents = true; }
+            break;
+          }
+        }
+        const isTest = /(^|\/)test\//.test(f.p) && (!b.member || b.member === 'main');
+        b.memberKey = f.p + '::' + (isTest && b.test ? 'test:' + b.test : b.member || '(top)');
       }
     }
 
@@ -279,8 +293,23 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       if (owners.size === 1 && [...owners][0]) return; // already inside one ripple chain
       chains.push({ blocks, kind: 'member', root: d });
     });
+    const identToken = (d) => d.tk.k === 'id' || d.tk.k === 'ty' || d.tk.k === 'ann';
+    groups.forEach((g) => {
+      const named = g.edits.some((e) => !e.commentOnly && e.atom.del.concat(e.atom.ins).some(identToken));
+      if (!named) return;
+      const blocks = new Set(g.edits.map((e) => e.block));
+      if (blocks.size < 2) return;
+      const shared = chains.filter((c) => [...blocks].every((b) => c.blocks.has(b)));
+      if (shared.length) return;
+      chains.push({ blocks, kind: 'group', group: g });
+    });
     const memberCount = (c) => new Set([...c.blocks].map((b) => b.memberKey)).size;
-    chains = chains.filter((c) => memberCount(c) > 1);
+    chains = chains.filter((c) => (c.kind === 'group' ? c.blocks.size > 1 : memberCount(c) > 1));
+    // Member cohesion: a chain takes every change of the members it touches (a test counts as
+    // a member in test files; top-level code doesn't).
+    const byMember = new Map();
+    allBlocks.forEach((b) => { if (!b.memberKey.endsWith('::(top)')) { if (!byMember.has(b.memberKey)) byMember.set(b.memberKey, []); byMember.get(b.memberKey).push(b); } });
+    chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => c.blocks.add(x))); });
     chains.forEach((c) => {
       const inside = [...decls.values()].filter((d) => c.blocks.has(d.block)).map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length })).filter((x) => x.n > 0);
       inside.sort((x, y) => y.n - x.n || (x.d.key < y.d.key ? -1 : 1));
@@ -294,19 +323,52 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       if (ctor) m = ctor[1];
       if (d.kind === 'param') return `${m || '?'}(${d.name})`;
       if (ctor && d.name === ctor[1]) return `${ctor[1]}()`;
-      if (d.kind === 'local') return `${m || '?'} · ${d.name}`;
+      if (d.kind === 'local') return `${!m || m === 'main' ? path.basename(d.file) : m} · ${d.name}`;
       return m && m.endsWith(d.name) ? m : m ? `${m.split('.')[0]}.${d.name}` : d.name;
     };
+    const editLabel = (e) => {
+      const t = (x) => (x.length > 48 ? x.slice(0, 47) + '…' : x);
+      return e.op === 'insert' ? '+ ' + t(e.to) : e.op === 'delete' ? '− ' + t(e.from) : t(e.from) + ' → ' + t(e.to);
+    };
     // Chains with the same root name are one chain (a ripple and the star of its root).
+    // A member's own chain and the ripple of one of its parameters are one chain too.
     const byName = new Map();
+    const mergeKey = (c, nm) => (c.root && c.root.kind === 'param' && c.root.member ? label({ ...c.root, kind: 'member', name: c.root.member.split('.').pop() }) : nm);
     chains.forEach((c) => {
-      const nm = label(c.root);
-      if (!byName.has(nm)) { byName.set(nm, c); c.name = nm; return; }
-      const keep = byName.get(nm);
+      const nm = c.kind === 'group' && !c.root ? editLabel(c.group.edits[0]) : label(c.root);
+      const key = mergeKey(c, nm);
+      c.name = nm;
+      if (!byName.has(key)) { byName.set(key, c); return; }
+      const keep = byName.get(key);
+      if (keep.root && keep.root.kind === 'param' && c.root && c.root.kind !== 'param') { keep.name = c.name; }
       c.blocks.forEach((b) => keep.blocks.add(b));
-      c.also.forEach((d) => { if (!keep.also.includes(d) && d !== keep.root) keep.also.push(d); });
+      [c.root, ...c.also].forEach((d) => { if (d && !keep.also.includes(d) && d !== keep.root) keep.also.push(d); });
     });
     chains = [...byName.values()];
+    const namesOf = (c) => {
+      const out = new Set();
+      c.blocks.forEach((b) => { if (b.member && b.member !== 'main') out.add(b.member.split('.').pop()); });
+      decls.forEach((d) => { if (c.blocks.has(d.block) && (d.kind === 'member' || d.kind === 'type')) out.add(d.name); });
+      return out;
+    };
+    const chainNames = chains.map((c) => [c, namesOf(c)]);
+    allBlocks.filter((b) => b.lang === 'md').forEach((b) => {
+      const mentioned = new Set();
+      b.rows.forEach((r) => { if (r.type === '+' || r.type === '-') for (const m of r.text.matchAll(/`([A-Za-z_$][\w$.]*)(?:\(\))?`/g)) mentioned.add(m[1].split('.').pop()); });
+      chainNames.forEach(([c, names]) => { if ([...mentioned].some((x) => names.has(x))) c.blocks.add(b); });
+    });
+    allBlocks.filter((b) => b.lang === 'dart').forEach((b) => {
+      const imported = [];
+      b.rows.forEach((r) => {
+        const m = r.type === '+' && /^\s*import\s+['"]([^'"]+)['"]/.exec(r.text);
+        if (m && !m[1].startsWith('package:') && !m[1].startsWith('dart:')) imported.push(path.normalize(path.join(path.dirname(b.file.p), m[1])));
+      });
+      if (!imported.length) return;
+      chains.forEach((c) => {
+        const uses = [...c.blocks].some((x) => x.file === b.file && [...(usesOf.get(x) || new Map()).keys()].some((dk) => imported.includes(decls.get(dk).file)));
+        if (uses) c.blocks.add(b);
+      });
+    });
     chains.sort((x, y) => y.blocks.size - x.blocks.size || (x.name < y.name ? -1 : 1));
     chains.forEach((c, i) => { c.id = i; c.files = new Set([...c.blocks].map((b) => b.file.p)).size; });
 
@@ -380,7 +442,48 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         chains.forEach((o) => { if (o !== c && o.blocks.has(b)) links.add(o.id); });
       });
       c.links = [...links].sort((x, y) => x - y);
+      c.shares = new Set();
+      chains.forEach((o) => { if (o !== c && [...c.blocks].some((b) => o.blocks.has(b))) c.shares.add(o.id); });
     });
+    // A chain's core is the changes of its root's member (all its changes when it has no root).
+    // Chain A uses chain B when A's core uses a function, method, field or type of B's core.
+    chains.forEach((c) => {
+      const mk = c.root ? c.root.block.memberKey : null;
+      c.core = new Set([...c.blocks].filter((b) => !mk || b.memberKey === mk));
+    });
+    chains.forEach((c) => {
+      c.uses = new Set();
+      c.core.forEach((b) => {
+        (usesOf.get(b) || new Map()).forEach((_, dk) => {
+          const d = decls.get(dk);
+          if (d.kind !== 'member' && d.kind !== 'type' && !chains.some((o) => o.root === d)) return;
+          chains.forEach((o) => { if (o !== c && o.core.has(d.block) && !c.core.has(d.block)) c.uses.add(o.id); });
+        });
+      });
+    });
+    // Depth: longest path from a chain nobody uses, ignoring back edges of cycles.
+    const depth = new Map();
+    const usedBy = new Map(chains.map((c) => [c.id, []]));
+    chains.forEach((c) => c.uses.forEach((o) => usedBy.get(o).push(c.id)));
+    const state = new Map();
+    const order = [];
+    const visit = (id) => { state.set(id, 1); [...chains[id].uses].sort((a, b) => a - b).forEach((o) => { if (!state.has(o)) visit(o); }); state.set(id, 2); order.push(id); };
+    chains.forEach((c) => { if (!state.has(c.id)) visit(c.id); });
+    order.reverse().forEach((id) => {
+      const parents = usedBy.get(id).filter((p) => order.indexOf(p) < order.indexOf(id));
+      depth.set(id, parents.length ? Math.max(...parents.map((p) => depth.get(p) + 1)) : 0);
+    });
+    // Families: chains connected by uses or shared changes.
+    const fam = new Map();
+    let famId = 0;
+    chains.forEach((c) => {
+      if (fam.has(c.id)) return;
+      const stack = [c.id];
+      fam.set(c.id, famId);
+      while (stack.length) { const x = stack.pop(); const ch = chains[x]; [...ch.uses, ...usedBy.get(x)].forEach((y) => { if (!fam.has(y)) { fam.set(y, famId); stack.push(y); } }); }
+      famId++;
+    });
+    chains.forEach((c) => { c.depth = depth.get(c.id); c.family = fam.get(c.id); });
 
     // ---------- serialize
     const fileIndex = new Map(files.map((f, i) => [f, i]));
@@ -397,11 +500,11 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           }
           return row;
         }) })),
-        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, edits: b.edits.map((e) => e.id) })),
+        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, documents: b.documents || undefined, edits: b.edits.map((e) => e.id) })),
       })),
       edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan })),
       groups: groups.map((g) => ({ id: g.id, count: g.count, files: g.files, parts: g.parts.map((p) => p.edits[0].id), edits: g.edits.map((e) => e.id) })),
-      chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, links: c.links, focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),
+      chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, links: c.links, uses: [...c.uses].sort((a, b) => a - b), shares: [...c.shares].sort((a, b) => a - b), depth: c.depth, family: c.family, adds: [...c.blocks].reduce((x, b) => x + b.adds, 0), dels: [...c.blocks].reduce((x, b) => x + b.dels, 0), focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),
       generated: generated.map((f) => ({ p: f.p, s: f.s, a: f.a, d: f.d, gen: f.gen, hunks: f.hunks ? f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, rows: h.l.map((l) => [l[0], l.slice(1)]) })) : null })),
     };
     out.compares[name] = ser;

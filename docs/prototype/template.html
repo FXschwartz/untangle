@@ -3,73 +3,49 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
 <style>
-/* Layout: a reading column (~68ch) for the argument; the working prototype breaks out to the full 1280px width and behaves like an editor pane. */
+/* Layout: a reading column (~68ch) for the argument; the working prototype breaks out to the full 1280px width and behaves like an editor pane. Deliberately dark-only: near-black and greys, with color reserved for code and review state. */
 :root {
-  --paper: #F4F6F9;
-  --surface: #FFFFFF;
-  --surface-2: #EEF1F5;
-  --surface-3: #E3E8EF;
-  --ink: #161A21;
-  --ink-2: #434B59;
-  --ink-3: #636C7D;
-  --line: #DCE1E8;
-  --line-2: #C6CED9;
-  --accent: #3A5BE0;
-  --accent-ink: #2A45B5;
-  --on-accent: #FFFFFF;
-  --mark: #FFE68A;
-  --mark-ink: #5C4300;
-  --mark-strong: #B98500;
-  --fold: #1F9A87;
-  --fold-bg: #E1F2EE;
-  --fold-ink: #0C5649;
-  --add-bg: #EAF6EE;
-  --add-strong: #BCE5C8;
-  --add-ink: #17663A;
-  --del-bg: #FCEDEC;
-  --del-strong: #F5C4BF;
-  --del-ink: #A1251B;
-  --rev-bg: #D8EFE9;
-  --hunk-bg: #EEF1F7;
-  --syn-kw: #8E3FB8;
-  --syn-ty: #0F6F94;
-  --syn-str: #A0461A;
-  --syn-num: #8F5600;
-  --syn-com: #687182;
-  --syn-ann: #806300;
-  --syn-op: #4A5261;
-  --shadow: 0 1px 0 rgba(22, 26, 33, .04), 0 18px 40px -24px rgba(22, 34, 60, .35);
+  --paper: #09090B;
+  --surface: #111113;
+  --surface-2: #18181B;
+  --surface-3: #222226;
+  --ink: #EDEDEF;
+  --ink-2: #B4B4BA;
+  --ink-3: #85858D;
+  --line: #242428;
+  --line-2: #36363C;
+  --accent: #EDEDEF;
+  --accent-ink: #EDEDEF;
+  --on-accent: #09090B;
+  --mark: #3A2C08;
+  --mark-ink: #F2C14E;
+  --mark-strong: #D6A03A;
+  --fold: #3DB58C;
+  --fold-bg: #0F2A21;
+  --fold-ink: #7FD9B6;
+  --add-bg: #0E2216;
+  --add-strong: #1F5233;
+  --add-ink: #7EE2A0;
+  --del-bg: #2A0F12;
+  --del-strong: #6B2329;
+  --del-ink: #FF9B95;
+  --rev-bg: #123329;
+  --hunk-bg: #151518;
+  --syn-kw: #C586C0;
+  --syn-ty: #4EC9B0;
+  --syn-str: #CE9178;
+  --syn-num: #B5CEA8;
+  --syn-com: #6A9955;
+  --syn-ann: #DCDCAA;
+  --syn-fn: #DCDCAA;
+  --syn-id: #9CDCFE;
+  --syn-op: #CCCCCC;
+  --shadow: 0 1px 0 rgba(0, 0, 0, .4), 0 24px 48px -28px rgba(0, 0, 0, .9);
   --font-display: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-body: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0E1116; --surface: #161A21; --surface-2: #1B2029; --surface-3: #232A35;
-    --ink: #E7EAF0; --ink-2: #B7BECB; --ink-3: #8E97A7; --line: #29303C; --line-2: #374050;
-    --accent: #7F95F5; --accent-ink: #A9B8FF; --on-accent: #0E1116;
-    --mark: #4A3B07; --mark-ink: #FFE08A; --mark-strong: #C99A1E;
-    --fold: #2E9F8E; --fold-bg: #0F2E29; --fold-ink: #84DCCB;
-    --add-bg: #12261A; --add-strong: #1F5233; --add-ink: #79D99A; --del-bg: #2C1517; --del-strong: #66282B; --del-ink: #FF9A94;
-    --rev-bg: #123A33; --hunk-bg: #1A2130;
-    --syn-kw: #D39BF2; --syn-ty: #6FC3E3; --syn-str: #EBA77C; --syn-num: #F2BE6A; --syn-com: #8E97A7; --syn-ann: #E8C766; --syn-op: #AEB6C3;
-    --shadow: 0 1px 0 rgba(0, 0, 0, .3), 0 18px 40px -24px rgba(0, 0, 0, .8);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --paper: #0E1116; --surface: #161A21; --surface-2: #1B2029; --surface-3: #232A35;
-  --ink: #E7EAF0; --ink-2: #B7BECB; --ink-3: #8E97A7; --line: #29303C; --line-2: #374050;
-  --accent: #7F95F5; --accent-ink: #A9B8FF; --on-accent: #0E1116;
-  --mark: #4A3B07; --mark-ink: #FFE08A; --mark-strong: #C99A1E;
-  --fold: #2E9F8E; --fold-bg: #0F2E29; --fold-ink: #84DCCB;
-  --add-bg: #12261A; --add-strong: #1F5233; --add-ink: #79D99A; --del-bg: #2C1517; --del-strong: #66282B; --del-ink: #FF9A94;
-  --rev-bg: #123A33; --hunk-bg: #1A2130;
-  --syn-kw: #D39BF2; --syn-ty: #6FC3E3; --syn-str: #EBA77C; --syn-num: #F2BE6A; --syn-com: #8E97A7; --syn-ann: #E8C766; --syn-op: #AEB6C3;
-  --shadow: 0 1px 0 rgba(0, 0, 0, .3), 0 18px 40px -24px rgba(0, 0, 0, .8);
   color-scheme: dark;
 }
-
 * { box-sizing: border-box; }
 body { background: var(--paper); color: var(--ink); font: 400 16px/1.6 var(--font-body); -webkit-font-smoothing: antialiased; }
 .page { max-width: 1280px; margin: 0 auto; padding-inline: 20px; padding-block: 48px 96px; display: grid; gap: 80px; }
@@ -79,7 +55,7 @@ h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); line-height: 1.04; font-weight: 800;
 h2 { font-size: clamp(1.6rem, 3vw, 2rem); line-height: 1.15; font-weight: 700; letter-spacing: -0.015em; }
 h3 { font-size: 1.12rem; line-height: 1.3; font-weight: 700; }
 p { margin: 0; }
-a { color: var(--accent-ink); text-underline-offset: 3px; }
+a { color: var(--ink); text-decoration-color: var(--ink-3); text-underline-offset: 3px; }
 code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .prose code, li code, .rule code, .note code, figcaption code, .q-list code, .pieces code, .plan code, .decide code {
   background: var(--surface-3); padding: .08em .35em; border-radius: 4px; overflow-wrap: anywhere;
@@ -109,9 +85,21 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
 .btn.sm { font-size: 12.5px; padding: 6px 10px; }
 .btn.xs { font-size: 11.5px; padding: 4px 8px; }
-.linkish { appearance: none; border: 0; background: none; padding: 0; color: var(--accent-ink); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: left; }
+.linkish { appearance: none; border: 0; background: none; padding: 0; color: var(--ink); text-decoration-color: var(--ink-3); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: left; }
 .chip-btn { appearance: none; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font: 500 11.5px/1.2 var(--font-mono); padding: 4px 8px; border-radius: 999px; cursor: pointer; }
-.chip-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+.chip-btn:hover { border-color: var(--ink-2); }
+.chip-btn.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.dstat { display: inline-flex; gap: 6px; align-items: center; font: 600 11.5px/1 var(--font-mono); }
+.dstat .sq { display: inline-flex; gap: 2px; }
+.dstat .sq i { width: 8px; height: 8px; border-radius: 1px; display: inline-block; }
+.dstat .sa { background: var(--add-ink); } .dstat .sd { background: var(--del-ink); }
+.focus-bar { position: sticky; left: 0; top: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.focus-bar .sp { flex: 1; }
+.fv-sub.hier { gap: 6px 8px; }
+.map-link { font-size: 12px; margin-left: 4px; }
+.sb-row.map .st { background: var(--ink); border-color: var(--ink); border-radius: 50%; }
+.graph-scroll.tall { max-height: 640px; }
+.hh-done .hh-tx { color: var(--fold-ink); }
 
 /* Viewer */
 .vw { background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: min(900px, 92vh); }
@@ -141,7 +129,7 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 0 4px 6px; background: var(--surface-3); border-radius: 9px; }
 .tabs button { appearance: none; border: 0; background: transparent; color: var(--ink-2); font: 600 12.5px/1 var(--font-body); padding: 8px; border-radius: 6px; cursor: pointer; }
 .tabs button span { font-family: var(--font-mono); font-weight: 500; color: var(--ink-3); margin-left: 4px; }
-.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
 .sb-h { display: flex; justify-content: space-between; gap: 8px; font: 600 10.5px/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 14px 8px 6px; }
 .sb-hn { letter-spacing: 0; text-transform: none; font-weight: 500; }
 .sb-dir { font: 400 11px/1.4 var(--font-mono); color: var(--ink-3); padding: 8px 8px 2px; overflow-wrap: anywhere; }
@@ -177,10 +165,13 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .g-node { cursor: pointer; }
 .g-box { fill: var(--surface); stroke: var(--line-2); stroke-width: 1.2; }
 .g-node.root .g-box { stroke: var(--ink); stroke-width: 1.8; }
+.g-node.focus .g-box { stroke: var(--ink); stroke-width: 2.6; fill: var(--surface-3); }
+.g-node.dim, .g-edge.dim { opacity: .28; }
+.g-edge.long { opacity: .22; }
 .g-node.grp .g-box { stroke-dasharray: 5 3; }
 .g-bar { fill: var(--mark-strong); }
 .g-node.ok .g-bar { fill: var(--fold); }
-.g-node:hover .g-box, .g-node:focus-visible .g-box { stroke: var(--accent); stroke-width: 2; }
+.g-node:hover .g-box, .g-node:focus-visible .g-box { stroke: var(--ink); stroke-width: 2; }
 .g-node:focus-visible { outline: none; }
 .g-l1 { fill: var(--ink-3); font: 500 10.5px var(--font-mono); }
 .g-l2 { fill: var(--ink); font: 700 12.5px var(--font-mono); }
@@ -211,8 +202,9 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .ln.skip { color: var(--ink-3); font-size: 11.5px; background: var(--surface-2); }
 .ln.skip .tx { font-family: var(--font-body); padding: 1px 0; }
 .more-row { padding: 6px 16px 12px; position: sticky; left: 0; }
+.sec .sec-t .dstat { margin-left: 6px; }
 .flash-sec .sec-h { animation: flashsec 1.6s ease-out 1; }
-@keyframes flashsec { 0% { background: color-mix(in srgb, var(--accent) 14%, transparent); } 100% { background: transparent; } }
+@keyframes flashsec { 0% { background: rgba(255, 255, 255, .08); } 100% { background: transparent; } }
 
 .code { font: 400 12.5px/1.65 var(--font-mono); width: max-content; min-width: 100%; }
 .ln { display: flex; align-items: flex-start; }
@@ -243,15 +235,16 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .chev:hover { background: var(--surface-3); }
 .tick { appearance: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 5px; border: 1.5px solid var(--mark-strong); background: var(--mark); color: transparent; font: 700 12px/1 var(--font-body); cursor: pointer; padding: 0; }
 .tick:hover { color: var(--mark-ink); }
-.tick.on { background: var(--fold); border-color: var(--fold); color: var(--surface); }
+.tick.on { background: var(--fold); border-color: var(--fold); color: var(--paper); }
 .dt { appearance: none; border: 1px solid var(--fold); background: var(--surface); color: var(--fold-ink); font: 600 10.5px/1 var(--font-mono); padding: 3px 7px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .bdg { appearance: none; font: 600 10.5px/1 var(--font-mono); padding: 3px 7px; border-radius: 999px; cursor: pointer; border: 1px solid var(--mark-strong); background: var(--surface); color: var(--mark-ink); white-space: nowrap; }
 .bdg.ok { border-color: var(--fold); color: var(--fold-ink); }
-.bdg.use { border-color: var(--accent); color: var(--accent-ink); }
+.bdg.use { border-color: var(--ink-3); color: var(--ink); }
 .t-kw { color: var(--syn-kw); } .t-ty { color: var(--syn-ty); } .t-str { color: var(--syn-str); } .t-num { color: var(--syn-num); }
-.t-com { color: var(--syn-com); font-style: italic; } .t-ann { color: var(--syn-ann); } .t-op { color: var(--syn-op); } .t-key { color: var(--syn-ty); }
+.t-com { color: var(--syn-com); font-style: italic; } .t-ann { color: var(--syn-ann); } .t-op { color: var(--syn-op); } .t-key { color: var(--syn-id); }
+.t-id { color: var(--syn-id); } .t-fn { color: var(--syn-fn); } .t-md { color: var(--ink); }
 .ref { cursor: pointer; border-radius: 2px; }
-.ref:hover { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ref:hover { text-decoration: underline; text-decoration-color: var(--ink); text-underline-offset: 3px; background: rgba(255, 255, 255, .08); }
 
 /* Split layout */
 .vw.split .code { width: 100%; }
@@ -264,7 +257,7 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .half.empty { background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--surface) 6px 12px); }
 .half.ctx { background: var(--surface); }
 
-.peek { position: sticky; left: 30px; width: min(860px, calc(100vw - 120px)); margin: 4px 0 10px 30px; border: 1.5px solid var(--accent); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; font-family: var(--font-body); white-space: normal; z-index: 2; }
+.peek { position: sticky; left: 30px; width: min(860px, calc(100vw - 120px)); margin: 4px 0 10px 30px; border: 1.5px solid var(--line-2); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; font-family: var(--font-body); white-space: normal; z-index: 2; }
 .pk-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 13px; }
 .pk-h2 { border-top: 1px solid var(--line); }
 .pk-loc { font: 500 12px/1.4 var(--font-mono); color: var(--ink-2); overflow-wrap: anywhere; }
@@ -273,7 +266,7 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .pk-code { font: 400 12px/1.6 var(--font-mono); padding: 6px 0; overflow-x: auto; }
 .pk-ln { display: flex; white-space: pre; }
 .pk-ln .no { width: 46px; flex: none; text-align: right; padding-right: 10px; color: var(--ink-3); }
-.pk-ln.hit { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pk-ln.hit { background: rgba(255, 255, 255, .07); }
 .pk-foot { padding: 6px 12px 10px; font-size: 13px; }
 .pk-list { display: grid; max-height: 240px; overflow-y: auto; padding: 4px 0; }
 .pk-use { appearance: none; border: 0; background: none; text-align: left; display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); gap: 12px; padding: 4px 12px; cursor: pointer; font: 400 12px/1.5 var(--font-mono); color: var(--ink); }
@@ -289,7 +282,7 @@ mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; }
 .rules { display: grid; gap: 52px; }
 .rule { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px 44px; align-items: start; }
 .rule-text { display: grid; gap: 12px; align-content: start; }
-.rule-k { font: 700 12px/1 var(--font-mono); color: var(--accent-ink); }
+.rule-k { font: 700 12px/1 var(--font-mono); color: var(--mark-ink); }
 .pain { font-size: 14px; color: var(--ink-3); }
 .pain b { color: var(--ink-2); font-weight: 600; }
 .rule p { color: var(--ink-2); font-size: 15.5px; }
@@ -315,7 +308,7 @@ mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; }
 .chain-ex code { font-size: 12px; background: var(--surface-3); padding: .05em .35em; border-radius: 4px; }
 
 .decide { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 0 36px; }
-.decide li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 4px 10px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14.5px; color: var(--ink-2); }
+.decide li { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 4px 10px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14.5px; color: var(--ink-2); }
 .decide .q { font: 700 12.5px/1.6 var(--font-mono); color: var(--fold-ink); }
 .decide b { color: var(--ink); font-weight: 600; }
 .musts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
@@ -352,11 +345,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v3 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v4 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
-    <p class="lede">A review tool that starts from chains of related changes and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. You read a chain as a graph, review its code in an editor-like diff, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted. A new push only reopens what changed since you looked. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
+    <p class="lede">A review tool that starts from chains of related changes and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. Chains link into a map, so you can see which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v2: chains are the main navigation, each with a graph. “Same change” is defined with tree-sitter. Reviewed code is muted instead of folded, and only hunks collapse. Generated files are never reviewed but can be peeked. The split layout is available.</p>
+    <p class="changed">Changed since v3: renames, same changes and member edits now join chains, so 48 changes stay outside instead of 104. A chain map shows how chains use each other. Each chain shows its total diff. Clicking a graph node focuses on it. A hunk folds when its last change is reviewed, and each view has its own hunks. The palette is dark and the syntax colors are stronger.</p>
   </header>
 
   <section class="section" id="try">
@@ -366,9 +359,9 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <p class="section-intro prose">This viewer shows <a href="https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168">serverpod_offline_sync #168</a> as the rules see it. One build-time pass ran git, tree-sitter and the Dart analysis server (the one VS Code uses) over the PR. Nothing in it was written by hand for this PR.</p>
     </header>
     <ul class="try">
-      <li><b>Start from a chain</b> on the left. Its graph shows the changed members and what uses what. Click a node to jump to its code.</li>
-      <li><b>Follow <code>mergeChanges(userId)</code></b> into <code>mergeInboundBatch(userId)</code> and <code>_transactionAs</code>. The 154 identical call-site edits are one node.</li>
-      <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted, with its diff hidden until you ask for it.</li>
+      <li><b>Open the chain map</b> at the top of the list. It lays 47 linked chains out in 9 levels. Click one to open it.</li>
+      <li><b>Click a node</b> in a chain’s graph to show only that member’s code. Click it again, or “Show all”, to go back.</li>
+      <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted. When a hunk’s last change is reviewed, the hunk folds.</li>
       <li><b>Click an identifier</b> to peek at its definition, as resolved by the Dart analysis server.</li>
       <li><b>Switch</b> to the split layout, search the changes, or compare with “Reviewed at 0540639”.</li>
     </ul>
@@ -408,66 +401,63 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
         <div class="rule-text">
           <span class="rule-k">Chains</span>
           <p class="pain"><b>Pain:</b> one change spans files, and today you rebuild it by jumping between them.</p>
-          <p>A changed line that uses something declared on another changed line links the two changes. The language server decides what a name refers to. Links form chains:</p>
+          <p>A changed line that uses something declared on another changed line links the two changes. The language server decides what a name refers to. Changes join a chain in five ways:</p>
           <ul>
             <li><b>Parameters and local variables pass a chain on.</b> A new parameter, the calls that now pass it, and the parameter those calls needed are one chain.</li>
-            <li><b>A changed function, method, field or type starts its own chain</b> with the changes that use it. Chains that touch link to each other.</li>
-            <li>A chain needs at least two members. Changes linked to nothing are listed by file under “Not in a chain”.</li>
-            <li>The graph has one node per changed member. Changes that are all the same edit collapse into one node.</li>
+            <li><b>A changed function, method, field or type starts a chain</b> with the changes that use it. A member’s chain and the ripple of its own parameters are one chain.</li>
+            <li><b>The same change in several places is a chain</b> when it names an identifier, so a rename such as <code>withCurrentNodeHlc → withUserClock</code> is tracked together.</li>
+            <li><b>A chain takes every change of the members it touches.</b> In test files that means the enclosing test. A doc comment counts with the declaration it documents.</li>
+            <li><b>Imports and docs follow.</b> A new import joins the chains that use what it imports in that file. A Markdown change that names a chain’s member in backticks joins that chain.</li>
           </ul>
-          <p class="num">In #168, 283 of the 387 changes fall into 50 chains, 26 of them across files. The largest is <code>mergeChanges(userId)</code>: 170 changes in 37 files, drawn as 9 nodes. 104 changes are in no chain.</p>
+          <p class="num">In #168, 339 of the 387 changes fall into 59 chains, 31 of them across files. <code>mergeChanges(userId)</code> is the largest: 184 changes in 38 files, drawn as 11 nodes. <code>recordSyncCheckpoint(spaceId)</code>, the <code>userId → spaceId</code> rename, has 16 changes in 6 files.</p>
         </div>
-        <figure class="fig">
-          <div class="fig-box chain-ex">
-            <b>The chain from your example, as found in #168</b>
-            <ol>
-              <li><code>OfflineSyncDatabase.mergeChanges</code> gains the parameter <code>userId</code>.</li>
-              <li>Its body now calls the new private <code>_transactionAs(…, authoring: false)</code>, so <code>_transactionAs</code> and its parameters join the chain.</li>
-              <li>154 call sites change <code>spaceId:</code> to <code>userId:</code>. They are one same-change node.</li>
-              <li><code>OfflineSyncEngine.mergeInboundBatch</code> passes <code>userId: userId</code> to <code>mergeChanges</code>, using its own new <code>userId</code> parameter, so that parameter joins the chain.</li>
-              <li>Its callers <code>_applyCycleBatch</code>, <code>DstReplica.merge</code> and 5 test calls now pass <code>userId</code>.</li>
-            </ol>
-          </div>
-          <figcaption>Each step is a link the language server reports. Open the first chain in the viewer to see it as a graph.</figcaption>
-        </figure>
+        <div class="rule-text">
+          <span class="rule-k">Why 48 changes stay outside</span>
+          <p>The rest have nothing a rule can link:</p>
+          <ul>
+            <li><b>14 only remove code.</b> There is no language server on removed lines, as decided in the v2 review.</li>
+            <li><b>13 are Markdown</b> that names nothing in a chain.</li>
+            <li><b>12 only change comments</b> of members that are in no chain.</li>
+            <li><b>9 are local edits</b> that use only unchanged code or declarations inside the same change.</li>
+          </ul>
+          <p>Removed code is the main gap. One way to close it is to match a removed declaration’s name with removed usages, using tree-sitter on the old side.</p>
+        </div>
       </div>
 
       <div class="rule">
         <div class="rule-text">
+          <span class="rule-k">Chain of chains</span>
+          <p class="pain"><b>Pain:</b> a big change is several chains that build on each other.</p>
+          <p>Each chain has a core: the changes of its root’s member. Chain A uses chain B when A’s core uses a function, method, field or type in B’s core. That gives a hierarchy. Chains that nothing uses come first, and each level depends on the next.</p>
+          <p class="num">In #168 the main family has 47 chains in 9 levels. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
+        </div>
+        <div class="rule-text">
           <span class="rule-k">Same change</span>
           <p class="pain"><b>Pain:</b> the same edit repeated across many call sites.</p>
-          <p>The tokens of each change are diffed. Each run of changed tokens is an edit, and tree-sitter describes it in one of two ways:</p>
+          <p>The tokens of each change are diffed. Each run of changed tokens is an edit, and tree-sitter describes it as one of two things:</p>
           <ul>
             <li><b>A token replaced by another</b>, in a role: a reference, a declaration name, a named argument or a type.</li>
             <li><b>Complete syntax nodes</b> inserted, removed or replaced.</li>
           </ul>
-          <p>Edits with the same description are the same change. Edits that always occur together form one group.</p>
-          <p class="num">In #168: <code>spaceId → userId</code> as a named argument, 156 times. <code>hlcManagerFor → spaceIdFor</code> as a reference together with removing <code>.normalizedSpaceId</code>, 14 times. 53 groups in all.</p>
-        </div>
-        <div class="rule-text">
-          <span class="rule-k">Reviewed snapshot</span>
-          <p class="pain"><b>Pain:</b> a viewed file resets whenever it changes.</p>
-          <p>Your review is a local git branch: the base plus every change you marked reviewed. The viewer diffs it against the PR head, so a new push only brings back what changed since you looked.</p>
-          <ul>
-            <li>On a rebase, the snapshot is replayed onto the new base with a syntax-aware merge, such as mergiraf, which resolves simple conflicts. Regions that still conflict go back to unreviewed.</li>
-            <li>Reviewed code is never hidden. It stays muted, with its diff hidden until you show it. Only hunks collapse, and only when you collapse them.</li>
-          </ul>
+          <p>Edits with the same description are the same change.</p>
+          <p class="num">In #168: <code>spaceId → userId</code> as a named argument, 156 times. <code>hlcManagerFor → spaceIdFor</code> with <code>.normalizedSpaceId</code> removed, 14 times. 53 groups in all.</p>
         </div>
       </div>
 
       <div class="rule">
         <div class="rule-text">
-          <span class="rule-k">Generated files</span>
-          <p class="pain"><b>Pain:</b> generated files still sit in the file list and the counts.</p>
-          <p>A file is generated when <code>.gitattributes</code> marks it <code>linguist-generated</code>, or when it matches a pattern in the review config. Generated files are never reviewed or counted. They are listed apart and can be opened read-only, for reference.</p>
-<pre class="code-block"><span class="c"># .review.yaml</span>
-<span class="k">generated:</span>
-  - <span class="s">"**/migrations/**"</span>     <span class="c"># on top of .gitattributes</span></pre>
-          <p class="num">In #168: 21 generated files with 25,731 lines. Ten come from <code>.gitattributes</code> and 11 from the config.</p>
+          <span class="rule-k">Reviewed snapshot</span>
+          <p class="pain"><b>Pain:</b> a viewed file resets whenever it changes.</p>
+          <p>Your review is a local git branch: the base plus every change you marked reviewed. The viewer diffs it against the PR head, so a new push only brings back what changed since you looked. On a rebase, a syntax-aware merge such as mergiraf replays the snapshot, and regions that still conflict go back to unreviewed.</p>
         </div>
         <div class="rule-text">
-          <span class="rule-k">Where tree-sitter isn’t available</span>
-          <p>The three <code>.spy.yaml</code> model files and the Markdown docs fall back to plain token edits. The prototype couldn’t load a YAML grammar with this tree-sitter runtime. The real core would ship grammars for the languages it supports.</p>
+          <span class="rule-k">Display</span>
+          <ul>
+            <li><b>Reviewed code is never hidden.</b> It stays muted, with its diff hidden until you show it.</li>
+            <li><b>Hunks fold on their own</b> when their last change is reviewed. You can open them again, or fold any hunk yourself. Nothing smaller than a hunk folds.</li>
+            <li><b>Each view has its own hunks.</b> A chain shows each change with three lines of context, so folding a hunk in one place never folds another.</li>
+            <li><b>Generated files</b> are never reviewed or counted, and can be opened read-only.</li>
+          </ul>
         </div>
       </div>
     </div>
@@ -475,17 +465,19 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
   <section class="section" id="decided">
     <header>
-      <span class="eyebrow">Decided in the v2 review</span>
-      <h2>Answers to the v2 questions</h2>
+      <span class="eyebrow">Decided so far</span>
+      <h2>Answers from the v2 and v3 reviews</h2>
     </header>
     <ol class="decide">
-      <li><span class="q">Q1</span><span><b>Same edit</b> means the same tree-sitter change, for example one token replaced by another.</span></li>
-      <li><span class="q">Q2</span><span><b>Rebase conflicts</b> go back to unreviewed, after a syntax-aware merge such as mergiraf has resolved the simple ones.</span></li>
-      <li><span class="q">Q3</span><span><b>Snapshots</b> live locally first.</span></li>
-      <li><span class="q">Q4</span><span><b>A whole chain</b> can be marked reviewed at once.</span></li>
-      <li><span class="q">Q5</span><span><b>No <code>reviewedWith</code>.</b> Generated files are not reviewed, but they can be peeked.</span></li>
-      <li><span class="q">Q6</span><span><b>No language server on removed lines</b> for now.</span></li>
-      <li><span class="q">Q7</span><span><b>Diff layout</b> is choosable, unified by default.</span></li>
+      <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another.</span></li>
+      <li><span class="q">Rebase</span><span>Conflicts go back to unreviewed, after a syntax-aware merge such as mergiraf.</span></li>
+      <li><span class="q">Storage</span><span>Snapshots live locally first.</span></li>
+      <li><span class="q">Chains</span><span>A whole chain can be marked reviewed at once. Chains are the main navigation, each with a graph, its total diff and a place in the chain map.</span></li>
+      <li><span class="q">Generated</span><span>Not reviewed, but peekable.</span></li>
+      <li><span class="q">LSP</span><span>Not on removed lines, for now.</span></li>
+      <li><span class="q">Layout</span><span>Choosable, unified by default.</span></li>
+      <li><span class="q">Hiding</span><span>Reviewed code is never hidden. Only hunks fold, including on their own when fully reviewed.</span></li>
+      <li><span class="q">Graph</span><span>Clicking a node focuses on it and filters the code to it.</span></li>
     </ol>
   </section>
 
@@ -493,7 +485,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
     <header>
       <span class="eyebrow">The must-haves</span>
       <h2>Highlighting, go to definition and search come from the editor</h2>
-      <p class="section-intro prose">The first version is a VS Code extension on top of a small core. The chain list and graph live in a side panel, and the code opens in the editor’s own diff.</p>
+      <p class="section-intro prose">The first version is a VS Code extension on top of a small core. The chain list, the chain map and the graphs live in a side panel. The code opens in the editor’s own diff.</p>
     </header>
     <div class="musts">
       <div class="must"><h3>Syntax highlighting</h3><p>The editor’s grammar colors both sides of the diff. The core uses tree-sitter for its own analysis.</p></div>
@@ -509,8 +501,8 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
     </header>
     <ol class="plan">
       <li><b>Snapshot CLI</b><span><code>review mark</code>, <code>status</code> and <code>rebase</code> with mergiraf, on a local branch. git-tree-compare and <code>git diff</code> can show what’s left from day one.</span></li>
-      <li><b>Analysis core</b><span>tree-sitter edits, same-change groups, and chains from the language server, as in this prototype’s <code>analyze.js</code>.</span></li>
-      <li><b>VS Code extension</b><span>Chain list and graph in a side panel, the diff against the snapshot in the editor, mark actions, peek and search.</span></li>
+      <li><b>Analysis core</b><span>Tree-sitter edits, same-change groups, chains and the chain map from the language server, as in this prototype’s <code>analyze.js</code>.</span></li>
+      <li><b>VS Code extension</b><span>Chain panel with the map and graphs, the diff against the snapshot, mark actions, peek and search.</span></li>
       <li><b>Later</b><span>Sharing snapshots with teammates and agents, and syncing GitHub’s viewed checkboxes.</span></li>
     </ol>
   </section>
@@ -521,16 +513,16 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <h2>Open questions</h2>
     </header>
     <ol class="q-list">
-      <li><span class="q">Q1</span><span><b>Should fields pass a chain on</b>, like parameters? In #168 that would fold <code>_userNodes</code>, <code>_participations</code> and <code>_knownNodes</code> into <code>getOrCreateUserNode</code>’s chain.</span></li>
-      <li><span class="q">Q2</span><span><b>Chain order:</b> by size (as now), by dependency (chains others use come first), or by what is left to review?</span></li>
-      <li><span class="q">Q3</span><span><b>Tests inside chains:</b> keep one node per test file, or one node for all tests that use the chain?</span></li>
-      <li><span class="q">Q4</span><span><b>Changes in no chain</b> (104 here): list them by file as now, or by member?</span></li>
-      <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy layers into “+N more” as now, or group nodes by file?</span></li>
+      <li><span class="q">Q1</span><span><b>Removed code:</b> should a removed declaration’s name link the removed usages, using tree-sitter on the old side? That is most of what is left outside chains.</span></li>
+      <li><span class="q">Q2</span><span><b>Should the chain list lead with families?</b> The map could be the first screen, with chains inside it, instead of a list.</span></li>
+      <li><span class="q">Q3</span><span><b>Member cohesion:</b> it makes chains complete but larger (<code>persistedUserClock</code> now spans 15 test nodes). Keep it, or show those changes as linked but outside?</span></li>
+      <li><span class="q">Q4</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
+      <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
     </ol>
   </section>
 
   <footer class="sources">
-    <span>How the prototype is built: <code>git diff</code> exported as JSON, then <code>analyze.js</code> runs tree-sitter and reads the Dart analysis server’s answers to build edits, groups and chains. The page only renders that model.</span>
+    <span>How the prototype is built: <code>git diff</code> exported as JSON, then <code>analyze.js</code> runs tree-sitter and reads the Dart analysis server’s answers to build edits, groups, chains and the chain map. The page only renders that model.</span>
     <details class="src"><summary>Show the analysis pass (analyze.js)</summary><pre id="analyze-src-view"></pre></details>
     <ul>
       <li><a href="https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168">serverpod_offline_sync #168</a></li>

@@ -1,4 +1,4 @@
-// Prototype viewer v3: chains first, code second. It only renders the model built by
+// Prototype viewer v4: chains first, code second. It only renders the model built by
 // analyze.js (git + tree-sitter + Dart language server) and keeps your review marks.
 (function () {
   'use strict';
@@ -11,19 +11,24 @@
   const trunc = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
   const fileName = (p) => p.slice(p.lastIndexOf('/') + 1);
   const wbr = (s) => esc(s).replace(/([.(])/g, '<wbr>$1');
+  const fmt = (n) => n.toLocaleString('en-US');
+  function diffstat(a, d) {
+    const t = a + d, g = t ? Math.round((5 * a) / t) : 0;
+    return `<span class="dstat"><span class="a">+${fmt(a)}</span><span class="d">−${fmt(d)}</span><span class="sq" aria-hidden="true">${'<i class="sa"></i>'.repeat(g)}${'<i class="sd"></i>'.repeat(5 - g)}</span></span>`;
+  }
 
   const viewer = $('#viewer'), side = $('#vw-side'), main = $('#vw-main'), qInput = $('#vw-q');
 
   // ---------- state
   const state = {
     compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
-    view: { kind: 'chain', id: 0 }, prevView: null, peek: null,
+    view: { kind: 'chain', id: 0 }, prevView: null, peek: null, focus: null,
     rev: { base: new Set(), since: new Set() },
     blockDiff: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
     search: { q: '', scope: 'unreviewed' },
   };
   try {
-    const saved = JSON.parse(localStorage.getItem('bcr-v3') || 'null');
+    const saved = JSON.parse(localStorage.getItem('bcr-v4') || 'null');
     if (saved) {
       state.rev.base = new Set(saved.rev.base || []);
       state.rev.since = new Set(saved.rev.since || []);
@@ -33,7 +38,7 @@
   } catch (e) { /* storage unavailable */ }
   function save() {
     try {
-      localStorage.setItem('bcr-v3', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
+      localStorage.setItem('bcr-v4', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
     } catch (e) { /* ignore */ }
   }
 
@@ -69,6 +74,15 @@
       c.blocks.forEach((id) => { if (!m.chainsOf.has(id)) m.chainsOf.set(id, []); m.chainsOf.get(id).push(c.id); });
       c.graph.nodes.forEach((n, i) => { n.idx = i; });
     });
+    m.usedBy = new Map(m.chains.map((c) => [c.id, []]));
+    m.chains.forEach((c) => c.uses.forEach((o) => m.usedBy.get(o).push(c.id)));
+    const fams = new Map();
+    m.chains.forEach((c) => { if (!fams.has(c.family)) fams.set(c.family, []); fams.get(c.family).push(c); });
+    m.families = [...fams.entries()].map(([id, list]) => {
+      list.sort((x, y) => x.depth - y.depth || y.blocks.length - x.blocks.length || (x.name < y.name ? -1 : 1));
+      const top = list.slice().sort((x, y) => y.blocks.length - x.blocks.length || x.id - y.id)[0];
+      return { id, chains: list, top, depth: Math.max(...list.map((c) => c.depth)) };
+    }).sort((x, y) => y.chains.length - x.chains.length || x.id - y.id);
     m.standalone = [];
     m.files.forEach((f) => f.blocks.forEach((b) => { if (b.edits.length && !m.chainsOf.has(b.id)) m.standalone.push(b); }));
     m.usageByLine = new Map();
@@ -132,9 +146,11 @@
     const toks = C.tokenize(text, f.lang);
     const marks = ranges && opts.emphasis ? new Map(ranges.map(([s, , id]) => [s, id])) : null;
     const defs = opts.n != null && opts.refs ? lineDefs(f.p, opts.n) : null;
-    return toks.map((tk) => {
+    const nextCode = (i) => { for (let j = i + 1; j < toks.length; j++) if (toks[j].k !== 'ws') return toks[j]; return null; };
+    return toks.map((tk, i) => {
       if (tk.k === 'ws') return esc(tk.t);
       let cls = 't-' + tk.k, attrs = '';
+      if (tk.k === 'id') { const nx = nextCode(i); if (nx && (nx.t === '(' || nx.t === '<')) cls = 't-fn'; }
       if (marks && marks.has(tk.c)) cls += rev().has(marks.get(tk.c)) ? ' rv' : ' ch';
       if (defs && (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann')) {
         const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
@@ -273,23 +289,48 @@
   }
   const anyRowsHtml = (f, hi, s, e, ctx) => (state.layout === 'split' ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
   const BIG = 150;
-  const isCollapsed = (key, rows, ctx) => state.collapsed.has(key) || (!!(ctx && ctx.chain) && rows > BIG && !state.expanded.has(key));
-  function hunkHtml(f, hi, ctx) {
+  function hunkView(f, hi, s0, e0, ctx) {
+    ctx = ctx || {};
     const h = f.hunks[hi];
-    const key = f.p + '#' + hi;
-    const collapsed = isCollapsed(key, h.rows.length, ctx);
-    const blocks = f.blocks.filter((b) => b.hunk === hi && b.edits.length);
+    const key = (ctx.key || 'file') + '|' + f.p + '#' + hi + ':' + s0;
+    const blocks = f.blocks.filter((b) => b.hunk === hi && b.edits.length && b.first < e0 && b.first + b.len > s0);
     const open = blocks.filter((b) => !done(b)).length;
-    let out = `<div class="hh"><button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(key)}" aria-expanded="${!collapsed}" title="${collapsed ? 'Expand hunk' : 'Collapse hunk'}">${collapsed ? '▸' : '▾'}</button><span class="hh-tx">@@ −${h.o} +${h.n} @@ <span class="hh-ctx">${esc(h.h)}</span></span>`;
-    if (blocks.length) out += `<button type="button" class="btn xs" data-act="mark-hunk" data-file="${f.idx}" data-hunk="${hi}">${open ? '✓ Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
+    const allDone = blocks.length > 0 && open === 0;
+    const big = !!ctx.chain && e0 - s0 > BIG;
+    const collapsed = state.collapsed.has(key) || ((allDone || big) && !state.expanded.has(key));
+    let o = null, n = null;
+    for (let i = s0; i < e0; i++) { if (o == null && h.meta[i].o != null) o = h.meta[i].o; if (n == null && h.meta[i].n != null) n = h.meta[i].n; }
+    let out = `<div class="hh${allDone ? ' hh-done' : ''}"><button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(key)}" aria-expanded="${!collapsed}" title="${collapsed ? 'Expand hunk' : 'Collapse hunk'}">${collapsed ? '▸' : '▾'}</button><span class="hh-tx">@@ −${o != null ? o : h.o} +${n != null ? n : h.n} @@ <span class="hh-ctx">${s0 === 0 ? esc(h.h) : ''}</span></span>`;
+    if (blocks.length) out += `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(blocks.map((b) => b.id).join(' '))}">${open ? '✓ Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
     if (collapsed) {
-      out += `<span class="hh-note">${h.rows.length} lines collapsed</span>`;
-      const focus = ctx && ctx.chain && ctx.chain.focus ? blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
-      if (focus.length) out += `<span class="hh-note">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(key)}" data-line="${ln}">line ${ln}</button>`).join('')}`;
+      out += `<span class="hh-note">${e0 - s0} lines${allDone ? ' · all reviewed' : ''}</span>`;
+      const focus = ctx.chain && ctx.chain.focus ? blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
+      if (focus.length && !allDone) out += `<span class="hh-note">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(key)}" data-line="${ln}">line ${ln}</button>`).join('')}`;
     }
     out += '</div>';
-    if (!collapsed) out += anyRowsHtml(f, hi, 0, h.rows.length, ctx);
+    if (!collapsed) out += anyRowsHtml(f, hi, s0, e0, ctx);
     return out;
+  }
+  const hunkHtml = (f, hi, ctx) => hunkView(f, hi, 0, f.hunks[hi].rows.length, ctx);
+  // The hunks a set of changes needs: each change with 3 lines of context, merged when they touch.
+  function subHunksHtml(blocks, ctx) {
+    const byFile = new Map();
+    blocks.forEach((b) => { if (!byFile.has(b.file)) byFile.set(b.file, []); byFile.get(b.file).push(b); });
+    let h = '';
+    [...byFile.keys()].sort((x, y) => x.idx - y.idx).forEach((f) => {
+      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code">`;
+      const byHunk = new Map();
+      byFile.get(f).forEach((b) => { if (!byHunk.has(b.hunk)) byHunk.set(b.hunk, []); byHunk.get(b.hunk).push(b); });
+      [...byHunk.keys()].sort((x, y) => x - y).forEach((hi) => {
+        const rows = f.hunks[hi].rows.length;
+        const ranges = byHunk.get(hi).map((b) => [Math.max(0, b.first - 3), Math.min(rows, b.first + b.len + 3)]).sort((x, y) => x[0] - y[0]);
+        const merged = [];
+        ranges.forEach((r) => { const last = merged[merged.length - 1]; if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]); else merged.push(r.slice()); });
+        merged.forEach(([s0, e0]) => { h += hunkView(f, hi, s0, e0, ctx); });
+      });
+      h += '</div>';
+    });
+    return h;
   }
 
   // ---------- peek
@@ -324,12 +365,13 @@
   }
   const h2text = (hl) => hl.f.hunks[hl.hi].rows[hl.ri][1].trim().slice(0, 110);
 
-  // ---------- graph
+  // ---------- graphs
   const NW = 214, NH = 52, GX = 66, GY = 14, PAD = 16;
-  function graphSvg(c) {
-    const m = M();
+  // spec: { id, nodes: [{ key, layer, l1, l2, cnt, ok, root, grp, attr, tip, label }], edges: [{ from, to, labels }], focus, w }
+  function layeredSvg(spec) {
+    const W0 = spec.w || NW;
     const layers = new Map();
-    c.graph.nodes.forEach((n) => { if (!layers.has(n.layer)) layers.set(n.layer, []); layers.get(n.layer).push(n); });
+    spec.nodes.forEach((n) => { if (!layers.has(n.layer)) layers.set(n.layer, []); layers.get(n.layer).push(n); });
     const keys = [...layers.keys()].sort((a, b) => a - b);
     const posOf = new Map();
     const more = [];
@@ -337,19 +379,22 @@
     keys.forEach((L, li) => {
       let list = layers.get(L);
       let hidden = 0;
-      if (list.length > 7 && !state.graphOpen.has(c.id + ':' + L)) { hidden = list.length - 6; list = list.slice(0, 6); }
-      list.forEach((n, ri) => posOf.set(n.key, { x: PAD + li * (NW + GX), y: PAD + ri * (NH + GY), n }));
-      if (hidden) more.push({ x: PAD + li * (NW + GX), y: PAD + list.length * (NH + GY), hidden, L });
+      const cap = spec.cap || 7;
+      if (list.length > cap && !state.graphOpen.has(spec.id + ':' + L)) { hidden = list.length - (cap - 1); list = list.slice(0, cap - 1); }
+      list.forEach((n, ri) => posOf.set(n.key, { x: PAD + li * (W0 + GX), y: PAD + ri * (NH + GY), n }));
+      if (hidden) more.push({ x: PAD + li * (W0 + GX), y: PAD + list.length * (NH + GY), hidden, L });
       maxRows = Math.max(maxRows, list.length + (hidden ? 1 : 0));
     });
-    const W = PAD * 2 + keys.length * NW + Math.max(0, keys.length - 1) * GX + 40;
+    const W = PAD * 2 + keys.length * W0 + Math.max(0, keys.length - 1) * GX + 40;
     const H = PAD * 2 + maxRows * NH + (maxRows - 1) * GY;
-    let svg = `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses.">
-      <defs><marker id="gar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>`;
+    const near = new Set();
+    if (spec.focus) { near.add(spec.focus); spec.edges.forEach((e) => { if (e.from === spec.focus) near.add(e.to); if (e.to === spec.focus) near.add(e.from); }); }
+    let svg = `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(spec.label)}">
+      <defs><marker id="gar-${spec.id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>`;
     let labels = '';
     const ports = new Map();
     const port = (key, side, otherY) => { const k = key + side; if (!ports.has(k)) ports.set(k, []); ports.get(k).push(otherY); };
-    const visible = c.graph.edges.filter((e) => posOf.get(e.from) && posOf.get(e.to));
+    const visible = spec.edges.filter((e) => posOf.get(e.from) && posOf.get(e.to));
     visible.forEach((e) => {
       const a = posOf.get(e.from), b = posOf.get(e.to);
       const fwd = a.x < b.x, same = a.x === b.x;
@@ -359,8 +404,7 @@
     const portY = (key, side, otherY, base) => {
       const list = ports.get(key + side);
       if (!list || list.length < 2) return base + NH / 2;
-      const i = list.indexOf(otherY);
-      return base + 10 + (i * (NH - 20)) / (list.length - 1);
+      return base + 10 + (list.indexOf(otherY) * (NH - 20)) / (list.length - 1);
     };
     const shown = new Set();
     visible.forEach((e) => {
@@ -369,59 +413,78 @@
       const y1 = portY(e.from, same0 || fwd0 ? 'R' : 'L', b.y, a.y), y2 = portY(e.to, same0 || !fwd0 ? 'R' : 'L', a.y, b.y);
       let d, lx, ly;
       if (a.x !== b.x) {
-        const fwd = a.x < b.x;
-        const x1 = fwd ? a.x + NW : a.x, x2 = fwd ? b.x - 3 : b.x + NW + 3;
+        const x1 = fwd0 ? a.x + W0 : a.x, x2 = fwd0 ? b.x - 3 : b.x + W0 + 3;
         const mx = (x1 + x2) / 2;
         d = `M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
-        lx = x1 + (x2 - x1) * 0.5; ly = y1 + (y2 - y1) * 0.5 - 5;
+        lx = (x1 + x2) / 2; ly = (y1 + y2) / 2 - 5;
       } else {
-        const x1 = a.x + NW, x2 = b.x + NW + 3, bx = x1 + 30;
+        const x1 = a.x + W0, x2 = b.x + W0 + 3, bx = x1 + 30;
         d = `M${x1} ${y1} C ${bx} ${y1}, ${bx} ${y2}, ${x2} ${y2}`;
         lx = x1 + 26; ly = (y1 + y2) / 2;
       }
-      svg += `<path class="g-edge" d="${d}" marker-end="url(#gar)"/>`;
-      const text = trunc(e.labels[0], 18) + (e.labels.length > 1 ? ' +' + (e.labels.length - 1) : '');
-      if (!shown.has(e.to + '|' + text)) {
-        shown.add(e.to + '|' + text);
-        labels += `<text class="g-elabel" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`;
+      const dim = spec.focus && !(e.from === spec.focus || e.to === spec.focus);
+      const long = spec.faintLong && Math.abs(a.n.layer - b.n.layer) > 1;
+      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}" d="${d}" marker-end="url(#gar-${spec.id})"/>`;
+      if (e.labels && e.labels.length) {
+        const text = trunc(e.labels[0], 18) + (e.labels.length > 1 ? ' +' + (e.labels.length - 1) : '');
+        if (!shown.has(e.to + '|' + text) && !dim) { shown.add(e.to + '|' + text); labels += `<text class="g-elabel" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`; }
       }
     });
     posOf.forEach(({ x, y, n }) => {
-      const s = stats(n.blocks.map((id) => m.blockById.get(id)));
-      const { l1, l2, owner } = nodeLabels(n);
-      const root = n.key === c.graph.root;
-      const tip = (owner ? owner + '.' : '') + l2 + ' · ' + n.file;
-      svg += `<g class="g-node${s.open ? '' : ' ok'}${root ? ' root' : ''}${n.group !== null && n.group !== undefined ? ' grp' : ''}" data-node="${n.idx}" tabindex="0" role="button" aria-label="${esc(l2 + ', ' + l1 + ', ' + s.total + ' changes')}"><title>${esc(tip)}</title>
-        <rect class="g-box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="8"/>
+      const cls = ['g-node', n.ok ? 'ok' : '', n.root ? 'root' : '', n.grp ? 'grp' : '', spec.focus ? (n.key === spec.focus ? 'focus' : near.has(n.key) ? '' : 'dim') : ''].filter(Boolean).join(' ');
+      svg += `<g class="${cls}" ${n.attr} tabindex="0" role="button" aria-label="${esc(n.l2 + ', ' + n.l1)}"><title>${esc(n.tip)}</title>
+        <rect class="g-box" x="${x}" y="${y}" width="${W0}" height="${NH}" rx="8"/>
         <rect class="g-bar" x="${x}" y="${y}" width="6" height="${NH}" rx="3"/>
-        <text class="g-l1" x="${x + 15}" y="${y + 20}">${esc(trunc(l1, 27))}</text>
-        <text class="g-l2" x="${x + 15}" y="${y + 39}">${esc(trunc(l2, 24))}</text>
-        <text class="g-cnt" x="${x + NW - 10}" y="${y + 20}" text-anchor="end">${s.open ? s.open + '/' + s.total : '✓ ' + s.total}</text>
+        <text class="g-l1" x="${x + 15}" y="${y + 20}">${esc(trunc(n.l1, Math.floor((W0 - 70) / 6.4)))}</text>
+        <text class="g-l2" x="${x + 15}" y="${y + 39}">${esc(trunc(n.l2, Math.floor((W0 - 24) / 7.7)))}</text>
+        <text class="g-cnt" x="${x + W0 - 10}" y="${y + 20}" text-anchor="end">${esc(n.cnt)}</text>
       </g>`;
     });
     more.forEach(({ x, y, hidden, L }) => {
-      svg += `<g class="g-more" data-graph-open="${c.id}:${L}" tabindex="0" role="button" aria-label="Show ${hidden} more nodes"><rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="8"/><text x="${x + NW / 2}" y="${y + NH / 2 + 4}" text-anchor="middle">+ ${hidden} more</text></g>`;
+      svg += `<g class="g-more" data-graph-open="${spec.id}:${L}" tabindex="0" role="button" aria-label="Show ${hidden} more"><rect x="${x}" y="${y}" width="${W0}" height="${NH}" rx="8"/><text x="${x + W0 / 2}" y="${y + NH / 2 + 4}" text-anchor="middle">+ ${hidden} more</text></g>`;
     });
     return svg + labels + '</svg>';
+  }
+  function graphSvg(c) {
+    const m = M();
+    const focusKey = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node].key : null;
+    return layeredSvg({
+      id: 'c' + c.id, label: `Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses.`, focus: focusKey,
+      edges: c.graph.edges,
+      nodes: c.graph.nodes.map((n) => {
+        const s = stats(n.blocks.map((id) => m.blockById.get(id)));
+        const { l1, l2, owner } = nodeLabels(n);
+        return { key: n.key, layer: n.layer, l1, l2, cnt: s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open, root: n.key === c.graph.root, grp: n.group !== null && n.group !== undefined,
+          attr: `data-node="${n.idx}"`, tip: (owner ? owner + '.' : '') + l2 + ' · ' + n.file };
+      }),
+    });
+  }
+  function mapSvg(fam) {
+    const ids = new Set(fam.chains.map((c) => c.id));
+    // Only direct dependencies: an arrow already implied by a longer path is left out.
+    const out = new Map(fam.chains.map((c) => [c.id, c.uses.filter((o) => ids.has(o) && o !== c.id)]));
+    const reach = (from, to, skip) => {
+      const seen = new Set([from]), stack = out.get(from).filter((x) => !(from === skip[0] && x === skip[1]));
+      while (stack.length) { const x = stack.pop(); if (x === to) return true; if (seen.has(x)) continue; seen.add(x); stack.push(...out.get(x)); }
+      return false;
+    };
+    const edges = [];
+    fam.chains.forEach((c) => out.get(c.id).forEach((o) => { if (!reach(c.id, o, [c.id, o])) edges.push({ from: 'k' + c.id, to: 'k' + o, labels: [] }); }));
+    return layeredSvg({
+      id: 'map' + fam.id, w: 236, cap: 9, faintLong: true, label: `Map of ${fam.chains.length} linked chains; arrows point from a chain to the chains its root member uses.`,
+      edges,
+      nodes: fam.chains.map((c) => {
+        const s = stats(blocksOf(c.blocks));
+        const cls = /^(_?[A-Z][\w$]*)\.(.+)$/.exec(c.name);
+        return { key: 'k' + c.id, layer: c.depth, l1: cls ? cls[1] : c.kind === 'group' && !c.rootKind ? 'same change' : '', l2: cls ? cls[2] : c.name, cnt: s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open, root: c === fam.top,
+          attr: `data-chain="${c.id}"`, tip: c.name };
+      }),
+    });
   }
 
   // ---------- views
   function headerHtml(title, metaHtml, actionHtml, sub) {
     return `<div class="fv-head"><div class="fv-title">${title}</div>${sub || ''}<div class="fv-meta">${metaHtml}<span class="sp"></span>${actionHtml || ''}</div></div>`;
-  }
-  function blocksByHunkHtml(blocks, ctx) {
-    const byFile = new Map();
-    blocks.forEach((b) => {
-      if (!byFile.has(b.file)) byFile.set(b.file, new Set());
-      byFile.get(b.file).add(b.hunk);
-    });
-    let h = '';
-    [...byFile.keys()].sort((x, y) => x.idx - y.idx).forEach((f) => {
-      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code">`;
-      [...byFile.get(f)].sort((x, y) => x - y).forEach((hi) => { h += hunkHtml(f, hi, ctx); });
-      h += '</div>';
-    });
-    return h;
   }
   function instancesHtml(g, blocks, key) {
     const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
@@ -465,29 +528,49 @@
     const c = m.chains[id];
     if (!c) return '<div class="empty">This chain doesn’t exist in this comparison.</div>';
     const s = stats(blocksOf(c.blocks));
-    const sub = c.also.length ? `<div class="fv-sub">Also carries ${c.also.map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : '';
+    const chip = (o) => `<button type="button" class="chip-btn" data-chain="${o}">${esc(m.chains[o].name)}</button>`;
+    const usedBy = m.usedBy.get(c.id);
+    let sub = c.also.length ? `<div class="fv-sub">Also carries ${c.also.map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : '';
+    if (usedBy.length || c.uses.length) {
+      sub += `<div class="fv-sub hier">${usedBy.length ? `<span class="links-k">Used by</span>${usedBy.slice(0, 6).map(chip).join('')}${usedBy.length > 6 ? `<span class="muted">+${usedBy.length - 6}</span>` : ''}` : ''}${c.uses.length ? `<span class="links-k">Uses</span>${c.uses.slice(0, 6).map(chip).join('')}${c.uses.length > 6 ? `<span class="muted">+${c.uses.length - 6}</span>` : ''}` : ''}<button type="button" class="linkish map-link" data-map="${c.family}">Open the chain map</button></div>`;
+    }
     let h = headerHtml(`<b>${wbr(c.name)}</b>`,
-      `<span>${kindWord[c.rootKind] || 'chain'}</span><span>${s.total} changes · ${c.files} file${c.files > 1 ? 's' : ''}</span><span>${s.total - s.open} reviewed</span>`,
+      `<span>${c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain'}</span>${diffstat(c.adds, c.dels)}<span>${s.total} changes · ${c.files} file${c.files > 1 ? 's' : ''}</span><span>${s.total - s.open}/${s.total} reviewed</span>`,
       `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`, sub);
+    const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
-      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a node to jump to its code.</span></div>`;
-    if (c.links.length) h += `<div class="links"><span class="links-k">Linked chains</span>${c.links.slice(0, 10).map((l) => `<button type="button" class="chip-btn" data-chain="${l}">${esc(m.chains[l].name)}</button>`).join('')}${c.links.length > 10 ? `<span class="muted">+${c.links.length - 10} more</span>` : ''}</div>`;
-    h += '</div>';
+      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a node to show only its code.</span></div></div>`;
+    if (focused) {
+      const { l2 } = nodeLabels(focused);
+      h += `<div class="focus-bar">Showing only <b>${esc(l2)}</b> · ${focused.blocks.length} change${focused.blocks.length > 1 ? 's' : ''}<span class="sp"></span><button type="button" class="btn xs" data-act="clear-focus">Show all ${c.graph.nodes.length} nodes</button></div>`;
+    }
     c.graph.nodes.forEach((n) => {
+      if (focused && n !== focused) return;
       const blocks = blocksOf(n.blocks);
       const ns = stats(blocks);
       const { l1, l2, owner } = nodeLabels(n);
       const uses = c.graph.edges.filter((e) => e.from === n.key).map((e) => `uses <code>${esc(e.labels.join(', '))}</code> of ${esc(nodeLabels(c.graph.nodes.find((x) => x.key === e.to)).l2)}`);
-      const usedBy = c.graph.edges.filter((e) => e.to === n.key).length;
-      const rel = uses.concat(usedBy ? [`used by ${usedBy} node${usedBy > 1 ? 's' : ''}`] : []).join(' · ');
-      h += `<section class="sec" id="sec-${n.idx}"><div class="sec-h"><div class="sec-t"><b>${esc(l2)}</b> <span>${esc(owner ? owner + ' · ' + l1 : l1)}</span>${n.key === c.graph.root ? '<span class="root-pill">root</span>' : ''}</div>
+      const usedByN = c.graph.edges.filter((e) => e.to === n.key).length;
+      const rel = uses.concat(usedByN ? [`used by ${usedByN} node${usedByN > 1 ? 's' : ''}`] : []).join(' · ');
+      const adds = blocks.reduce((x, b) => x + b.adds, 0), dels = blocks.reduce((x, b) => x + b.dels, 0);
+      h += `<section class="sec" id="sec-${n.idx}"><div class="sec-h"><div class="sec-t"><b>${esc(l2)}</b> <span>${esc(owner ? owner + ' · ' + l1 : l1)}</span>${n.key === c.graph.root ? '<span class="root-pill">root</span>' : ''}${diffstat(adds, dels)}</div>
         <div class="sec-m"><span>${rel}</span><span class="sp"></span><span>${ns.total - ns.open}/${ns.total} reviewed</span><button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(n.blocks.join(' '))}">${ns.open ? '✓ Mark node reviewed' : 'Mark node unreviewed'}</button></div></div>`;
       if (n.group !== null && n.group !== undefined) {
         const g = m.groupById.get(n.group);
-        h += `<p class="sec-note">The same change in ${blocks.length} places. Each place is shown whole.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
-      } else h += blocksByHunkHtml(blocks, { chain: c });
+        h += `<p class="sec-note">The same change in ${blocks.length} places. Each place shows the whole edit.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
+      } else h += subHunksHtml(blocks, { chain: c, key: 'c' + c.id + 'n' + n.idx });
       h += '</section>';
     });
+    return h;
+  }
+  function renderMap(famId) {
+    const m = M();
+    const fam = m.families.find((f) => f.id === famId) || m.families[0];
+    const linked = m.families.filter((f) => f.chains.length > 1);
+    let h = headerHtml('<b>Chain map</b>', `<span>${fam.chains.length} linked chains</span><span>${fam.depth + 1} levels</span>`, '',
+      `<div class="fv-sub">A chain uses another when its root member uses that chain’s function, method, field or type. Chains that nothing uses sit on the left.</div>${linked.length > 1 ? `<div class="fv-sub"><span class="links-k">Families</span>${linked.map((f) => `<button type="button" class="chip-btn${f === fam ? ' on' : ''}" data-map="${f.id}">${esc(f.top.name)} · ${f.chains.length}</button>`).join('')}</div>` : ''}`);
+    h += `<div class="graph-box"><div class="graph-scroll tall">${mapSvg(fam)}</div>
+      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Faint arrows skip levels.</span><span>Click a chain to open it.</span></div></div>`;
     return h;
   }
   function renderStandalone() {
@@ -496,7 +579,7 @@
     let h = headerHtml('<b>Not in a chain</b>', `<span>${s.total} changes</span><span>${s.total - s.open} reviewed</span>`,
       `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
       '<div class="fv-sub">Changes that don’t use, and aren’t used by, anything changed elsewhere. Grouped by file.</div>');
-    return h + '<div class="sec">' + blocksByHunkHtml(m.standalone, {}) + '</div>';
+    return h + '<div class="sec">' + subHunksHtml(m.standalone, { key: 'standalone' }) + '</div>';
   }
   function renderFile(path) {
     const m = M();
@@ -514,7 +597,7 @@
       chains.length ? `<div class="fv-sub">In chains: ${chains.slice(0, 6).map((id) => `<button type="button" class="chip-btn" data-chain="${id}">${esc(m.chains[id].name)}</button>`).join('')}${chains.length > 6 ? ` +${chains.length - 6}` : ''}</div>` : '');
     if (state.compare === 'since') h += '<div class="since-note">Left: your reviewed snapshot (as if you had reviewed everything up to <code>0540639</code>). Right: the PR head <code>a45f9ae</code>.</div>';
     h += '<div class="code">';
-    f.hunks.forEach((hk, hi) => { h += hunkHtml(f, hi, {}); });
+    f.hunks.forEach((hk, hi) => { h += hunkHtml(f, hi, { key: 'file' }); });
     return h + '</div>';
   }
   function renderGenerated(path) {
@@ -581,17 +664,21 @@
       <div class="sb-sub">${pct}% of changed lines reviewed · <button type="button" class="linkish" data-act="reset">Reset</button></div></div>
       <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="chains" aria-selected="${state.tab === 'chains'}">Chains <span>${m.chains.length}</span></button><button type="button" role="tab" data-tab="files" aria-selected="${state.tab === 'files'}">Files <span>${m.files.length}</span></button></div>`;
     if (state.tab === 'chains') {
-      const row = (c) => {
+      const row = (c, indent) => {
         const s = stats(blocksOf(c.blocks));
         const frac = s.total ? Math.round(((s.total - s.open) / s.total) * 100) : 100;
         const on = v.kind === 'chain' && v.id === c.id;
-        return `<button type="button" class="sb-row chain${s.open ? '' : ' done'}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''}>
-          <span class="st"></span><span class="nm">${wbr(c.name)}<span class="sub">${s.total} change${s.total > 1 ? 's' : ''} · ${c.files} file${c.files > 1 ? 's' : ''} · ${c.graph.nodes.length} nodes</span><span class="mini-track"><span style="width:${frac}%"></span></span></span>
+        return `<button type="button" class="sb-row chain${s.open ? '' : ' done'}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="padding-left:${8 + Math.min(indent, 6) * 12}px">
+          <span class="st"></span><span class="nm">${wbr(c.name)}<span class="sub">${s.total} change${s.total > 1 ? 's' : ''} · ${c.files} file${c.files > 1 ? 's' : ''} · <span class="a">+${fmt(c.adds)}</span> <span class="d">−${fmt(c.dels)}</span></span><span class="mini-track"><span style="width:${frac}%"></span></span></span>
           <span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
       };
-      const multi = m.chains.filter((c) => c.files > 1), single = m.chains.filter((c) => c.files === 1);
-      h += `<div class="sb-h"><span>Across files</span><span class="sb-hn">${multi.length}</span></div>` + multi.map(row).join('');
-      if (single.length) h += `<div class="sb-h"><span>Within one file</span><span class="sb-hn">${single.length}</span></div>` + single.map(row).join('');
+      const linked = m.families.filter((f) => f.chains.length > 1);
+      const lone = m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
+      h += `<button type="button" class="sb-row map${v.kind === 'map' ? '' : ''}" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">Chain map<span class="sub">${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels</span></span><span class="cnt">›</span></button>`;
+      linked.forEach((f) => {
+        h += `<div class="sb-h"><span>Family · ${esc(trunc(f.top.name, 30))}</span><span class="sb-hn">${f.chains.length}</span></div>` + f.chains.map((c) => row(c, c.depth)).join('');
+      });
+      if (lone.length) h += `<div class="sb-h"><span>Unlinked chains</span><span class="sb-hn">${lone.length}</span></div>` + lone.map((c) => row(c, 0)).join('');
       const s = stats(m.standalone);
       h += `<div class="sb-h"><span>Outside chains</span></div><button type="button" class="sb-row chain${s.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">Not in a chain<span class="sub">${s.total} changes · grouped by file</span></span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
     } else {
@@ -618,7 +705,7 @@
     const keep = main.scrollTop;
     renderSide();
     const v = state.view;
-    main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : renderFile(v.path);
+    main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : renderFile(v.path);
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     viewer.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
     viewer.classList.toggle('split', state.layout === 'split');
@@ -643,28 +730,34 @@
     state.peek = null;
     if (line) {
       const hl = M().head.get(path + ':' + line);
-      if (hl) state.collapsed.delete(path + '#' + hl.hi);
+      if (hl) { const k = 'file|' + path + '#' + hl.hi + ':0'; state.collapsed.delete(k); state.expanded.add(k); }
     }
     render(line ? { line: Number(line) } : { top: true });
   }
 
   // ---------- events
   viewer.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-tab],[data-compare],[data-layout],[data-usage],[data-scope],.ref');
+    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-layout],[data-usage],[data-scope],.ref');
     if (!t || !viewer.contains(t)) return;
     const m = M();
     const d = t.dataset;
     if (d.compare) {
       if (state.compare === d.compare) return;
       state.compare = d.compare; state.peek = null;
-      state.view = { kind: 'chain', id: 0 };
+      state.view = { kind: 'chain', id: 0 }; state.focus = null;
       return render({ top: true });
     }
     if (d.layout) { state.layout = d.layout; save(); return render(); }
     if (d.tab) { state.tab = d.tab; return render(); }
     if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
     if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
-    if (d.node !== undefined && !d.act) return render({ section: Number(d.node) });
+    if (d.node !== undefined && !d.act) {
+      const node = Number(d.node);
+      const same = state.focus && state.focus.chain === state.view.id && state.focus.node === node;
+      state.focus = same ? null : { chain: state.view.id, node };
+      return render(same ? {} : { section: node });
+    }
+    if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
     if (t.classList.contains('ref')) {
       const path = d.path, n = Number(d.n), col = Number(d.col);
       const key = `${path}:${n}:${col}`;
@@ -680,13 +773,14 @@
       state.peek = same ? null : { path, n, col, ti: defs ? defs.get(col) : undefined, usageKey: d.usage };
       return render();
     }
-    if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.tab = 'chains'; return render({ top: true }); }
+    if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); }
     if (d.standalone) { state.view = { kind: 'standalone' }; state.peek = null; return render({ top: true }); }
     if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
     if (act === 'reset') { state.rev[state.compare] = new Set(); state.blockDiff.clear(); save(); return render(); }
     if (act === 'close-peek') { state.peek = null; return render(); }
+    if (act === 'clear-focus') { state.focus = null; return render(); }
     if (act === 'toggle-block') { const b = m.blockById.get(d.block); toggleBlocks([b]); return render(); }
     if (act === 'toggle-diff') { state.blockDiff.has(d.block) ? state.blockDiff.delete(d.block) : state.blockDiff.add(d.block); return render(); }
     if (act === 'toggle-hunk') {
@@ -695,7 +789,6 @@
       return render();
     }
     if (act === 'expand-to') { state.collapsed.delete(d.key); state.expanded.add(d.key); return render({ line: Number(d.line) }); }
-    if (act === 'mark-hunk') { const f = m.files[Number(d.file)]; toggleBlocks(f.blocks.filter((b) => b.hunk === Number(d.hunk) && b.edits.length)); return render(); }
     if (act === 'mark-file') { toggleBlocks(m.files[Number(d.file)].blocks.filter((b) => b.edits.length)); return render(); }
     if (act === 'mark-blocks') { toggleBlocks(blocksOf(d.blocks.split(' '))); return render(); }
     if (act === 'mark-chain') { toggleBlocks(blocksOf(m.chains[Number(d.chainId)].blocks)); return render(); }
@@ -715,7 +808,7 @@
     }
   });
   viewer.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('[data-node],[data-graph-open]')) { e.preventDefault(); e.target.closest('[data-node],[data-graph-open]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   viewer.addEventListener('change', (e) => {
     if (e.target.id === 'vw-revdiff') { state.showReviewedDiff = e.target.checked; save(); render(); }
