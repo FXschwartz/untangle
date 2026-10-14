@@ -1,4 +1,5 @@
 // The review page: the viewer with the review's data inlined, as one HTML document.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ReviewData } from './build.js';
@@ -61,7 +62,9 @@ export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'ex
     return list.map((g) => ({ ...g, hunks: kept.has(g) ? g.hunks : null }));
   };
   const model = { compares: Object.fromEntries(Object.entries(data.model.compares).map(([k, c]) => [k, { ...c, generated: generated(c.generated) }])) };
-  const highlight = !shiki ? '' : mode === 'served' ? '<script src="assets/highlight.js"></script>' : `<script>${shiki.toString('utf8')}</script>`;
+  // Served, the highlighter's URL carries its content's hash: a browser never keeps an old one.
+  const version = shiki ? crypto.createHash('sha256').update(shiki).digest('hex').slice(0, 12) : '';
+  const highlight = !shiki ? '' : mode === 'served' ? `<script src="assets/highlight.js?v=${version}"></script>` : `<script>${shiki.toString('utf8')}</script>`;
   const parts: Array<[string, string]> = [
     ['/*TITLE*/', escapeHtml(title + ' · untangle')],
     ['<!--HIGHLIGHT-->', highlight],

@@ -112,7 +112,9 @@ export class ReviewServer {
     if (route.startsWith('assets/') && req.method === 'GET') {
       const a = this.api.asset(route.slice(7));
       if (!a) return this.send(res, 404, 'text/plain', 'Not found');
-      res.writeHead(200, { 'content-type': a.type, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+      // A versioned URL (?v=<hash>) never changes content, so it can be kept; any other, never.
+      const caching = url.searchParams.has('v') ? 'private, max-age=31536000, immutable' : 'no-store';
+      res.writeHead(200, { 'content-type': a.type, 'cache-control': caching, 'x-content-type-options': 'nosniff' });
       return res.end(a.body);
     }
     if (route.startsWith('api/')) {

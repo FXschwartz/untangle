@@ -175,6 +175,8 @@
   // comments over several lines keep their colors.
   const SHIKI = window.UntangleShiki || null;
   let shikiOn = false;
+  // The theme's color for text no grammar rule colors (a bundle from before it said so: Dark+'s).
+  let shikiFg = '#D4D4D4';
   const rowsColorCache = new WeakMap();
   function rowsColors(rows, path) {
     if (!shikiOn) return null;
@@ -240,7 +242,7 @@
         const c = colorAt(colors, tk.c);
         // Grammars leave plain names (variables, properties, parameters) in the default color;
         // VS Code colors them from the language server. The tokenizer's classes stand in there.
-        const plain = !c || !c[1] || (c[1].toUpperCase() === SHIKI.fg() && (tk.k === 'id' || tk.k === 'ty'));
+        const plain = !c || !c[1] || (c[1].toUpperCase() === shikiFg && (tk.k === 'id' || tk.k === 'ty'));
         if (!plain) attrs += ` style="color:${c[1]};font-style:${c[2] ? 'italic' : 'normal'}"`;
       }
       if (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann') {
@@ -1160,7 +1162,12 @@
     const keep = main.scrollTop;
     renderSide();
     const v = state.view;
-    main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : renderFile(v.path);
+    try {
+      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : renderFile(v.path);
+    } catch (e) {
+      main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
+      console.error(e);
+    }
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     const title = $('#vw-title');
     if (title && M().raw.title && !title.childElementCount) {
@@ -1340,5 +1347,5 @@
   });
 
   render({ top: true });
-  if (SHIKI) SHIKI.load().then(() => { shikiOn = true; render(); }).catch(() => {});
+  if (SHIKI) SHIKI.load().then(() => { if (typeof SHIKI.fg === 'function') shikiFg = SHIKI.fg(); shikiOn = true; render(); }).catch(() => {});
 })();
