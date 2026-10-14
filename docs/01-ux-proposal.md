@@ -95,6 +95,8 @@ From the review of v11:
     each place resolves to, and each can be marked on its own.
 17. **Names in strings:** a string that looks like a name links like one, beyond what the
     language server sees.
+18. **The CLI is `untangle`,** used like px0: `untangle [flags] [directory | pr-url]`.
+    Serving the review comes first.
 
 ## Rules
 
@@ -389,12 +391,18 @@ The web app runs one Dart analysis server with both checkouts as workspace folde
 
 ## Where it runs
 
-**A local web app.** A small command-line tool, `review serve`, serves the page on
-localhost. It runs git, tree-sitter and the language servers, and the page asks it for
-everything else. Any browser can open it: Orca's, VS Code's Simple Browser, or a remote
-machine's through a forwarded port.
+**A local web app.** A small command-line tool, [`untangle`](../README.md), serves the
+page on localhost. It runs git, tree-sitter and the language servers, and the page asks it
+for everything else. Any browser can open it: Orca's, VS Code's Simple Browser, or a remote
+machine's through a forwarded port. It works like px0: one command,
+flags in Go's style, and the target is a directory or a pull request URL.
 
-| | Prototype page (static) | Served by `review serve` |
+```
+untangle [flags] [directory]   # the branch's pull request, found with gh (default: .)
+untangle [flags] <pr-url>      # cloned into the cache first
+```
+
+| | Prototype page (static) | Served by `untangle` |
 |---|---|---|
 | Go to definition | Answered ahead of time for the identifiers in the diff (about 8,500 on the new side). A definition outside the diff opens as a snippet of up to 10 lines. | Asked live on click, anywhere: whole files, inside a peek, removed lines. |
 | Files | Diff hunks only | Any file at either revision |
@@ -412,13 +420,15 @@ machine's through a forwarded port.
   - **Analysis:** the core from `prototype/analyze.js` (edits, same-change groups, chains
     and the chain map), cached per pair of commits.
   - **Language server:** one Dart analysis server with both checkouts as workspace
-    folders. It answers the batch that builds chains, then the page's live requests.
+    folders. It answers the batch that builds chains, then the page's live requests. Like
+    an editor, it only analyzes the packages of open files, and untangle opens the files
+    it asks about: on #157, 2,444 lookups took 10 s instead of 123 s with the same answers.
   - **Stack:** TypeScript on Node, reusing this prototype, web-tree-sitter, Shiki and
     `vscode-jsonrpc`, the LSP layer VS Code is built on.
   - **Access:** localhost only, with a random token in the URL, as Jupyter does.
 - **Open in editor:** every location links to the editor, `vscode://file/<path>:<line>`
   by default, or a command you configure.
-- **Static export:** `review export` writes the page as one HTML file with everything
+- **Static export:** `untangle -export` writes the page as one HTML file with everything
   computed ahead, as this prototype is, for sharing a review read-only.
 - **Later:**
   - **Editor extensions** that show the same page in a webview and add open in editor.
@@ -429,14 +439,19 @@ machine's through a forwarded port.
 
 ## Build order
 
-1. **Snapshot CLI:** `review mark`, `status`, and `rebase` with mergiraf, on a local
-   branch. git-tree-compare and `git diff` show what's left from day one.
-2. **Analysis core:** tree-sitter edits, same-change groups, chains and the chain map from
-   the language servers, as in `prototype/analyze.js`, cached per pair of commits.
-3. **Local web app:** `review serve`, the page served live. Go to definition on both
-   sides, whole files, repository search, Shiki highlighting, open in editor, and marks
-   written to the snapshot branch. `review export` writes the same page as one HTML file,
-   for sharing a review read-only.
+Serving the review came first: steps 2 and 3 are under way in `untangle`, step 1 waits.
+
+1. **Snapshot CLI:** marking, status and rebase with mergiraf, on a local branch.
+   git-tree-compare and `git diff` show what's left from day one.
+2. **Analysis core (done):** tree-sitter edits, same-change groups, chains and the chain
+   map from the language server, as in `prototype/analyze.js`, cached per pair of
+   commits. untangle's pipeline gives the prototype's answers exactly, step by step, on
+   the eight PRs ([02-test-runs.md](02-test-runs.md)).
+3. **Local web app (started):** `untangle` serves the page, with progress while it builds,
+   review marks saved next to the analysis, and generated diffs loaded on demand. Still to
+   come: go to definition asked live on both sides, whole files, repository search, Shiki
+   highlighting, open in editor, marks on the snapshot branch, and `-export` for a
+   read-only page.
 4. **Later:** a VS Code extension around the same page, the API for agents, sharing
    snapshots with teammates, and syncing GitHub's viewed checkboxes.
 
@@ -501,6 +516,10 @@ machine's through a forwarded port.
   - Asked: run the rules on four Serverpod PRs, a much larger repository. They found nine
     problems ([02-test-runs.md](02-test-runs.md)).
   - Feedback: fix all nine as proposed.
+- **v13:** the nine fixes.
+  - Asked: build the CLI, focused on serving the review, with px0's UX: a directory or a pull
+    request URL, cloned into a temporary place. Named `untangle`; clones go to a cache, so the
+    next pull request of the same repository only fetches.
 
 ## References
 

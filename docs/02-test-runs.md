@@ -309,3 +309,44 @@ the Serverpod ones and the offline_sync ones.
 
 Freezed and protobuf adapters are still checked only on the fixture
 (`prototype/make_fixture.sh`), which gives the same result as before.
+
+## Round 3: untangle's pipeline against the prototype's
+
+untangle (the CLI in `src/`) ports the prototype's Python steps to TypeScript and asks one Dart
+analysis server, with both checkouts open, instead of four separate ones. On the eight PRs,
+each step's output was compared with the prototype's files for the same commits.
+
+| PR | Head lookups | Old-side definitions | Test call graph | Overrides | Same as the prototype |
+|---|---:|---:|---:|---:|---|
+| offline_sync #157 | 2,444 | 594 | 96 functions | 7 | every step |
+| offline_sync #166 | 2,225 | 76 | 157 functions | 29 | every step |
+| offline_sync #162 | 2,294 | 137 | 132 functions | 43 | every step |
+| offline_sync #168 | 8,559 | 1,795 | 177 functions | 62 | every step (see below) |
+| Serverpod #5864 | 238 | 6 | 8 functions | 0 | every step |
+| Serverpod #5706 | 3,465 | 875 | 77 functions | 22 | every step |
+| Serverpod #5471 | 2,486 | 54 | 66 functions | 10 | every step |
+| Serverpod #5630 | 6,138 | 278 | 29 functions | 124 | every step |
+
+The steps compared: the diff export, identifier positions, both sides' definitions (answers
+and peek snippets), the test call graph, overrides and changed usages. The analysis then gives
+byte-identical models. #168's prototype run also exported its second comparison ("Reviewed at
+0540639"), whose hunks add 2 lookups; with both comparisons exported, the positions match too.
+
+**Only the packages the review touches are analyzed.** An editor's server analyzes the
+packages of open files only (`onlyAnalyzeProjectsWithOpenFiles`), and untangle opens the files
+it asks about. On #157, under the same machine load, the 2,444 head lookups took 10 s instead of
+107 s for the prototype's script and 123 s for untangle when the server analyzes the whole
+checkout. The language-server steps took 15 s (#5864) to 103 s (#5630). From its URL, with the
+clone, worktrees and `pub get`, a first review of Serverpod #5864 took about 40 s.
+
+**Two pitfalls, both handled:**
+- Opening a file of another package makes the server rebuild its contexts, and a lookup that
+  lands meanwhile answers nothing (#5864's old side resolved 0 or 2 of its 6 lookups instead of
+  6). untangle opens both sides' files before the first lookup, opens each batch's files
+  before asking, and asks once more for empty answers after a batch.
+- `dart` is often Flutter's wrapper script, and the analysis server a process under it.
+  untangle starts the server in its own process group and stops the group.
+
+The stored `refs.json` of the four offline_sync runs didn't match their `defs.json` (they came
+from an earlier run). Computing the usages again from the same definitions gives untangle's
+answer.

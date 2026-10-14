@@ -1,0 +1,33 @@
+{
+  "name": "untangle",
+  "version": "0.1.0",
+  "description": "Review a pull request chain by chain, in your browser.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "untangle": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "analysis",
+    "viewer"
+  ],
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "check": "tsc -p . --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "0.1.13",
+    "vscode-jsonrpc": "8.2.1",
+    "web-tree-sitter": "0.25.10",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.9",
+    "typescript": "5.9.3"
+  }
+}

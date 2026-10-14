@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Untangling… · untangle</title>
+<style>
+:root { --paper: #09090B; --surface: #111113; --ink: #EDEDEF; --ink-2: #B4B4BA; --ink-3: #85858D; --line: #242428; --ok: #7EE2A0; --bad: #FF9B95; --mark: #F2C14E; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--paper); color: var(--ink); font: 400 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; display: grid; place-items: center; padding: 24px 16px; }
+main { width: min(640px, 100%); display: grid; gap: 18px; }
+h1 { margin: 0; font-size: 20px; font-weight: 700; }
+.sub { color: var(--ink-3); font: 500 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 14px; }
+li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 4px 10px; font: 400 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+li .i { color: var(--ink-3); } li.done .i { color: var(--ok); } li.failed .i { color: var(--bad); } li.running .i { color: var(--mark); }
+li .t { color: var(--ink-3); }
+li .d, li .n { grid-column: 2 / 4; color: var(--ink-3); overflow-wrap: anywhere; }
+.err { color: var(--bad); white-space: pre-wrap; font: 400 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.hint { color: var(--ink-3); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Untangling the pull request…</h1>
+  <div class="sub" id="sub">The first time, the language server reads both sides of the diff, which can take a minute or two. After that, this review opens at once.</div>
+  <ol id="steps"></ol>
+  <div class="err" id="err" hidden></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const secs = (ms) => (ms < 1000 ? ms + ' ms' : ms < 60000 ? (ms / 1000).toFixed(1) + ' s' : Math.floor(ms / 60000) + ' min ' + Math.round((ms % 60000) / 1000) + ' s');
+  const icon = { running: '…', done: '✓', failed: '✗' };
+  let misses = 0;
+  async function poll() {
+    let s;
+    try {
+      const r = await fetch('api/status', { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      s = await r.json();
+      misses = 0;
+    } catch (e) {
+      if (++misses > 3) { document.getElementById('err').hidden = false; document.getElementById('err').textContent = 'untangle stopped. Run it again to see this review.'; return; }
+      return setTimeout(poll, 1000);
+    }
+    if (s.phase === 'ready') return location.reload();
+    if (s.title) document.getElementById('title').textContent = s.title;
+    document.getElementById('steps').innerHTML = s.notes.map((n) => `<li><span class="i"></span><span class="n">${esc(n)}</span></li>`).join('')
+      + s.steps.map((st) => `<li class="${st.state}"><span class="i">${icon[st.state]}</span><span>${esc(st.label)}</span><span class="t">${st.ms != null ? secs(st.ms) : ''}</span>${st.detail ? `<span class="d">${esc(st.detail)}</span>` : ''}${st.notes.map((n) => `<span class="n">${esc(n)}</span>`).join('')}</li>`).join('');
+    if (s.phase === 'failed') {
+      const err = document.getElementById('err');
+      err.hidden = false;
+      err.textContent = s.error || 'The review could not be built.';
+      return;
+    }
+    setTimeout(poll, 700);
+  }
+  poll();
+})();
+</script>
+</body>
+</html>
