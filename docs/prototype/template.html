@@ -345,11 +345,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v7 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v8 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
     <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v6: a same change now has to be a real edit. Words changed in one comment line are one edit, not “the same change ×5”, and a lone bracket, comma, <code>!</code> or quote is never a same change. In #168 that leaves 25 groups instead of 53, and no change carries more than two “same change” badges, down from five.</p>
+    <p class="changed">Changed since v7: the first version is a local web app instead of a VS Code extension. A small command-line tool serves this page on localhost, so it opens in any browser, Orca’s included, and go to definition and search reach the whole repository.</p>
   </header>
 
   <section class="section" id="try">
@@ -359,7 +359,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <p class="section-intro prose">This viewer shows <a href="https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168">serverpod_offline_sync #168</a> as the rules see it. One build-time pass ran git, tree-sitter and the Dart analysis server (the one VS Code uses) over the PR. Nothing in it was written by hand for this PR.</p>
     </header>
     <ul class="try">
-      <li><b>Start on the chain map.</b> It lays the 58 linked chains out in 9 levels, with the model changes at the bottom. Click a chain to open it.</li>
+      <li><b>Start on the chain map.</b> It lays the 57 linked chains out in 9 levels, with the model changes at the bottom. Click a chain to open it.</li>
       <li><b>Click a node</b> in a chain’s graph to show only that member’s code. Click it again, or “Show all”, to go back.</li>
       <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted. When a hunk’s last change is reviewed, the hunk folds.</li>
       <li><b>Click an identifier</b> to peek at its definition, on added and removed lines alike. Each side has its own Dart analysis server.</li>
@@ -387,7 +387,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
         <div class="vw-main" id="vw-main"><div class="empty">Loading the model…</div></div>
       </div>
     </div>
-    <p class="muted" style="font-size:13.5px">Your marks are saved in this browser only. Go to definition works on both sides: the PR head for added and unchanged lines, the old side for removed ones. Generated files with more than 2,000 changed lines are listed without content.</p>
+    <p class="muted" style="font-size:13.5px">This is the static export: everything was computed ahead of time, so go to definition covers the identifiers in the diff, search covers the changed lines, and your marks are saved in this browser only. Go to definition works on both sides: the PR head for added and unchanged lines, the old side for removed ones. Generated files with more than 2,000 changed lines are listed without content.</p>
   </section>
 
   <section class="section" id="rules">
@@ -470,7 +470,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 to v6 reviews</h2>
+      <h2>Answers from the v2 to v7 reviews</h2>
     </header>
     <ol class="decide">
       <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another. Overlapping runs are one edit, and punctuation alone never counts.</span></li>
@@ -484,34 +484,60 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Graph</span><span>Clicking a node focuses on it and filters the code to it.</span></li>
       <li><span class="q">First screen</span><span>The chain map.</span></li>
       <li><span class="q">Models</span><span>Generated code links back to the model file it comes from.</span></li>
+      <li><span class="q">Where</span><span>A local web app, open in any browser. A VS Code extension can wrap it later.</span></li>
     </ol>
+  </section>
+
+
+
+  <section class="section" id="runs">
+    <header>
+      <span class="eyebrow">Where it runs</span>
+      <h2>A local web app, open in any browser</h2>
+      <p class="section-intro prose">A small command-line tool, <code>review serve</code>, serves this page on localhost. It runs git, tree-sitter and the language servers, and the page asks it for everything else. Any browser can open it: Orca’s, VS Code’s Simple Browser, or a remote machine’s through a forwarded port.</p>
+    </header>
+    <div class="musts">
+      <div class="must"><h3>Syntax highlighting</h3><p><a href="https://shiki.style">Shiki</a> colors both sides with VS Code’s own TextMate grammars and its Dark+ theme, so code looks as it does in the editor. This prototype still uses a regex tokenizer, with real rules for Dart and YAML only.</p></div>
+      <div class="must"><h3>Go to definition</h3><p>Asked live: a click sends the position to that side’s language server, so it works anywhere, in whole files, inside a peek and on removed lines. This static page only knows the identifiers in the diff.</p></div>
+      <div class="must"><h3>Search</h3><p>The whole repository at either revision, through <code>git grep</code>, next to the search over the changes you haven’t reviewed. A result opens the whole file.</p></div>
+    </div>
+    <div class="rules">
+      <div class="rule">
+        <div class="rule-text">
+          <span class="rule-k">The server</span>
+          <ul>
+            <li><b>Git:</b> diffs, files at either revision, and the reviewed-snapshot branch, with mergiraf on a rebase. Your marks are commits on that branch, so git-tree-compare and <code>git diff</code> still show what’s left.</li>
+            <li><b>Checkouts:</b> each side is a git worktree that shares objects with the repo (18 MB of source for #168), or an existing checkout of the same commit, such as an agent’s worktree.</li>
+            <li><b>Analysis:</b> this prototype’s core (edits, same changes, chains and the chain map), cached per pair of commits.</li>
+            <li><b>Language servers:</b> one per side. They answer the batch that builds chains, then the page’s live requests.</li>
+            <li><b>Access:</b> localhost only, with a random token in the URL, as Jupyter does.</li>
+          </ul>
+        </div>
+        <div class="rule-text">
+          <span class="rule-k">Around it</span>
+          <ul>
+            <li><b>Open in editor:</b> every location links to your editor, <code>vscode://file/…:line</code> by default, or a command you configure.</li>
+            <li><b>Static export:</b> <code>review export</code> writes the page as one HTML file with everything computed ahead, as this prototype is, for sharing a review read-only.</li>
+            <li><b>Editor extensions, later:</b> the same page in a webview, plus open in editor. Sapling’s <a href="https://sapling-scm.com/docs/addons/isl">Interactive Smartlog</a> works this way: <code>sl web</code> opens it in a browser, and Sapling’s VS Code extension embeds it.</li>
+            <li><b>Agents, later:</b> they can read the same JSON API the page uses, such as what’s left and which chain a change belongs to.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="section" id="cost">
     <header>
       <span class="eyebrow">Measured on #168</span>
-      <h2>What the second language server costs</h2>
-      <p class="section-intro prose">Measured on this machine with the Dart analysis server, resolving the identifiers of #168’s diff.</p>
+      <h2>What the language servers cost</h2>
+      <p class="section-intro prose">The web app runs its own Dart analysis servers, one per side. Measured on this machine, resolving the identifiers of #168’s diff.</p>
     </header>
     <div class="musts">
-      <div class="must"><h3>Memory</h3><p>One server peaks at about 640 MB on the PR head and 690 MB on the old side. Two separate servers need about 1.3 GB at the peak. One server with both checkouts as workspace folders peaks at about 850 MB, so the old side adds about 210 MB.</p></div>
-      <div class="must"><h3>Time</h3><p>The old side only resolves removed lines: 1,846 lookups in 23 seconds. The head side’s 8,526 lookups took 106 seconds. In the extension, the head side is the editor’s own server, which is already running.</p></div>
+      <div class="must"><h3>Memory</h3><p>One server peaks at about 640 MB on the PR head and 690 MB on the old side. Two separate servers need about 1.3 GB at the peak. One server with both checkouts as workspace folders peaks at about 850 MB, so the old side adds about 210 MB. This duplicates memory only when an editor already has the PR head open.</p></div>
+      <div class="must"><h3>Time</h3><p>The batch that builds chains took 106 seconds for the head side’s 8,526 lookups and 23 seconds for the old side’s 1,846, about 12 ms per lookup with startup. After that, a click on an identifier is one lookup.</p></div>
       <div class="must"><h3>Disk</h3><p>The old checkout is a git worktree that shares objects with the repo: 18 MB of source plus 76 KB of <code>.dart_tool</code>. Packages come from the shared pub cache, and this commit needed no new ones.</p></div>
     </div>
     <p class="filters"><b>It only has to run once per old commit.</b> The old side doesn’t change during a review, only on a rebase. Its answers can be computed once, cached (about 500 KB here), and the server stopped. The steady cost is then a cache file, and a burst of about 20 seconds when the base moves.</p>
-  </section>
-
-  <section class="section" id="musts">
-    <header>
-      <span class="eyebrow">The must-haves</span>
-      <h2>Highlighting, go to definition and search come from the editor</h2>
-      <p class="section-intro prose">The first version is a VS Code extension on top of a small core. The chain list, the chain map and the graphs live in a side panel. The code opens in the editor’s own diff.</p>
-    </header>
-    <div class="musts">
-      <div class="must"><h3>Syntax highlighting</h3><p>The editor’s grammar colors both sides of the diff. The core uses tree-sitter for its own analysis.</p></div>
-      <div class="must"><h3>Go to definition</h3><p>Both sides of the diff are real files in checkouts: the PR head on the right, the old side on the left. Each has the project’s language server, which also provides the links that build chains.</p></div>
-      <div class="must"><h3>Search</h3><p>The editor’s search covers the repository. The extension adds a search over the changes you haven’t reviewed.</p></div>
-    </div>
   </section>
 
   <section class="section" id="plan">
@@ -521,9 +547,9 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
     </header>
     <ol class="plan">
       <li><b>Snapshot CLI</b><span><code>review mark</code>, <code>status</code> and <code>rebase</code> with mergiraf, on a local branch. git-tree-compare and <code>git diff</code> can show what’s left from day one.</span></li>
-      <li><b>Analysis core</b><span>Tree-sitter edits, same-change groups, chains and the chain map from the language server, as in this prototype’s <code>analyze.js</code>.</span></li>
-      <li><b>VS Code extension</b><span>Chain panel with the map and graphs, the diff against the snapshot, mark actions, peek and search.</span></li>
-      <li><b>Later</b><span>Sharing snapshots with teammates and agents, and syncing GitHub’s viewed checkboxes.</span></li>
+      <li><b>Analysis core</b><span>Tree-sitter edits, same-change groups, chains and the chain map from the language servers, as in this prototype’s <code>analyze.js</code>, cached per pair of commits.</span></li>
+      <li><b>Local web app</b><span><code>review serve</code>: this page, served live. Go to definition on both sides, whole files, repository search, Shiki highlighting, open in editor, and marks written to the snapshot branch. <code>review export</code> writes the same page as one HTML file, for sharing a review read-only.</span></li>
+      <li><b>Later</b><span>A VS Code extension around the same page, the API for agents, sharing snapshots with teammates, and syncing GitHub’s viewed checkboxes.</span></li>
     </ol>
   </section>
 
@@ -533,12 +559,13 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <h2>Open questions</h2>
     </header>
     <ol class="q-list">
-      <li><span class="q">Q1</span><span><b>Old-side server:</b> start it once per old commit and cache its answers (cheapest), or add the old checkout to a long-lived server (about 210 MB more, but go to definition on removed lines stays live)?</span></li>
+      <li><span class="q">Q1</span><span><b>Language servers:</b> one server with both checkouts as roots (about 850 MB while a review is open, everything live), or the head live and the old side answered once per old commit and cached (about 640 MB, plus a 20-second burst when the base moves, with removed-line lookups limited to the diff)?</span></li>
       <li><span class="q">Q2</span><span><b>Member cohesion:</b> it makes chains complete but larger. <code>− OfflineSyncSpace.currentNode</code> reaches 64 changes because whole members join. Keep it, or show those changes as linked but outside?</span></li>
       <li><span class="q">Q3</span><span><b>Model adapters:</b> the generated-to-model mapping is Serverpod-specific. Should each generator ship a small adapter (Serverpod, freezed, json_serializable, protobuf), or should the mapping be declared in <code>.review.yaml</code>?</span></li>
       <li><span class="q">Q4</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
       <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
       <li><span class="q">Q6</span><span><b>Same change across symbols:</b> <code>userId → spaceId</code> as a declaration is one group of six different parameters. Requiring the language server to resolve each instance to the same declaration would split it into six. It would also split a class rename from its constructor calls, and an interface method from its override. Keep the syntax-only rule, or require the same symbol?</span></li>
+      <li><span class="q">Q7</span><span><b>Server language:</b> TypeScript on Node, which reuses this prototype, web-tree-sitter, Shiki and <code>vscode-jsonrpc</code> (the LSP layer VS Code is built on), or a single Rust binary, like mergiraf and difftastic?</span></li>
     </ol>
   </section>
 
@@ -552,6 +579,8 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><a href="https://pub.dev/packages/dart_source_graph">dart_source_graph</a></li>
       <li><a href="https://arxiv.org/abs/2609.32057">CG-Diff (arXiv 2609.32057)</a></li>
       <li><a href="https://mergiraf.org">mergiraf</a></li>
+      <li><a href="https://shiki.style">Shiki</a></li>
+      <li><a href="https://sapling-scm.com/docs/addons/isl">Sapling Interactive Smartlog</a></li>
       <li><a href="https://marketplace.visualstudio.com/items?itemName=letmaik.git-tree-compare">git-tree-compare</a></li>
     </ul>
   </footer>

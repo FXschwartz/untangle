@@ -1,8 +1,8 @@
-# UX proposal v7: start from the chain map, end in the code
+# UX proposal v8: start from the chain map, end in the code
 
-> Draft v7, 2026-10-13. Replaces v6 (see "History" at the end).
+> Draft v8, 2026-10-13. Replaces v7 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 8).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 9).
 > Prototype sources: [prototype/](prototype/).
 
 ## Requirements
@@ -46,6 +46,10 @@ From the review of v6:
 - **"Same change" triggers too much.** One doc-comment edit showed as "the same change
   ×5", a lone `(` or `!` was a same change, and one rewrite carried up to five badges.
 
+From the review of v7:
+- **The first version is a web page,** not a VS Code extension, so it runs anywhere,
+  including Orca's built-in browser.
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
@@ -59,6 +63,8 @@ From the review of v6:
 6. **Language servers on both sides.** This revises the v2 answer: removed lines get go
    to definition and link into chains like added lines.
 7. **The diff layout is choosable,** unified by default.
+8. **Where it runs:** a local web app first, open in any browser. A VS Code extension can
+   wrap it later.
 
 ## Rules
 
@@ -225,13 +231,17 @@ From the review of v6:
   | Markdown or YAML naming nothing in a chain | 9 |
   | Dart edits using only unchanged code (test names, package imports) | 7 |
 
-## Cost of the second language server (measured on #168)
+## Cost of the language servers (measured on #168)
+
+The web app runs its own Dart analysis servers, one per side.
 
 - **Memory:** about 640 MB peak on the PR head and 690 MB on the old side, so roughly
   1.3 GB for two separate servers. One server with both checkouts as workspace folders
-  peaks at about 850 MB, so the old side adds about 210 MB.
-- **Time:** the old side only resolves removed lines, 1,846 lookups in 23 s. The head
-  side's 8,526 lookups took 106 s; in the extension it's the editor's own server.
+  peaks at about 850 MB, so the old side adds about 210 MB. This duplicates memory only
+  when an editor already has the PR head open.
+- **Time:** the batch that builds chains took 106 s for the head side's 8,526 lookups and
+  23 s for the old side's 1,846, about 12 ms per lookup with startup. After that, a click
+  is one lookup.
 - **Disk:** the old checkout is a git worktree sharing objects with the repo: 18 MB of
   source plus 76 KB of `.dart_tool`. Packages come from the shared pub cache (no new ones
   for this commit).
@@ -244,30 +254,61 @@ From the review of v6:
 
 ## Where it runs
 
-- **VS Code extension first,** on top of a small core:
-  - The chain list and graph live in a side panel (webview).
-  - The code opens in the editor's diff with the snapshot on the left.
-  - Highlighting, go to definition and search come from the editor and the project's
-    language server. That same server provides the links that build chains.
-- **Core:** keeps the snapshot and computes edits, groups and chains. It is plain git
-  underneath, so git-tree-compare (full mode) or `git diff` can show what's left.
+**A local web app.** A small command-line tool, `review serve`, serves the page on
+localhost. It runs git, tree-sitter and the language servers, and the page asks it for
+everything else. Any browser can open it: Orca's, VS Code's Simple Browser, or a remote
+machine's through a forwarded port.
+
+| | Prototype page (static) | Served by `review serve` |
+|---|---|---|
+| Go to definition | Answered ahead of time for the identifiers in the diff (about 8,500 on the new side). A definition outside the diff opens as a snippet of up to 10 lines. | Asked live on click, anywhere: whole files, inside a peek, removed lines. |
+| Files | Diff hunks only | Any file at either revision |
+| Search | Changed lines | Changed lines, plus the repository at either revision (`git grep`) |
+| Highlighting | A regex tokenizer, with real rules for Dart and YAML only | [Shiki](https://shiki.style): VS Code's TextMate grammars and its Dark+ theme |
+| Review marks | Browser storage | Commits on the reviewed-snapshot branch |
+
+- **The server:**
+  - **Git:** diffs, files at either revision, and the reviewed-snapshot branch, with
+    mergiraf on a rebase. It is plain git underneath, so git-tree-compare (full mode) or
+    `git diff` can show what's left.
+  - **Checkouts:** each side is a git worktree that shares objects with the repo (18 MB
+    of source for #168), or an existing checkout of the same commit, such as an agent's
+    worktree.
+  - **Analysis:** the core from `prototype/analyze.js` (edits, same-change groups, chains
+    and the chain map), cached per pair of commits.
+  - **Language servers:** one per side. They answer the batch that builds chains, then
+    the page's live requests.
+  - **Access:** localhost only, with a random token in the URL, as Jupyter does.
+- **Open in editor:** every location links to the editor, `vscode://file/<path>:<line>`
+  by default, or a command you configure.
+- **Static export:** `review export` writes the page as one HTML file with everything
+  computed ahead, as this prototype is, for sharing a review read-only.
+- **Later:**
+  - **Editor extensions** that show the same page in a webview and add open in editor.
+    Sapling's [Interactive Smartlog](https://sapling-scm.com/docs/addons/isl) works this
+    way: `sl web` opens it in a browser, and Sapling's VS Code extension embeds it.
+  - **Agents** can read the same JSON API the page uses: what's left, and which chain a
+    change belongs to.
 
 ## Build order
 
 1. **Snapshot CLI:** `review mark`, `status`, and `rebase` with mergiraf, on a local
-   branch.
-2. **Analysis core:** tree-sitter edits, same-change groups, and chains from the language
-   server, as in `prototype/analyze.js`.
-3. **VS Code extension:** chain panel with graph, diff against the snapshot, mark
-   actions, peek, and search in unreviewed changes.
-4. **Later:** sharing snapshots with teammates and agents, and syncing GitHub's viewed
-   checkboxes.
+   branch. git-tree-compare and `git diff` show what's left from day one.
+2. **Analysis core:** tree-sitter edits, same-change groups, chains and the chain map from
+   the language servers, as in `prototype/analyze.js`, cached per pair of commits.
+3. **Local web app:** `review serve`, the page served live. Go to definition on both
+   sides, whole files, repository search, Shiki highlighting, open in editor, and marks
+   written to the snapshot branch. `review export` writes the same page as one HTML file,
+   for sharing a review read-only.
+4. **Later:** a VS Code extension around the same page, the API for agents, sharing
+   snapshots with teammates, and syncing GitHub's viewed checkboxes.
 
 ## Open questions
 
-- **Q1.** How should the old-side server run: once per old commit with cached answers
-  (cheapest), or as a second root of a long-lived server (about 210 MB more, with live go
-  to definition on removed lines)?
+- **Q1.** How should the language servers run: one server with both checkouts as roots
+  (about 850 MB while a review is open, everything live), or the head live and the old
+  side answered once per old commit and cached (about 640 MB, plus a 20-second burst when
+  the base moves, with removed-line lookups limited to the diff)?
 - **Q2.** Member cohesion makes chains complete but larger
   (`− OfflineSyncSpace.currentNode` reaches 64 changes). Should it stay?
 - **Q3.** Model adapters: should each generator ship one (Serverpod, freezed,
@@ -281,6 +322,9 @@ From the review of v6:
   resolve each instance to the same declaration would split it into six, but it would
   also split a class rename from its constructor calls and an interface method from its
   override.
+- **Q7.** What should the server be written in: TypeScript on Node, which reuses this
+  prototype, web-tree-sitter, Shiki and `vscode-jsonrpc` (the LSP layer VS Code is built
+  on), or a single Rust binary, like mergiraf and difftastic?
 
 ## History
 
@@ -311,6 +355,9 @@ From the review of v6:
     server.
 - **v6:** model links, measured cost of the second server.
   - Feedback: "same change" triggers too much.
+- **v7:** stricter same change.
+  - Feedback: make the first version a web page instead of a VS Code extension, so it
+    runs anywhere, including Orca's browser.
 
 ## References
 
@@ -321,5 +368,9 @@ From the review of v6:
 - [CG-Diff, arXiv 2609.32057](https://arxiv.org/abs/2609.32057): organizing PRs around
   call graphs.
 - [mergiraf](https://mergiraf.org): syntax-aware git merge driver.
+- [Shiki](https://shiki.style): syntax highlighting with VS Code's TextMate grammars, in
+  the browser.
+- [Sapling Interactive Smartlog](https://sapling-scm.com/docs/addons/isl): a local web UI
+  (`sl web`) that its VS Code extension embeds.
 - [git-tree-compare](https://marketplace.visualstudio.com/items?itemName=letmaik.git-tree-compare):
   compares the working tree against any branch, tag or commit; has a full diff mode.
