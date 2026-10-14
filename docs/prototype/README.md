@@ -34,7 +34,27 @@ and `since=0540639..a45f9aee30bcb170b863373840e63a0e42a0092b=Reviewed at 0540639
 It makes worktrees of both sides, runs `dart pub get`, and writes every file into `<out-dir>`.
 The results on #157, #166 and #162 are in [../02-test-runs.md](../02-test-runs.md).
 
-Set `BCR_DEPS` to another `node_modules` folder if the dependencies live elsewhere.
+**Generated code and adapters.** `analyze.js` sets generated files aside and links usages that resolve
+into them back to their source, through an adapter per generator: Serverpod (`*.spy.yaml`),
+generated part files (`*.g.dart`, `*.freezed.dart`) and protobuf (`*.proto`). Each switches on by
+what the repository contains. A `.review.yaml` at the repository root can override them:
+
+```yaml
+generated:            # more generated patterns
+  - '**/*.gen.dart'
+adapters:             # turn an adapter on or off
+  protobuf: false
+models:               # a YAML-model mapping of your own
+  - generated: ['**/gen/**']
+    source: '**/*.model.yaml'
+    classSuffixes: 'Table|Repository'
+```
+
+`make_fixture.sh <dir>` builds a three-commit repository that exercises the part-file and protobuf
+adapters (the third commit turns protobuf off with `.review.yaml`); run `run_pr.sh` on it.
+
+Set `BCR_DEPS` to another `node_modules` folder if the dependencies live elsewhere (`npm install` here
+installs `web-tree-sitter`, the grammars and `yaml`).
 
 Cost measurements: `measure_lsp.sh <worktree> <positions.json>` reports the language server's
 peak memory and time. `lsp_two_roots.py <head> <old> positions.json positions_old_base.json`

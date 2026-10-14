@@ -1,8 +1,8 @@
-# UX proposal v11: start from the chain map, end in the code
+# UX proposal v12: start from the chain map, end in the code
 
-> Draft v11, 2026-10-13. Replaces v10 (see "History" at the end).
+> Draft v12, 2026-10-14. Replaces v11 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 12).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 13).
 > Prototype sources: [prototype/](prototype/).
 > Test runs of these rules on #157, #166 and #162: [02-test-runs.md](02-test-runs.md).
 
@@ -62,6 +62,9 @@ From the review of v9 and the test runs ([02-test-runs.md](02-test-runs.md)):
 From the review of v10:
 - **Changes that override the same method join one chain** (Q6).
 
+From the review of v11:
+- **Adopt the proposed answers to Q1–Q5.**
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
@@ -81,6 +84,15 @@ From the review of v10:
    definition stays live on both sides (about 850 MB on #168).
 10. **Server language:** TypeScript on Node, for now.
 11. **Overrides:** changed methods that override the same method join one chain.
+12. **Member cohesion:** only for changes no other rule links. A chain shows the rest of its
+    members folded, as context.
+13. **Model adapters:** one per generator, built in and switched on by what the repository
+    contains; `.review.yaml` can turn one off, add generated patterns or declare a mapping.
+14. **Chain order:** by level, never by review progress, with a "next unreviewed" action.
+15. **Large graphs:** a test file's tests are one node; code stays one node per member;
+    "+N more" only when a level is still too busy.
+16. **Same change across declarations:** syntax only; the group view shows the declaration
+    each place resolves to, and each can be marked on its own.
 
 ## Rules
 
@@ -129,7 +141,8 @@ From the review of v10:
    server's outgoing calls are followed up to 3 levels inside the repository. The test links
    to the first changed function on each path.
 8. **A same-change group that names an identifier is a chain.**
-9. **Member cohesion.** A chain takes every change of the members it touches.
+9. **Member cohesion.** A change that no other rule links joins the chains of its member.
+   Changes that already belong to a chain stay out of other chains.
    - In test files, the member is the enclosing `test(...)`.
    - A comment-only change belongs to the declaration it documents, unless the block holds
      that declaration itself.
@@ -150,12 +163,20 @@ From the review of v10:
     - A `part` directive joins the chains that have changes in its part file.
     - A Markdown change that names a chain's member or declaration in backticks joins that
       chain.
-13. **Generated code leads back to its model.** A usage that resolves into generated code
-    (`**/generated/**`) links to the change of the model field it was generated from
-    (`**/*.spy.yaml`), on either side.
-    - Serverpod adapter: generated `Table`, `Include` and `Repository` classes map to the
-      model class, and a relation's `…Id` column maps to the relation field.
-    - A doc-comment change in the model belongs to the field below it.
+13. **Generated code leads back to what it was generated from,** through an adapter per
+    generator. Each switches on by what the repository contains, on either side of the diff:
+    - **Serverpod** (`*.spy.yaml`): generated `Table`, `Include` and `Repository` classes map
+      to the model class, a field to the model field, and a relation's `…Id` column to the
+      relation. A doc-comment change in the model belongs to the field below it.
+    - **Generated part files** (`*.g.dart`, `*.freezed.dart`: freezed, json_serializable,
+      built_value and the like): `_$User`, `$UserCopyWith` and `_User` map to `User` in the
+      library that owns the part, and their members to `User`'s members or constructor
+      parameters.
+    - **Protobuf** (`*.proto`): a generated message class maps to its message, and a getter
+      or its `has`/`clear`/`ensure` accessor to the field in snake_case.
+    - **`.review.yaml`** at the repository root can add `generated:` patterns, turn an
+      adapter on or off (`adapters:`), and declare YAML-model mappings of its own (`models:`,
+      with `generated`, `source` and `classSuffixes`).
 14. A chain needs at least two members; same-change chains need two changes. Chains with
     exactly the same changes are one chain. Changes in no chain are listed by file.
 15. **Name:** the best declaration inside the chain: what remains before what was removed,
@@ -165,6 +186,7 @@ From the review of v10:
 16. **Graph:**
     - one node per member;
     - nodes that are all the same change, 3 or more times, collapse into one;
+    - the tests of one test file are one node;
     - arrows go from a change to what it uses;
     - layers are the distance from the root.
 17. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
@@ -215,8 +237,10 @@ From the review of v10:
 
 ### Generated files
 
-- A file is generated when `.gitattributes` marks it `linguist-generated`, or when it
-  matches `generated` patterns in `.review.yaml`.
+- A file is generated when `.gitattributes` marks it `linguist-generated`, when an active
+  adapter's patterns match it (Serverpod's `generated/` and `migrations/`, `*.g.dart`,
+  `*.freezed.dart`, `*.pb.dart` and the like), or when it matches `generated` patterns in
+  `.review.yaml`.
 - Generated files are never reviewed or counted. They are listed apart and can be opened
   read-only.
 
@@ -232,6 +256,14 @@ From the review of v10:
 - **Each view has its own hunks.** A chain section shows each change with 3 lines of
   context, merged when they touch. Folding a hunk in one place never folds another.
 - **Clicking a graph node** shows only that node's code and dims unrelated nodes.
+- **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
+  stay in place, muted. "Next unreviewed" (key `n`) walks the same order.
+- **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
+  of one test file lists its tests by `group(...)` instead of drawing a graph.
+- **The rest of a member:** a chain section folds the member's other changes, which belong to
+  other chains ("3 more changes in this member, in other chains").
+- **Same change by declaration:** the group view lists its places under the declaration each
+  resolves to ("6 places · 6 declarations"), with marking per declaration.
 - **Moved code:** the added copy shows "Moved from file:line" and the diff of the two
   bodies. Unchanged moved lines are tinted and long runs of them fold. The removed copy is
   one line, "N lines moved to file:line".
@@ -252,25 +284,26 @@ From the review of v10:
 | Edits | 740 | 432 |
 | Same-change groups | 33 | 16 |
 | Changes with 2+ same-change badges (most on one) | 5 (2) | 1 (2) |
-| Chains (across files / within a file) | 54 (31 / 23) | 40 (15 / 25) |
+| Chains (across files / within a file) | 56 (33 / 23) | 41 (15 / 26) |
 | Changes in a chain / not in a chain | 550 / 30 | 191 / 74 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
 Changes went up from 387 because each declaration and each test is now a change of its own.
 
-- **Largest chain:** `OfflineSyncDatabase.mergeChanges`, with 254 changes in 43 files
-  (+1,307 −371), drawn as 52 nodes. The 154 identical call-site edits are one node.
+- **Largest chain:** `OfflineSyncDatabase.mergeChanges`, with 251 changes in 43 files
+  (+1,290 −371), drawn as 38 nodes. The 154 identical call-site edits are one node, and so
+  are each test file's tests.
 - **Removed declarations:** 8 chains start at one, such as
-  `− OfflineSyncSpaceManager._cachedCurrentNode` with 12 changes.
+  `− OfflineSyncSpaceManager._cachedCurrentNode` with 7 changes.
 - **Old-side language server:** it resolved 1,795 of 1,846 removed-line identifiers
   (main) and 1,223 of 1,246 (snapshot).
 - **Model chains:**
 
   | Chain | Changes | Files |
   |---|---:|---:|
-  | `− OfflineSyncSpace.currentNode` | 66 | 18 |
-  | `CrdtNode.localUserUuid` | 31 | 11 |
-  | `OfflineSyncSpace.lastHlc` | 11 | 6 |
+  | `− OfflineSyncSpace.currentNode` | 48 | 18 |
+  | `CrdtNode.localUserUuid` | 22 | 11 |
+  | `OfflineSyncSpace.lastHlc` | 9 | 6 |
 
 - **Same change, v6 → v7:**
 
@@ -287,10 +320,18 @@ Changes went up from 387 because each declaration and each test is now a change 
   `mergeChanges` calls), `hlcManagerFor → spaceIdFor` (14), `nodeUuid → .nodeUuidFor(space)`
   (14). What went away was punctuation (`(` ×9, `!` ×6, `,` ×5, `}` ×4, `'` → `"` ×4, empty
   `///` ×8) and self-repeats (one doc-comment line counted 5 times).
-- **Chain of chains:** the main family has 37 chains in 6 levels, with the model chains near
+- **Chain of chains:** the main family has 39 chains in 6 levels, with the model chains near
   the bottom. Tests use `mergeChanges`, which uses `_transactionAs` and the recorder
   wrappers. Those use the space manager and context locks, which use `_UserClock` and the
-  cache fields. Ten chains link to no other.
+  cache fields. Fifteen chains link to no other.
+- **Member cohesion (Q1):** limiting it to changes no rule links keeps the same 550 changes in
+  chains and shrinks the chains it used to inflate: `− OfflineSyncSpace.currentNode` 66 → 48,
+  `_transactionAs` 54 → 38, and chain memberships 1,014 → 869.
+- **Adapters (Q2):** `prototype/make_fixture.sh` builds a three-commit repo with a
+  freezed-style part file and a protobuf message. Both new fields link to the code that
+  reads them through the generated files (`User(email)`, `Account.billing_email`), and the
+  third commit's `.review.yaml` turns protobuf off, so `.pb.dart` is reviewed as normal
+  code.
 - **Still outside a chain (30):**
 
   | Reason | Changes |
@@ -376,19 +417,8 @@ machine's through a forwarded port.
 
 ## Open questions
 
-- **Q1.** Member cohesion makes chains complete but larger
-  (`− OfflineSyncSpace.currentNode` reaches 66 changes). Should it stay?
-- **Q2.** Model adapters: should each generator ship one (Serverpod, freezed,
-  json_serializable, protobuf), or should the mapping be declared in `.review.yaml`?
-- **Q3.** How should chains inside a family be ordered: by level, or by what is left to
-  review?
-- **Q4.** For large graphs, should busy levels collapse into "+N more", or should nodes be
-  grouped by file?
-- **Q5.** Should a same change also need the same symbol? `userId → spaceId` as a
-  declaration is one group of six different parameters. Requiring the language server to
-  resolve each instance to the same declaration would split it into six, but it would
-  also split a class rename from its constructor calls and an interface method from its
-  override.
+None right now: Q1–Q5 from v11 are decided (decisions 12–16). The next ones will come from
+building it.
 
 ## History
 
@@ -432,6 +462,10 @@ machine's through a forwarded port.
   - Feedback: fix all of them.
 - **v10:** the fixes, with the three PRs in the viewer.
   - Decided: overrides of the same method join one chain (Q6).
+- **v11:** overrides as one chain.
+  - Decided: Q1–Q5 as proposed (cohesion only for unlinked changes, adapters per generator,
+    chain order by level, tests grouped by file in graphs, same change by syntax with
+    declarations shown).
 
 ## References
 

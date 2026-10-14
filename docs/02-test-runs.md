@@ -107,7 +107,7 @@ test is now a change of its own.
 
 | PR | Changes | Chains | Changes in a chain | Outside | Identical chains | Moved declarations |
 |---|---:|---:|---:|---:|---:|---:|
-| #168 | 387 → 580 | 65 → 54 | 93% → 95% | 28 → 30 | 1 → 0 | 0 |
+| #168 | 387 → 580 | 65 → 56 | 93% → 95% | 28 → 30 | 1 → 0 | 0 |
 | #157 | 52 → 102 | 13 → 11 | 85% → 97% | 8 → 3 | 1 → 0 | 6 |
 | #166 | 58 → 123 | 12 → 14 | 74% → 91% | 15 → 11 | 2 → 0 | 0 |
 | #162 | 64 → 104 | 5 → 12 | 83% → 94% | 11 → 6 | 0 | 0 |
@@ -144,5 +144,11 @@ Two rules had to be narrowed after the first try, both found by these runs:
 **Overrides (Q6, decided after these runs):** changed methods that override the same
 method join one chain. In #162 the real database's `watch` and the benchmark's query
 counter are now one chain, `overrides Database.watch`, and so are their `unsafeWatch`.
+
+**Q1–Q5 (decided after these runs):** member cohesion now applies only to changes nothing
+else links. Every PR keeps the same coverage, and the chains it inflated shrink (#168's
+`− OfflineSyncSpace.currentNode` 66 → 48). Generated-code adapters for part files and
+protobuf are checked on a fixture (`prototype/make_fixture.sh`), since none of these PRs uses
+those generators.
 
 **Still open:** moves are detected for whole declarations only, and only in Dart.

@@ -32,17 +32,37 @@ const OLD = Object.fromEntries(OLD_ARGS.map((a) => { const [name, dir, defs] = a
 const HEAD = path.resolve(HEADDIR) + '/';
 const DEPS = process.env.BCR_DEPS || path.join(__dirname, 'node_modules');
 const { Parser, Language } = require(DEPS + '/web-tree-sitter/tree-sitter.cjs');
-const CONFIG = {
-  generated: ['**/migrations/**'],
-  peekMaxLines: 2000,
-  // Generated code maps back to the model it comes from (a Serverpod adapter): a usage that
-  // resolves into generated code links to the change of the model field it was generated from.
-  models: { generated: '**/generated/**', source: '**/*.spy.yaml', classSuffixes: /(Table|Include|IncludeList|Repository|AttachRepository|AttachRowRepository|DetachRepository|DetachRowRepository)$/ },
+const YAML = require(DEPS + '/yaml');
+// ---------- generated code
+// Generated files are set aside: listed, peekable, never reviewed. A usage that resolves into
+// generated code links to the change of what it was generated from. Each generator has an
+// adapter that switches on by what the repository contains; .review.yaml at the root can add
+// generated patterns, turn an adapter on or off, or declare a YAML-model mapping of its own.
+const PEEK_MAX_LINES = 2000;
+const ADAPTERS = {
+  // Serverpod: a generated class maps to its model class (minus the suffix), a field to the
+  // model field of the same name, and a relation's …Id column to the relation.
+  serverpod: {
+    detect: /\.spy\.yaml$/, generated: ['**/generated/**', '**/migrations/**'],
+    model: { kind: 'yaml', generated: ['**/generated/**'], source: '**/*.spy.yaml', classSuffixes: 'Table|Include|IncludeList|Repository|AttachRepository|AttachRowRepository|DetachRepository|DetachRowRepository' },
+  },
+  // Generated part files (build_runner: freezed, json_serializable, built_value, riverpod...):
+  // a generated declaration maps to the one it was generated for, in the library that owns
+  // the part. _$User, $UserCopyWith and _User map to User, and their members to User's.
+  build_runner: {
+    detect: /\.(g|freezed)\.dart$/, generated: ['**/*.g.dart', '**/*.freezed.dart', '**/*.gr.dart', '**/*.config.dart', '**/*.mocks.dart'],
+    model: { kind: 'part', generated: ['**/*.g.dart', '**/*.freezed.dart'] },
+  },
+  // Protobuf: a generated message class maps to its .proto message, and a getter (or its
+  // has/clear/ensure accessor) to the field of the same name in snake_case.
+  protobuf: {
+    detect: /\.proto$/, generated: ['**/*.pb.dart', '**/*.pbenum.dart', '**/*.pbjson.dart', '**/*.pbserver.dart', '**/*.pbgrpc.dart'],
+    model: { kind: 'proto', generated: ['**/*.pb.dart'], source: '**/*.proto' },
+  },
 };
-const MODEL_GEN = C.globToRegExp(CONFIG.models.generated), MODEL_SRC = C.globToRegExp(CONFIG.models.source);
-const GEN_RES = CONFIG.generated.map(C.globToRegExp);
+const compileMapping = (name, m) => ({ name, kind: m.kind || 'yaml', generated: [].concat(m.generated || []).map(C.globToRegExp), source: m.source ? C.globToRegExp(m.source) : null, classSuffixes: m.classSuffixes ? new RegExp('(' + m.classSuffixes + ')$') : null, fields: new Map() });
 
-const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { return null; } };
+const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 const CODE_KINDS = new Set(['id', 'ty', 'kw', 'num', 'ann', 'key']);
 const SIGNATURES = new Set(['method_signature', 'function_signature', 'getter_signature', 'setter_signature', 'constructor_signature', 'factory_constructor_signature', 'operator_signature', 'redirecting_factory_constructor_signature', 'constant_constructor_signature']);
@@ -160,7 +180,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     if (!tree) return null;
     const col = Math.max(0, text.search(/\S/));
     let n = tree.rootNode.descendantForPosition(pos(line, col));
-    let member = null, owner = null, test = null;
+    let member = null, owner = null, test = null, group = null;
     for (let a = n; a; a = a.parent) {
       if (!member && a.type === 'function_body') {
         const s = a.previousNamedSibling;
@@ -173,13 +193,14 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         const id = ii && ii.child(0) && ii.child(0).type === 'identifier' ? ii.child(0) : a.descendantsOfType('identifier')[0];
         if (id) member = id.text;
       }
-      if (!test && a.type === 'expression_statement') {
+      if (a.type === 'expression_statement' && (!test || !group)) {
         const m = /^(test|group)\s*\(\s*(['"])((?:\\.|(?!\2).)*)\2/.exec(a.text);
-        if (m) test = m[3];
+        if (m && !test) test = m[3];
+        if (m && m[1] === 'group' && !group) group = m[3];
       }
-      if (!owner && TYPES.has(a.type)) { const nm = a.childForFieldName('name'); owner = nm ? nm.text : null; }
+      if (!owner && TYPES.has(a.type)) { const nm = a.childForFieldName('name') || a.namedChildren.find((x) => x.type === 'identifier'); owner = nm ? nm.text : null; }
     }
-    return { member: member ? (owner && !member.includes('.') ? owner + '.' + member : member) : owner || null, test };
+    return { member: member ? (owner && !member.includes('.') ? owner + '.' + member : member) : owner || null, test, group };
   }
   // Role of a replaced token: a declaration name (the language server resolves it to
   // itself), a named-argument label, a type, or a reference.
@@ -208,13 +229,24 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
 
   for (const [name, cmp] of Object.entries(diff.compares)) {
     const meta = { left: cmp.left, right: cmp.right, label: cmp.label };
+    // Adapters on for this head, and what .review.yaml adds.
+    const repoPaths = execFileSync('git', ['-C', REPO, 'ls-tree', '-r', '--name-only', meta.right], { encoding: 'utf8', maxBuffer: 256 << 20 }).split('\n').filter(Boolean);
+    let review = {};
+    try { review = YAML.parse(gitShow(meta.right, '.review.yaml') || '') || {}; } catch (e) { console.warn('.review.yaml is not valid YAML:', e.message); }
+    const adapterOn = Object.fromEntries(Object.entries(ADAPTERS).map(([k, a]) => [k, review.adapters && k in review.adapters ? !!review.adapters[k] : repoPaths.some((p) => a.detect.test(p))]));
+    const mappings = Object.entries(ADAPTERS).filter(([k]) => adapterOn[k]).map(([k, a]) => compileMapping(k, a.model))
+      .concat((review.models || []).map((m, i) => compileMapping('.review.yaml models[' + i + ']', m)));
+    const genRules = Object.entries(ADAPTERS).filter(([k]) => adapterOn[k]).flatMap(([k, a]) => a.generated.map((g) => [C.globToRegExp(g), k + ' adapter']))
+      .concat((review.generated || []).map((g) => [C.globToRegExp(g), '.review.yaml']));
+    const mappingFor = (rel) => mappings.find((mp) => mp.generated.some((rx) => rx.test(rel)));
     const files = [], generated = [];
     for (const f0 of cmp.files) {
       const f = JSON.parse(JSON.stringify(f0));
       const byAttr = f.ga === 'true';
-      if (byAttr || GEN_RES.some((rx) => rx.test(f.p))) {
-        f.gen = byAttr ? '.gitattributes' : '.review.yaml';
-        if ((f.a + f.d) <= CONFIG.peekMaxLines) {
+      const rule = genRules.find(([rx]) => rx.test(f.p));
+      if (byAttr || rule) {
+        f.gen = byAttr ? '.gitattributes' : rule[1];
+        if ((f.a + f.d) <= PEEK_MAX_LINES) {
           const text = execFileSync('git', ['-C', REPO, 'diff', '--no-renames', '-U3', meta.left, meta.right, '--', f.p], { encoding: 'utf8', maxBuffer: 64 << 20 });
           f.hunks = [];
           let cur = null;
@@ -448,17 +480,19 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         if (!rows.length) { rows = b.rows.filter((r) => r.type === '-' && codeRow(r)); tree = f.oldTree; line = (r) => r.o; }
         if (!rows.length) rows = b.rows.filter((r) => r.type === '+').length ? b.rows.filter((r) => r.type === '+') : b.rows;
         const tally = new Map();
-        let firstTest = null;
+        let firstTest = null, firstGroup = null;
         rows.forEach((r) => {
           const at = memberAt(tree, line(r), r.text);
           const k = at && at.member ? at.member : null;
           tally.set(k, (tally.get(k) || 0) + 1);
           if (!firstTest && at && at.test) firstTest = at.test;
+          if (!firstGroup && at && at.group) firstGroup = at.group;
         });
         let best = null, bestN = -1;
         tally.forEach((n, k) => { if (n > bestN) { best = k; bestN = n; } });
         b.member = best;
         b.test = firstTest;
+        b.group = firstGroup;
         // A comment-only change documents the declaration below it, unless the block holds
         // that declaration itself (a class whose doc comment changed).
         const commentOnly = b.atoms.length && b.atoms.every((a) => a.commentOnly) && !b.rows.some((r) => r.type !== ' ' && codeRow(r) && !/^\s*@/.test(r.text));
@@ -481,9 +515,9 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
 
     const decls = new Map();
     const usesOf = new Map();
-    // ---------- model fields changed in this comparison: Class.field -> blocks of the .spy.yaml
-    const modelFields = new Map();
-    files.filter((f) => MODEL_SRC.test(f.p)).forEach((f) => {
+    // ---------- model fields changed in this comparison: Class.field -> blocks of the model file
+    mappings.filter((mp) => mp.kind === 'yaml').forEach((mp) => files.filter((f) => mp.source && mp.source.test(f.p)).forEach((f) => {
+      const modelFields = mp.fields;
       const cls = (src) => { const m = src && /^(?:class|exception):\s*(\w+)/m.exec(src); return m ? m[1] : null; };
       const name = cls(f.newSrc) || cls(f.oldSrc);
       if (!name) return;
@@ -504,20 +538,34 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
           types.forEach((t) => modelFields.get(k).types.add(t));
         });
       });
-    });
-    const genTrees = new Map();
-    const genTarget = (abs, line, col) => {
-      if (!genTrees.has(abs)) { let src = null; try { src = fs.readFileSync(abs, 'utf8'); } catch {} genTrees.set(abs, src && { src, tree: parser.parse(src) }); }
-      const g = genTrees.get(abs);
-      if (!g) return null;
-      const text = g.src.split('\n')[line - 1] || '';
-      const id = /^[A-Za-z_$][\w$]*/.exec(text.slice(col));
-      const at = memberAt(g.tree, line, ' '.repeat(col) + 'x');
-      const owner = at && at.member ? at.member.split('.')[0].replace(CONFIG.models.classSuffixes, '') : null;
-      if (!id || !owner) return null;
-      const name = id[0];
-      return modelFields.get(owner + '.' + name) || (name.endsWith('Id') ? modelFields.get(owner + '.' + name.slice(0, -2)) : null) || null;
+    }));
+    // Protobuf: messages (nested ones joined with _) and their fields, by line, on each side.
+    const protoFields = (src) => {
+      const out = new Map(), stack = [];
+      (src || '').split('\n').forEach((raw, i) => {
+        const t = raw.replace(/\/\/.*$/, '');
+        const msg = stack.filter(Boolean).join('_');
+        const m = /^\s*message\s+(\w+)\s*\{/.exec(t);
+        const fm = !m && /^\s*(?:repeated\s+|optional\s+|required\s+)?[\w.]+(?:<[^>]*>)?\s+(\w+)\s*=\s*\d+/.exec(t);
+        if (fm && msg) out.set(i + 1, { msg, field: fm[1] });
+        let first = true;
+        for (const ch of t) { if (ch === '{') { stack.push(m && first ? m[1] : null); first = false; } else if (ch === '}') stack.pop(); }
+      });
+      return out;
     };
+    const camel = (snake) => snake.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
+    mappings.filter((mp) => mp.kind === 'proto').forEach((mp) => files.filter((f) => mp.source && mp.source.test(f.p)).forEach((f) => {
+      const nf = protoFields(f.newSrc), of = protoFields(f.oldSrc);
+      f.blocks.forEach((b) => b.rows.forEach((r) => {
+        const hit = r.type === '+' ? nf.get(r.n) : r.type === '-' ? of.get(r.o) : null;
+        if (!hit) return;
+        const k = hit.msg + '.' + camel(hit.field);
+        if (!mp.fields.has(k)) mp.fields.set(k, { blocks: [], types: new Set(), file: f.p, cls: hit.msg, field: hit.field });
+        const mf = mp.fields.get(k);
+        if (!mf.blocks.includes(b)) mf.blocks.push(b);
+        mf.types.add(r.type);
+      }));
+    }));
     // A usage whose definition is generated from a changed model field links to that field's change.
     const linkModel = (u, mf, removedSide) => {
       const dk = `model:${mf.file}:${mf.cls}.${mf.field}`;
@@ -542,6 +590,48 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const diskTree = (abs) => {
       if (!diskTrees.has(abs)) { let src = null; try { src = fs.readFileSync(abs, 'utf8'); } catch {} diskTrees.set(abs, src && { tree: parser.parse(src), lines: src.split('\n') }); }
       return diskTrees.get(abs);
+    };
+    // Where a usage that resolves into generated code leads: a model field (YAML or protobuf),
+    // or the declaration it was generated for (generated parts). Undefined when the target
+    // isn't generated code a mapping covers.
+    const cleanGenerated = (n) => n.replace(/^_?\$+/, '').replace(/^_/, '').replace(/(CopyWithImpl|CopyWith|Impl|FromJson|ToJson)$/, '');
+    const genLink = (abs, root, line, col) => {
+      const rel = abs.slice(root.length);
+      const mp = mappingFor(rel);
+      if (!mp) return undefined;
+      const g = diskTree(abs);
+      if (!g) return null;
+      const id = /^[A-Za-z_$][\w$]*/.exec((g.lines[line - 1] || '').slice(col));
+      const at = memberAt(g.tree, line, ' '.repeat(col) + 'x');
+      if (!id || !at || !at.member) return null;
+      const name = id[0], dot = at.member.indexOf('.');
+      const owner = dot > 0 ? at.member.slice(0, dot) : null;
+      if (mp.kind === 'yaml') {
+        const cls = (owner || at.member).replace(mp.classSuffixes || /$^/, '');
+        const mf = mp.fields.get(cls + '.' + name) || (name.endsWith('Id') ? mp.fields.get(cls + '.' + name.slice(0, -2)) : null);
+        return mf ? { field: mf } : null;
+      }
+      if (mp.kind === 'proto') {
+        const field = name.replace(/^(has|clear|ensure)(?=[A-Z])/, '');
+        const mf = owner && mp.fields.get(owner + '.' + field.charAt(0).toLowerCase() + field.slice(1));
+        return mf ? { field: mf } : null;
+      }
+      // A generated part: find what it was generated for in the library that owns the part.
+      const partOf = /^\s*part\s+of\s+['"]([^'"]+)['"]/m.exec(g.lines.join('\n'));
+      if (!partOf) return null;
+      const libAbs = path.resolve(path.dirname(abs), partOf[1]), lib = diskTree(libAbs);
+      if (!lib || !libAbs.startsWith(root)) return null;
+      const base = cleanGenerated(owner || at.member), member = owner ? name : null;
+      let hit = null;
+      for (let i = 0; i < lib.tree.rootNode.namedChildCount && !hit; i++) {
+        const n = lib.tree.rootNode.namedChild(i);
+        const nm = TYPES.has(n.type) && (n.childForFieldName('name') || n.namedChildren.find((x) => x.type === 'identifier'));
+        if (!nm || nm.text !== base) continue;
+        hit = nm;
+        // A member, or a parameter of a constructor (freezed's fields are factory parameters).
+        if (member) for (const x of n.descendantsOfType('identifier')) { if (x.text === member && x.startIndex !== nm.startIndex && x.parent && x.parent.type !== 'type_identifier') { const p = x.parent.type; if (/formal_parameter|signature|initialized_identifier|declaration/.test(p) || SIGNATURES.has(p)) { hit = x; break; } } }
+      }
+      return hit ? { decl: { rel: libAbs.slice(root.length), line: hit.startPosition.row + 1, col: hit.startPosition.column } } : null;
     };
     // What a definition target is, independent of line shifts: file, name, enclosing member.
     const targetSig = (abs, root, line0, col) => {
@@ -639,7 +729,12 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       const u = plusRow.get(p + ':' + line);
       if (!u || !tpath.startsWith(HEAD) || !(changedCol(u.r, col) || rebound(u, col))) continue;
       const rel = tpath.slice(HEAD.length);
-      if (MODEL_GEN.test(rel)) { const mf = genTarget(tpath, tl + 1, tc); if (mf) linkModel(u, mf, false); continue; }
+      const gl = genLink(tpath, HEAD, tl + 1, tc);
+      if (gl !== undefined) {
+        if (gl && gl.field) linkModel(u, gl.field, false);
+        else if (gl && gl.decl) { const d2 = plusRow.get(gl.decl.rel + ':' + gl.decl.line); if (d2 && d2.b !== u.b) addUse(u, `${gl.decl.rel}:${gl.decl.line}:${gl.decl.col}`, declAt(gl.decl.rel, d2.f, d2.b, gl.decl.line, gl.decl.col)); }
+        continue;
+      }
       const d = plusRow.get(rel + ':' + (tl + 1));
       if (d) { if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc)); continue; }
       // A test links to the changed code it reaches: the first changed function on each path
@@ -761,7 +856,8 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         const u = minusRow.get(p + ':' + line);
         if (!u || !tpath.startsWith(old.dir) || !changedCol(u.r, col)) continue;
         const rel = tpath.slice(old.dir.length);
-        if (MODEL_GEN.test(rel)) { const mf = genTarget(tpath, tl + 1, tc); if (mf) linkModel(u, mf, true); continue; }
+        const gl = genLink(tpath, old.dir, tl + 1, tc);
+        if (gl !== undefined) { if (gl && gl.field) linkModel(u, gl.field, true); continue; }
         const d = minusRow.get(rel + ':' + (tl + 1));
         if (!d || d.b === u.b) continue;
         const dk = `old:${rel}:${tl + 1}:${tc}`;
@@ -848,11 +944,13 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const isPublic = (d) => ![d.name, ...String(d.member || '').split('.')].some((x) => String(x).startsWith('_'));
     const rootRank = (d) => (d.removed ? 100 : 0) + (d.kind === 'member' || d.kind === 'type' ? 0 : d.kind === 'param' ? 20 : 40) + (isPublic(d) ? 0 : 10);
     chains = chains.filter((c) => (c.kind === 'group' ? c.blocks.size > 1 : memberCount(c) > 1));
-    // Member cohesion: a chain takes every change of the members it touches (a test counts as
-    // a member in test files; top-level code doesn't).
+    // Member cohesion: a change that no rule links joins the chains of its member (a test counts
+    // as a member in test files; top-level code doesn't). Changes that already belong to a chain
+    // stay out of other chains.
     const byMember = new Map();
     allBlocks.forEach((b) => { if (!b.memberKey.endsWith('::(top)')) { if (!byMember.has(b.memberKey)) byMember.set(b.memberKey, []); byMember.get(b.memberKey).push(b); } });
-    chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => c.blocks.add(x))); });
+    const linkedBlocks = new Set(chains.flatMap((c) => [...c.blocks]));
+    chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => { if (!linkedBlocks.has(x)) c.blocks.add(x); })); });
     chains.forEach((c) => {
       const inside = [...decls.values()].filter((d) => c.blocks.has(d.block)).map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length })).filter((x) => x.n > 0);
       // In a ripple, the top parameter comes first: its callers don't pass it on from a
@@ -991,7 +1089,8 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     chains.forEach((c, i) => { c.id = i; c.files = new Set([...c.blocks].map((b) => b.file.p)).size; });
 
     // Graph per chain: nodes are members; blocks whose edits are all one same-change group
-    // that appears 3+ times in the chain collapse into one node.
+    // that appears 3+ times in the chain collapse into one node, and the tests of one test file
+    // are one node.
     for (const c of chains) {
       const groupCount = new Map();
       c.blocks.forEach((b) => { const gs = new Set(b.edits.map((e) => e.group)); if (gs.size === 1 && [...gs][0] !== undefined) groupCount.set([...gs][0], (groupCount.get([...gs][0]) || 0) + 1); });
@@ -1000,10 +1099,12 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       [...c.blocks].sort((x, y) => (x.id < y.id ? -1 : 1)).forEach((b) => {
         const gs = new Set(b.edits.map((e) => e.group));
         const g = gs.size === 1 ? [...gs][0] : undefined;
-        const key = g !== undefined && groupCount.get(g) >= 3 ? 'group:' + g : 'member:' + b.memberKey;
-        if (!nodes.has(key)) nodes.set(key, { key, blocks: [], files: new Set(), group: key.startsWith('group:') ? g : null, member: b.member, file: b.file.p, test: b.test });
+        const testCase = isTestFile(b.file.p) && /::(test:.*|main|\(top\))$/.test(b.memberKey);
+        const key = g !== undefined && groupCount.get(g) >= 3 ? 'group:' + g : testCase ? 'tests:' + b.file.p : 'member:' + b.memberKey;
+        if (!nodes.has(key)) nodes.set(key, { key, blocks: [], files: new Set(), group: key.startsWith('group:') ? g : null, member: testCase ? null : b.member, file: b.file.p, test: b.test, tests: key.startsWith('tests:') ? new Set() : null });
         const n = nodes.get(key);
         n.blocks.push(b); n.files.add(b.file.p);
+        if (n.tests && b.test) n.tests.add(b.test);
         nodeOf.set(b, key);
       });
       const edges = new Map();
@@ -1046,7 +1147,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       nodes.forEach((n, k) => { if (!layer.has(k)) layer.set(k, maxLayer + 1); });
       c.graph = {
         root: rootKey,
-        nodes: [...nodes.values()].map((n) => ({ key: n.key, layer: layer.get(n.key), group: n.group, member: n.member, file: n.file, files: n.files.size, test: n.test, blocks: n.blocks.map((b) => b.id) }))
+        nodes: [...nodes.values()].map((n) => ({ key: n.key, layer: layer.get(n.key), group: n.group, member: n.member, file: n.file, files: n.files.size, test: n.test, tests: n.tests ? n.tests.size : undefined, blocks: n.blocks.map((b) => b.id) }))
           .sort((x, y) => x.layer - y.layer || (x.file < y.file ? -1 : x.file > y.file ? 1 : (x.key < y.key ? -1 : 1))),
         edges: [...edges.values()].map((e) => ({ from: e.from, to: e.to, labels: [...e.labels].sort() })),
       };
@@ -1105,6 +1206,20 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
 
     // ---------- serialize
     const fileIndex = new Map(files.map((f, i) => [f, i]));
+    // What a same-change token resolves to on the new side: [key, label]. The group view lists
+    // its places under each declaration.
+    const symOf = (e) => {
+      const d = e.atom.ins[0];
+      const t = d && defsRaw[`${e.block.file.p}:${d.row.n}:${d.tk.c}`];
+      if (!t) return undefined;
+      const inRepo = t[0].startsWith(HEAD);
+      const dt = diskTree(t[0]);
+      const word = dt && /^@?[A-Za-z_$][\w$]*/.exec((dt.lines[t[1]] || '').slice(t[2]));
+      const at = dt && memberAt(dt.tree, t[1] + 1, ' '.repeat(t[2]) + 'x');
+      const name = word ? word[0].replace(/^@/, '') : '?';
+      const lbl = dt ? label({ name, kind: declKind(dt.tree, t[1] + 1, t[2]), member: at && at.member, file: inRepo ? t[0].slice(HEAD.length) : t[0] }) : name;
+      return [(inRepo ? t[0].slice(HEAD.length) : path.basename(t[0])) + ':' + (t[1] + 1) + ':' + t[2], lbl];
+    };
     // A moved declaration's body diff: [type, text, old line, new line, changed ranges].
     const rowOut = (r) => {
       const ranges = [];
@@ -1124,11 +1239,11 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
           }
           return row;
         }) })),
-        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
+        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, grp: b.group || undefined, mk: b.memberKey, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
           move: b.move ? { f: fileIndex.get(b.move.file), b: b.move.from.id, rows: b.move.rows.map(rowOut) } : undefined,
           movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: b.movedTo.block.rows[0].n, changes: b.movedTo.block.edits.length } : undefined })),
       })),
-      edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan })),
+      edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan, sym: e.group != null && e.op === 'token' ? symOf(e) : undefined })),
       groups: groups.map((g) => ({ id: g.id, count: g.count, files: g.files, parts: g.parts.map((p) => p.edits[0].id), edits: g.edits.map((e) => e.id) })),
       chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, links: c.links, uses: [...c.uses].sort((a, b) => a - b), shares: [...c.shares].sort((a, b) => a - b), depth: c.depth, family: c.family, adds: [...c.blocks].reduce((x, b) => x + b.adds, 0), dels: [...c.blocks].reduce((x, b) => x + b.dels, 0), focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),
       generated: generated.map((f) => ({ p: f.p, s: f.s, a: f.a, d: f.d, gen: f.gen, hunks: f.hunks ? f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, rows: h.l.map((l) => [l[0], l.slice(1)]) })) : null })),

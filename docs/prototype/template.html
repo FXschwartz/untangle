@@ -205,6 +205,12 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .ln.skip { color: var(--ink-3); font-size: 11.5px; background: var(--surface-2); }
 .ln.skip .tx { font-family: var(--font-body); padding: 1px 0; }
 .more-row { padding: 6px 16px 12px; position: sticky; left: 0; }
+.ctx-row { font-size: 13px; padding-top: 2px; }
+.ctx-row .muted { margin-left: 2px; }
+.sec-h.sub { padding: 10px 16px 2px; border-top: 1px dashed var(--line); }
+.sec-h.sub .sec-t span { color: var(--ink-2); font-size: 13px; }
+.sym-h { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px 4px; border-top: 1px solid var(--line); font-size: 13px; }
+.sym-h .sp { flex: 1; }
 .sec .sec-t .dstat { margin-left: 6px; }
 .flash-sec .sec-h { animation: flashsec 1.6s ease-out 1; }
 @keyframes flashsec { 0% { background: rgba(255, 255, 255, .08); } 100% { background: transparent; } }
@@ -298,6 +304,7 @@ mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; }
 .rule { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px 44px; align-items: start; }
 .rule-text { display: grid; gap: 12px; align-content: start; }
 .rule-k { font: 700 12px/1 var(--font-mono); color: var(--mark-ink); }
+kbd { font: 600 11.5px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; color: var(--ink); background: var(--surface-2); }
 .pain { font-size: 14px; color: var(--ink-3); }
 .pain b { color: var(--ink-2); font-weight: 600; }
 .rule p { color: var(--ink-2); font-size: 15.5px; }
@@ -360,11 +367,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v11 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v12 · for discussion · Oct 14, 2026</span>
     <h1>Review by chain, end in the code</h1>
     <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v10: changed methods that override the same method now join one chain, so #162’s two implementations of Serverpod’s new <code>watch</code> are reviewed together. v10 fixed every problem the test runs on #157, #166 and #162 found; those PRs are in the viewer under “Other PRs”.</p>
+    <p class="changed">Changed since v11: the five open questions are decided. A change joins its member’s chain only when nothing else links it, generated code from freezed-style part files and protobuf leads back to its source, chains keep the map’s order with a “next unreviewed” key, a test file’s tests are one node in a graph, and a same change shows which declaration each place resolves to.</p>
   </header>
 
   <section class="section" id="try">
@@ -374,7 +381,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <p class="section-intro prose">This viewer shows <a href="https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168">serverpod_offline_sync #168</a> as the rules see it. One build-time pass ran git, tree-sitter and the Dart analysis server (the one VS Code uses) over the PR. Nothing in it was written by hand for this PR.</p>
     </header>
     <ul class="try">
-      <li><b>Start on the chain map.</b> It lays the 37 linked chains of the main family out in 6 levels. Click a chain to open it.</li>
+      <li><b>Start on the chain map.</b> It lays the 39 linked chains of the main family out in 6 levels. Click a chain to open it.</li>
       <li><b>Click a node</b> in a chain’s graph to show only that member’s code. Click it again, or “Show all”, to go back.</li>
       <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted. When a hunk’s last change is reviewed, the hunk folds.</li>
       <li><b>Click an identifier</b> to peek at its definition, on added and removed lines alike. In a peek, click a changed usage to show it there, then click it again to go to it.</li>
@@ -430,14 +437,14 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>A name that now means something else counts as changed.</b> An argument label whose text stayed but which now binds to another function’s parameter links to that parameter.</li>
             <li><b>Tests follow their calls.</b> A changed test links to the first changed function on each path of calls from what it calls, up to three calls deep, through the language server’s call hierarchy.</li>
             <li><b>The same change in several places is a chain</b> when it names an identifier.</li>
-            <li><b>A chain takes every change of the members it touches.</b> In test files that means the enclosing test. A doc comment counts with the declaration it documents.</li>
+            <li><b>A change that nothing links joins the chain of its member.</b> In test files that means the enclosing test, and a doc comment counts with the declaration it documents. Changes that already have a chain stay out of other chains; a chain shows the rest of its members folded.</li>
             <li><b>New code stays together.</b> A new or removed type is one chain with its members. Chains that never leave a new file are one chain, and a change of a new file that links to nothing joins that file’s main chain.</li>
             <li><b>Overrides of the same method are one chain.</b> Changed methods that override the same method, a framework’s say, join one chain, and an override of a changed method links to it. The members of <code>Object</code> (<code>toString</code>, <code>==</code>, <code>hashCode</code>) are left out.</li>
             <li><b>Imports, parts and docs follow.</b> A new import joins the chains that use what it imports in that file, a <code>part</code> directive joins the chains of its part file, and a Markdown change that names a chain’s member in backticks joins that chain.</li>
-            <li><b>Generated code leads back to its model.</b> A usage that the language server resolves into generated code links to the <code>.spy.yaml</code> field it was generated from. Generated <code>Table</code>, <code>Include</code> and <code>Repository</code> classes map to the model class, and a relation’s generated <code>…Id</code> column maps to the relation field.</li>
+            <li><b>Generated code leads back to what it was generated from.</b> An adapter per generator switches on by what the repository contains: Serverpod maps generated classes to the <code>.spy.yaml</code> field, generated part files (freezed, json_serializable and the like) to the declaration in the library that owns the part, and protobuf to the <code>.proto</code> field. <code>.review.yaml</code> can turn an adapter off, add generated patterns or declare a mapping of its own.</li>
           </ul>
           <p>Chains with exactly the same changes are one chain. A chain is named after its best declaration: what remains before what was removed, members before parameters, public before private, and in a ripple, the parameter where the change enters.</p>
-          <p class="num">In #168, 550 of the 580 changes fall into 54 chains, 31 of them across files. <code>OfflineSyncDatabase.mergeChanges</code> is the largest, with 254 changes in 43 files: its signature, its 154 call sites, and the tests that reach it. The model changes form three chains: <code>− OfflineSyncSpace.currentNode</code> (66 changes in 18 files), <code>CrdtNode.localUserUuid</code> (31 in 11) and <code>OfflineSyncSpace.lastHlc</code> (11 in 6). Eight chains start at a removed declaration.</p>
+          <p class="num">In #168, 550 of the 580 changes fall into 56 chains, 33 of them across files. <code>OfflineSyncDatabase.mergeChanges</code> is the largest, with 251 changes in 43 files: its signature, its 154 call sites, and the tests that reach it. The model changes form three chains: <code>− OfflineSyncSpace.currentNode</code> (48 changes in 18 files), <code>CrdtNode.localUserUuid</code> (22 in 11) and <code>OfflineSyncSpace.lastHlc</code> (9 in 6). Eight chains start at a removed declaration.</p>
         </div>
         <div class="rule-text">
           <span class="rule-k">Why 30 changes stay outside</span>
@@ -474,7 +481,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
           <span class="rule-k">Chain of chains</span>
           <p class="pain"><b>Pain:</b> a big change is several chains that build on each other.</p>
           <p>Each chain has a core: the changes of its root’s member. Chain A uses chain B when A’s core uses a function, method, field or type in B’s core. That gives a hierarchy. Chains that nothing uses come first, and each level depends on the next.</p>
-          <p class="num">In #168 the main family has 37 chains in 6 levels, with the model chains near the bottom. Tests use <code>mergeChanges</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
+          <p class="num">In #168 the main family has 39 chains in 6 levels, with the model chains near the bottom. Tests use <code>mergeChanges</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Fifteen chains link to no other.</p>
         </div>
         <div class="rule-text">
           <span class="rule-k">Same change</span>
@@ -489,7 +496,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>Runs whose syntax nodes overlap are one edit.</b> Five changed words in one doc comment line are one edit.</li>
             <li><b>Punctuation alone is not an edit.</b> A run of only brackets, commas, <code>!</code>, quotes or an empty <code>///</code> joins the edit of its statement, without changing what that edit is. On its own, it is never a same change.</li>
           </ul>
-          <p>Edits with the same description are the same change.</p>
+          <p>Edits with the same description are the same change. The group view lists its places under the declaration each one resolves to, so a rename across six parameters reads as six declarations, and each can be marked on its own or all at once.</p>
           <p class="num">In #168: <code>spaceId → userId</code> as a named argument, 156 times, all at <code>mergeChanges</code> calls. <code>hlcManagerFor → spaceIdFor</code> with <code>.normalizedSpaceId</code> removed, 14 times. 33 groups in all.</p>
         </div>
       </div>
@@ -507,6 +514,9 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>Hunks fold on their own</b> when their last change is reviewed. You can open them again, or fold any hunk yourself. Nothing smaller than a hunk folds.</li>
             <li><b>Each view has its own hunks.</b> A chain shows each change with three lines of context, so folding a hunk in one place never folds another.</li>
             <li><b>Generated files</b> are never reviewed or counted, and can be opened read-only.</li>
+            <li><b>Chains keep the map’s order:</b> by level, larger first. Reviewed chains stay in place, muted, and “Next unreviewed” (key <kbd>n</kbd>) walks the same order.</li>
+            <li><b>A test file’s tests are one node</b> in a chain’s graph. A chain made only of one test file lists its tests by <code>group(…)</code> instead of drawing a graph. Code stays one node per member, and a level that is still too busy shows “+N more”.</li>
+            <li><b>A chain folds the rest of its members:</b> “3 more changes in this member, in other chains”.</li>
           </ul>
         </div>
       </div>
@@ -516,7 +526,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 to v10 reviews</h2>
+      <h2>Answers from the v2 to v11 reviews</h2>
     </header>
     <ol class="decide">
       <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another. Overlapping runs are one edit, and punctuation alone never counts.</span></li>
@@ -534,6 +544,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Servers</span><span>One language server with both checkouts as workspace folders, so go to definition stays live on both sides.</span></li>
       <li><span class="q">Language</span><span>TypeScript on Node, for now.</span></li>
       <li><span class="q">Overrides</span><span>Changed methods that override the same method join one chain.</span></li>
+      <li><span class="q">Cohesion</span><span>Only for changes nothing else links; a chain shows the rest of its members folded.</span></li>
+      <li><span class="q">Adapters</span><span>One per generator, built in and switched on by the repository; <code>.review.yaml</code> overrides them.</span></li>
+      <li><span class="q">Order</span><span>Chains by level, never by progress, with a “next unreviewed” key.</span></li>
+      <li><span class="q">Graphs</span><span>Tests grouped by file, code by member, “+N more” as the last resort.</span></li>
+      <li><span class="q">Same change</span><span>Syntax only; the group view shows the declaration each place resolves to.</span></li>
     </ol>
   </section>
 
@@ -608,13 +623,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <span class="eyebrow">For discussion</span>
       <h2>Open questions</h2>
     </header>
-    <ol class="q-list">
-      <li><span class="q">Q1</span><span><b>Member cohesion:</b> it makes chains complete but larger. <code>− OfflineSyncSpace.currentNode</code> reaches 66 changes because whole members join. Keep it, or show those changes as linked but outside?</span></li>
-      <li><span class="q">Q2</span><span><b>Model adapters:</b> the generated-to-model mapping is Serverpod-specific. Should each generator ship a small adapter (Serverpod, freezed, json_serializable, protobuf), or should the mapping be declared in <code>.review.yaml</code>?</span></li>
-      <li><span class="q">Q3</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
-      <li><span class="q">Q4</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
-      <li><span class="q">Q5</span><span><b>Same change across symbols:</b> <code>userId → spaceId</code> as a declaration is one group of six different parameters. Requiring the language server to resolve each instance to the same declaration would split it into six. It would also split a class rename from its constructor calls, and an interface method from its override. Keep the syntax-only rule, or require the same symbol?</span></li>
-    </ol>
+    <p class="section-intro prose">None right now: the five from v11 are decided. The next ones will come from building it.</p>
   </section>
 
   <footer class="sources">

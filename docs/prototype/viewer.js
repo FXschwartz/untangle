@@ -26,7 +26,7 @@
     compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
     view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null,
     rev: {},
-    blockDiff: new Set(), moveOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
+    blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
     search: { q: '', scope: 'unreviewed' },
   };
   try {
@@ -84,6 +84,8 @@
       const top = list.slice().sort((x, y) => y.blocks.length - x.blocks.length || x.id - y.id)[0];
       return { id, chains: list, top, depth: Math.max(...list.map((c) => c.depth)) };
     }).sort((x, y) => y.chains.length - x.chains.length || x.id - y.id);
+    m.byMember = new Map();
+    m.files.forEach((f) => f.blocks.forEach((b) => { if (b.edits.length && b.mk && !/::\(top\)$/.test(b.mk)) { if (!m.byMember.has(b.mk)) m.byMember.set(b.mk, []); m.byMember.get(b.mk).push(b); } }));
     m.standalone = [];
     m.files.forEach((f) => f.blocks.forEach((b) => { if (b.edits.length && !m.chainsOf.has(b.id)) m.standalone.push(b); }));
     m.usageByLine = new Map();
@@ -128,6 +130,7 @@
   }
   function groupLabel(g) { return g.parts.map(editText).join(' … '); }
   function nodeLabels(n) {
+    if (n.tests != null) return { l1: 'tests', l2: `${fileName(n.file)} · ${n.tests} test${n.tests === 1 ? '' : 's'}`, owner: '' };
     if (n.group !== null && n.group !== undefined) {
       const g = M().groupById.get(n.group);
       return { l1: `same change · ${n.files} file${n.files > 1 ? 's' : ''}`, l2: g ? groupLabel(g) : '' };
@@ -616,6 +619,50 @@
     if (!showAll) h += `<div class="more-row"><button type="button" class="btn sm" data-act="group-all" data-key="${esc(key)}">Show all ${list.length} places</button></div>`;
     return h;
   }
+  // The order chains are reviewed in: families as the sidebar lists them (each by level), then
+  // unlinked chains, then the changes outside chains.
+  function chainOrder() {
+    const m = M();
+    const linked = m.families.filter((f) => f.chains.length > 1).flatMap((f) => f.chains);
+    const lone = m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
+    return linked.concat(lone).map((c) => c.id);
+  }
+  function nextUnreviewed() {
+    const m = M();
+    const order = chainOrder();
+    const at = state.view.kind === 'chain' ? order.indexOf(state.view.id) : -1;
+    for (let k = 1; k <= order.length; k++) {
+      const id = order[(at + k + order.length) % order.length];
+      if (stats(blocksOf(m.chains[id].blocks)).open) return { kind: 'chain', id };
+    }
+    return stats(m.standalone).open ? { kind: 'standalone' } : null;
+  }
+  const nextBtn = () => (nextUnreviewed() ? '<button type="button" class="btn sm" data-act="next-open" title="Next chain with changes to review (key: n)">Next unreviewed ›</button>' : '<span class="muted">All reviewed</span>');
+  // A chain made only of one test file's changes: its tests as a list, grouped by group(...).
+  function testListHtml(c, blocks) {
+    const byGroup = new Map();
+    const helpers = [];
+    blocks.forEach((b) => {
+      if (!/::(test:.*|main|\(top\))$/.test(b.mk || '')) { helpers.push(b); return; }
+      const g = b.grp || '(no group)';
+      if (!byGroup.has(g)) byGroup.set(g, new Map());
+      const t = b.test && b.test !== b.grp ? b.test : '(setup)';
+      if (!byGroup.get(g).has(t)) byGroup.get(g).set(t, []);
+      byGroup.get(g).get(t).push(b);
+    });
+    let h = '';
+    byGroup.forEach((tests, g) => {
+      h += `<section class="sec"><div class="sec-h"><div class="sec-t"><b>${esc(g)}</b> <span>group · ${tests.size} test${tests.size > 1 ? 's' : ''}</span></div></div>`;
+      tests.forEach((list, t) => {
+        const ns = stats(list);
+        h += `<div class="sec-h sub"><div class="sec-t"><span>${esc(t)}</span></div><div class="sec-m"><span class="sp"></span><span>${ns.total - ns.open}/${ns.total} reviewed</span><button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(list.map((b) => b.id).join(' '))}">${ns.open ? '✓ Mark test reviewed' : 'Mark test unreviewed'}</button></div></div>`
+          + subHunksHtml(list, { chain: c, key: 'tl' + c.id + ':' + g + ':' + t });
+      });
+      h += '</section>';
+    });
+    if (helpers.length) h += `<section class="sec"><div class="sec-h"><div class="sec-t"><b>Helpers</b> <span>${helpers.length} change${helpers.length > 1 ? 's' : ''}</span></div></div>${subHunksHtml(helpers, { chain: c, key: 'tlh' + c.id })}</section>`;
+    return h;
+  }
   function renderChain(id) {
     const m = M();
     const c = m.chains[id];
@@ -629,7 +676,10 @@
     }
     let h = headerHtml(`<b>${wbr(c.name)}</b>`,
       `<span>${c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain'}</span>${diffstat(c.adds, c.dels)}<span>${s.total} changes · ${c.files} file${c.files > 1 ? 's' : ''}</span><span>${s.total - s.open}/${s.total} reviewed</span>`,
-      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`, sub);
+      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>${nextBtn()}`, sub);
+    const all = blocksOf(c.blocks);
+    const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && /(^|\/)test\//.test(all[0].file.p);
+    if (oneTestFile) return h + `<p class="sec-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + testListHtml(c, all);
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
       <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a node to show only its code.</span></div></div>`;
@@ -651,7 +701,17 @@
       if (n.group !== null && n.group !== undefined) {
         const g = m.groupById.get(n.group);
         h += `<p class="sec-note">The same change in ${blocks.length} places. Each place shows the whole edit.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
-      } else h += subHunksHtml(blocks, { chain: c, key: 'c' + c.id + 'n' + n.idx });
+      } else {
+        h += subHunksHtml(blocks, { chain: c, key: 'c' + c.id + 'n' + n.idx });
+        // The member's other changes belong to other chains: folded context here.
+        const rest = n.member ? [...new Set(blocks.map((b) => b.mk))].flatMap((k) => m.byMember.get(k) || []).filter((b) => !c.blockSet.has(b.id)) : [];
+        if (rest.length) {
+          const key = c.id + ':' + n.idx, open = state.memberOpen.has(key);
+          const others = [...new Set(rest.flatMap((b) => m.chainsOf.get(b.id) || []))];
+          h += `<div class="more-row ctx-row"><button type="button" class="linkish" data-act="toggle-member" data-key="${esc(key)}">${open ? 'Hide' : 'Show'} ${rest.length} more change${rest.length > 1 ? 's' : ''} in this member</button><span class="muted">, in ${others.length ? others.slice(0, 2).map((o) => esc(m.chains[o].name)).join(', ') + (others.length > 2 ? ` +${others.length - 2}` : '') : 'no chain'}</span></div>`;
+          if (open) h += subHunksHtml(rest, { chain: c, key: 'cm' + key });
+        }
+      }
       h += '</section>';
     });
     return h;
@@ -660,7 +720,7 @@
     const m = M();
     const fam = m.families.find((f) => f.id === famId) || m.families[0];
     const linked = m.families.filter((f) => f.chains.length > 1);
-    let h = headerHtml('<b>Chain map</b>', `<span>${fam.chains.length} linked chains</span><span>${fam.depth + 1} levels</span>`, '',
+    let h = headerHtml('<b>Chain map</b>', `<span>${fam.chains.length} linked chains</span><span>${fam.depth + 1} levels</span>`, nextBtn(),
       `<div class="fv-sub">A chain uses another when its root member uses that chain’s function, method, field or type. Chains that nothing uses sit on the left.</div>${linked.length > 1 ? `<div class="fv-sub"><span class="links-k">Families</span>${linked.map((f) => `<button type="button" class="chip-btn${f === fam ? ' on' : ''}" data-map="${f.id}">${esc(f.top.name)} · ${f.chains.length}</button>`).join('')}</div>` : ''}`);
     h += `<div class="graph-box"><div class="graph-scroll tall">${mapSvg(fam)}</div>
       <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Faint arrows skip levels.</span><span>Click a chain to open it.</span></div></div>`;
@@ -717,10 +777,21 @@
     if (!g) return '<div class="empty">No such group in this comparison.</div>';
     const ok = g.edits.every((x) => rev().has(x));
     const e0 = M().edits[g.parts[0]];
-    return headerHtml(`<b class="mono">${esc(groupLabel(g))}</b>`,
-      `<span>same change in ${g.count} places · ${g.files} files</span><span>${e0.op === 'token' ? 'token replaced, as ' + esc(e0.where) : esc(e0.op) + ' of ' + esc(e0.where)}</span>${g.parts.length > 1 ? `<span>${g.parts.length} edits that always appear together</span>` : ''}`,
-      `<button type="button" class="btn sm${ok ? '' : ' primary'}" data-act="mark-group" data-group-id="${g.id}">${ok ? 'Mark all unreviewed' : `Mark all ${g.count} reviewed`}</button>`)
-      + instancesHtml(g, null, 'group' + g.id);
+    // Places grouped by the declaration they resolve to, when there is more than one.
+    const bySym = new Map();
+    g.edits.forEach((id) => { const e = M().edits[id]; const k = e.sym ? e.sym[0] : ''; if (!bySym.has(k)) bySym.set(k, { label: e.sym ? e.sym[1] : '', edits: [] }); bySym.get(k).edits.push(id); });
+    const syms = bySym.size > 1 ? [...bySym.values()] : null;
+    let h = headerHtml(`<b class="mono">${esc(groupLabel(g))}</b>`,
+      `<span>same change in ${g.count} places · ${g.files} files${syms ? ` · ${syms.length} declarations` : ''}</span><span>${e0.op === 'token' ? 'token replaced, as ' + esc(e0.where) : esc(e0.op) + ' of ' + esc(e0.where)}</span>${g.parts.length > 1 ? `<span>${g.parts.length} edits that always appear together</span>` : ''}`,
+      `<button type="button" class="btn sm${ok ? '' : ' primary'}" data-act="mark-group" data-group-id="${g.id}">${ok ? 'Mark all unreviewed' : `Mark all ${g.count} reviewed`}</button>`);
+    if (!syms) return h + instancesHtml(g, null, 'group' + g.id);
+    syms.forEach((sy, i) => {
+      const blocks = sy.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, k, arr) => arr.indexOf(b) === k);
+      const done2 = sy.edits.every((x) => rev().has(x));
+      h += `<div class="sym-h"><b class="mono">${esc(sy.label || 'unresolved')}</b><span class="muted">${sy.edits.length} place${sy.edits.length > 1 ? 's' : ''}</span><span class="sp"></span><button type="button" class="btn xs" data-act="mark-edits" data-edits="${sy.edits.join(' ')}">${done2 ? (sy.edits.length > 1 ? 'Mark these unreviewed' : 'Mark it unreviewed') : sy.edits.length > 1 ? `Mark these ${sy.edits.length} reviewed` : 'Mark it reviewed'}</button></div>`
+        + instancesHtml(g, blocks, 'group' + g.id + ':' + i);
+    });
+    return h;
   }
   function renderSearch() {
     const q = state.search.q.trim().toLowerCase();
@@ -904,6 +975,9 @@
     if (act === 'mark-blocks') { toggleBlocks(blocksOf(d.blocks.split(' '))); return render(); }
     if (act === 'mark-chain') { toggleBlocks(blocksOf(m.chains[Number(d.chainId)].blocks)); return render(); }
     if (act === 'mark-standalone') { toggleBlocks(m.standalone); return render(); }
+    if (act === 'mark-edits') { const ids = d.edits.split(' ').map(Number); setEdits(ids, !ids.every((x) => rev().has(x))); return render(); }
+    if (act === 'toggle-member') { state.memberOpen.has(d.key) ? state.memberOpen.delete(d.key) : state.memberOpen.add(d.key); return render(); }
+    if (act === 'next-open') { const nx = nextUnreviewed(); if (nx) { state.view = nx; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); } return; }
     if (act === 'mark-group') { const g = m.groupById.get(Number(d.groupId)); setEdits(g.edits, !g.edits.every((x) => rev().has(x))); return render(); }
     if (act === 'group-all') { state.groupAll.add(d.key); return render(); }
     if (act === 'mark-usages') {
@@ -917,6 +991,18 @@
       });
       return render();
     }
+  });
+  // "n" walks to the next chain with changes to review, while the viewer is on screen.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'n' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const r = viewer.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) return;
+    const nx = nextUnreviewed();
+    if (!nx) return;
+    e.preventDefault();
+    state.view = nx; state.peek = null; state.focus = null; state.tab = 'chains';
+    render({ top: true });
   });
   viewer.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
