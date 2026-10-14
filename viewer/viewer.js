@@ -83,7 +83,7 @@
     view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null,
     rev: {},
     blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
-    search: { q: '', scope: 'unreviewed' }, showGraph: false,
+    search: { q: '', scope: 'unreviewed' },
     // Files shown whole, lines shown around each section of a diff ({ above, below } by its key),
     // and folders closed in the Files tab.
     whole: new Set(), more: new Map(), closedDirs: new Set(),
@@ -126,7 +126,7 @@
   window.addEventListener('pagehide', flushSave);
   // This browser's layout: the sidebar's width and whether it shows, the minimap.
   const UI_KEY = 'untangle:ui';
-  const UI = { side: 272, sideOff: false, minimap: true };
+  const UI = { side: 272, sideOff: false, minimap: true, graph: true };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
@@ -875,28 +875,59 @@
       if (!list || list.length < 2) return base + NH / 2;
       return base + 10 + (list.indexOf(otherY) * (NH - 20)) / (list.length - 1);
     };
+    // A name goes on its arrow's middle when it fits there between the members; else where the
+    // arrow crosses a gap between rows of members, the free one nearest its middle; else in the gap
+    // nearest its middle. It covers no member.
+    const gaps = Array.from({ length: maxRows + 1 }, (_, r) => (r === 0 ? PAD / 2 : r === maxRows ? H - PAD / 2 : PAD + r * (NH + GY) - GY / 2));
+    const boxes = [...posOf.values(), ...more];
+    const taken = [];
+    const placeName = (c, text) => {
+      const w = text.length * 6.3 + 8;
+      const pt = (t) => { const u = 1 - t; return [u * u * u * c[0] + 3 * u * u * t * c[2] + 3 * u * t * t * c[4] + t * t * t * c[6], u * u * u * c[1] + 3 * u * u * t * c[3] + 3 * u * t * t * c[5] + t * t * t * c[7]]; };
+      const mid = pt(0.5);
+      const spots = [{ x: mid[0], y: mid[1], far: -1 }];
+      let p = pt(0);
+      for (let k = 1; k <= 32; k++) {
+        const q = pt(k / 32);
+        gaps.forEach((gy) => { if (p[1] !== q[1] && (p[1] - gy) * (q[1] - gy) <= 0) spots.push({ x: p[0] + ((gy - p[1]) / (q[1] - p[1])) * (q[0] - p[0]), y: gy, far: Math.abs(k / 32 - 0.5) }); });
+        p = q;
+      }
+      if (spots.length === 1) gaps.forEach((gy) => spots.push({ x: mid[0], y: gy, far: 1 + Math.abs(gy - mid[1]) / H }));
+      spots.sort((s1, s2) => s1.far - s2.far);
+      const box = (sp) => { const x = Math.max(w / 2 + 2, Math.min(W - w / 2 - 2, sp.x)); return { x, y: sp.y, l: x - w / 2, r: x + w / 2 }; };
+      const clear = (bx) => !boxes.some((o) => o.x < bx.r && bx.l < o.x + W0 && o.y < bx.y + 7 && bx.y - 7 < o.y + NH);
+      const free = (bx) => !taken.some((o) => o.l < bx.r && bx.l < o.r && Math.abs(o.y - bx.y) < 14);
+      const all = spots.map(box);
+      const at = all.find((bx) => clear(bx) && free(bx)) || all.find(clear) || all[0];
+      taken.push(at);
+      return at;
+    };
     const shown = new Set();
     visible.forEach((e) => {
       const a = posOf.get(e.from), b = posOf.get(e.to);
       const fwd0 = a.x < b.x, same0 = a.x === b.x;
       const y1 = portY(e.from, same0 || fwd0 ? 'R' : 'L', b.y, a.y), y2 = portY(e.to, same0 || !fwd0 ? 'R' : 'L', a.y, b.y);
-      let d, lx, ly;
+      // The curve's points: start, two controls, end.
+      let c;
       if (a.x !== b.x) {
         const x1 = fwd0 ? a.x + W0 : a.x, x2 = fwd0 ? b.x - 3 : b.x + W0 + 3;
         const mx = (x1 + x2) / 2;
-        d = `M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
-        lx = (x1 + x2) / 2; ly = (y1 + y2) / 2 - 5;
+        c = [x1, y1, mx, y1, mx, y2, x2, y2];
       } else {
         const x1 = a.x + W0, x2 = b.x + W0 + 3, bx = x1 + 30;
-        d = `M${x1} ${y1} C ${bx} ${y1}, ${bx} ${y2}, ${x2} ${y2}`;
-        lx = x1 + 26; ly = (y1 + y2) / 2;
+        c = [x1, y1, bx, y1, bx, y2, x2, y2];
       }
       const dim = spec.focus && !(e.from === spec.focus || e.to === spec.focus);
       const long = spec.faintLong && Math.abs(a.n.layer - b.n.layer) > 1;
-      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}${e.share ? ' share' : ''}" d="${d}"${e.share ? '' : ` marker-end="url(#gar-${spec.id})"`}/>`;
-      if (e.labels && e.labels.length) {
+      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}${e.share ? ' share' : ''}" d="M${c[0]} ${c[1]} C ${c[2]} ${c[3]}, ${c[4]} ${c[5]}, ${c[6]} ${c[7]}"${e.share ? '' : ` marker-end="url(#gar-${spec.id})"`}/>`;
+      // What an arrow uses is named only on the arrows of the member clicked.
+      if (e.labels && e.labels.length && spec.focus && !dim) {
         const text = trunc(e.labels[0], 18) + (e.labels.length > 1 ? ' +' + (e.labels.length - 1) : '');
-        if (!shown.has(e.to + '|' + text) && !dim) { shown.add(e.to + '|' + text); labels += `<text class="g-elabel" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`; }
+        if (!shown.has(e.to + '|' + text)) {
+          shown.add(e.to + '|' + text);
+          const at = placeName(c, text);
+          labels += `<text class="g-elabel" x="${at.x.toFixed(1)}" y="${(at.y + 3.5).toFixed(1)}" text-anchor="middle">${esc(text)}</text>`;
+        }
       }
     });
     posOf.forEach(({ x, y, n }) => {
@@ -1029,7 +1060,6 @@
       const c = m.chains[v.id];
       if (!c) return items;
       showing(null);
-      items.push({ sep: true }, { label: 'Show the graph', checked: state.showGraph, data: { act: 'graph' } }, { label: 'The chain map', icon: ICON.map, data: { map: c.family } });
       const usedBy = m.usedBy.get(c.id);
       if (usedBy.length) items.push({ head: 'Used by' }, ...usedBy.map((o) => chainItem(m.chains[o])));
       if (c.uses.length) items.push({ head: 'Uses' }, ...c.uses.map((o) => chainItem(m.chains[o])));
@@ -1731,12 +1761,12 @@
   const plusMinus = (a, d) => `<span class="a">+${fmt(a)}</span> <span class="d">−${fmt(d)}</span>`;
   const sumOf = (blocks, k) => blocks.reduce((x, b) => x + b[k], 0);
   // A view's header, in one row: where you are, what it holds, the previous and next change, the
-  // view's menu (⋯) and its one action. `pinned`: what stays on screen under it (a chain's
-  // members); `below`: what follows it, scrolling away with the code.
+  // view's own toggles (`tools`), its menu (⋯) and its one action. `pinned`: what stays on screen
+  // under it (a chain's members); `below`: what follows it, scrolling away with the code.
   function headerHtml(o) {
     const nav = o.nav ? iconBtn(ICON.up, 'Previous change', 'data-act="nav" data-step="-1"') + iconBtn(ICON.down, 'Next change', 'data-act="nav" data-step="1"') : '';
     const menu = viewMenuItems().length ? `<button type="button" class="ib" data-act="menu" data-menu="view" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="${MENU.open === 'view'}">${ICON.more}</button>` : '';
-    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}<span class="sp"></span>${nav || menu ? `<span class="tools">${nav}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
+    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}<span class="sp"></span>${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
   }
   function instancesHtml(g, blocks, key) {
     const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
@@ -1822,7 +1852,7 @@
     return h;
   }
   // A chain's members in a row, by level: the root, then what uses it, and so on, each with what's
-  // left to review in it. Graph shows them as the drawing instead.
+  // left to review in it. The graph above the code draws them.
   function stripHtml(c) {
     const byLayer = new Map();
     c.graph.nodes.forEach((n) => { if (!byLayer.has(n.layer)) byLayer.set(n.layer, []); byLayer.get(n.layer).push(n); });
@@ -1841,8 +1871,8 @@
       });
     });
     const more = c.graph.nodes.length - shown;
-    if (more > 0) h += `<button type="button" class="lnk" data-act="graph" title="Show all of them, as a graph">+${more} more</button>`;
-    return `<div class="strip" role="group" aria-label="The chain’s members">${h}<span class="sp"></span><button type="button" class="lnk" data-act="graph" aria-pressed="${state.showGraph}" title="${state.showGraph ? 'Hide the graph' : 'Show the members as a graph'}">${ICON.graph}Graph</button></div>`;
+    if (more > 0) h += `<button type="button" class="lnk" data-act="graph-show" title="Show all of them, in the graph">+${more} more</button>`;
+    return `<div class="strip" role="group" aria-label="The chain’s members">${h}</div>`;
   }
   function renderChain(id) {
     const m = M();
@@ -1856,14 +1886,15 @@
       crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
       nav: true,
+      tools: oneTestFile ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
       action: `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
       // The members stay under the header, so going from one to another needs no scrolling back.
       pinned: oneTestFile ? '' : stripHtml(c),
     });
     if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + testListHtml(c, all);
-    if (state.showGraph) {
+    if (UI.graph) {
       h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
-        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code.</span></div></div>`;
+        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span></div></div>`;
     }
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     if (focused) {
@@ -2405,11 +2436,20 @@
   main.addEventListener('wheel', () => cancelAnimationFrame(glide), { passive: true });
   main.addEventListener('pointerdown', () => cancelAnimationFrame(glide));
 
+  // A chain's graph, shown and brought into view.
+  function showGraph() {
+    if (!UI.graph) { UI.graph = true; saveUI(); render(); }
+    const g = main.querySelector('.graph-box');
+    if (g) glideTo(g, headH(), 0, () => {});
+  }
+
   // ---------- render
   function render(opts) {
     opts = opts || {};
     const snap = motionBefore();
     const keep = main.scrollTop;
+    // A graph scrolled within its box stays scrolled as it's drawn again.
+    const gs = main.querySelector('.graph-scroll'), graphAt = gs && { view: viewKey(), x: gs.scrollLeft, y: gs.scrollTop };
     // A comment being typed keeps its focus, caret and scroll through the new page.
     const ae = document.activeElement;
     const typing = ae && ae.dataset && ae.dataset.draft != null && viewer.contains(ae) ? { key: ae.dataset.draft, s: ae.selectionStart, e: ae.selectionEnd, top: ae.scrollTop } : null;
@@ -2422,6 +2462,8 @@
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
     }
+    const gs2 = graphAt && graphAt.view === viewKey() && main.querySelector('.graph-scroll');
+    if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     renderTop();
     viewer.classList.toggle('split', state.layout === 'split');
@@ -3255,10 +3297,11 @@
     if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
     if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
     if (d.node !== undefined && !d.act) {
+      // Filtering from the graph leaves the page where it is: the graph stays under the pointer.
       const node = Number(d.node);
       const same = state.focus && state.focus.chain === state.view.id && state.focus.node === node;
       state.focus = same ? null : { chain: state.view.id, node };
-      return render(same ? {} : { section: node });
+      return render();
     }
     if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
     if (t.classList.contains('live')) return liveLookup(t);
@@ -3291,7 +3334,14 @@
     if (act === 'jump') return palOpen();
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
-    if (act === 'graph') { state.showGraph = !state.showGraph; return render(); }
+    if (act === 'graph-show') return showGraph();
+    if (act === 'graph') {
+      if (!UI.graph) return showGraph();
+      // Hidden, the graph leaves the code on screen where it is.
+      const at = lineOnScreen();
+      UI.graph = false; saveUI(); render();
+      return backTo(at);
+    }
     if (act === 'to-node') {
       const i = Number(d.i);
       if (state.focus && state.focus.chain === state.view.id) { state.focus = { chain: state.view.id, node: i }; return render({ section: i }); }
@@ -3618,18 +3668,22 @@
   let metricsMisses = 0, metricsTimer = null, lspState = 'off';
   function showMetrics(m) {
     const set = (k, v) => { const el = lspEl.querySelector(`[data-m="${k}"]`); if (el) el.textContent = v; };
-    const dot = $('#lsp-dot'), head = $('#lsp-state');
+    const dot = $('#lsp-dot'), head = $('#lsp-state'), pid = $('#lsp-pid');
     if (!m) {
       dot.className = 'dot failed';
       head.textContent = 'untangle isn’t answering: run it again to keep reviewing';
+      pid.hidden = true;
       lspEl.setAttribute('aria-label', head.textContent);
       return;
     }
     const lsp = m.lsp;
     lspState = lsp.state;
     dot.className = 'dot ' + lsp.state;
-    head.textContent = { ready: `Dart analysis server, running (pid ${lsp.pid})`, starting: 'Dart analysis server, starting', off: 'Dart analysis server, not running yet', failed: `Dart analysis server, failed: ${lsp.error || ''}` }[lsp.state] || '';
-    lspEl.setAttribute('aria-label', head.textContent);
+    head.textContent = { ready: 'Dart analysis server, running', starting: 'Dart analysis server, starting', off: 'Dart analysis server, not running yet', failed: `Dart analysis server, failed: ${lsp.error || ''}` }[lsp.state] || '';
+    // Its process on a line of its own.
+    pid.textContent = lsp.state === 'ready' && lsp.pid ? `pid ${lsp.pid}` : '';
+    pid.hidden = !pid.textContent;
+    lspEl.setAttribute('aria-label', head.textContent + (pid.textContent ? `, ${pid.textContent}` : ''));
     set('rss', bytes(m.rss));
     set('cpu', percent(m.cpu));
     set('resources', String(m.resources));

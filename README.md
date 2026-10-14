@@ -72,14 +72,15 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
     with changes to review, c to comment on the line, Ctrl B for the sidebar, Esc to close; `?`
     lists them.
   - **A view's header** is one row: where you are (Map / chain, or Files / folder / file), what
-    it holds, ↑ and ↓ for every change, a ⋯ menu, and the view's one action (Mark chain
-    reviewed). The menu holds open in the editor, the whole file, side by side, the diffs of
-    reviewed code, the minimap, a comment on the file, the chain map and the chains a chain
+    it holds, ↑ and ↓ for every change, a chain's graph button, a ⋯ menu, and the view's one
+    action (Mark chain reviewed). The menu holds open in the editor, the whole file, side by
+    side, the diffs of reviewed code, the minimap, a comment on the file and the chains a chain
     uses or is used by. A file's "In 3 chains" lists its chains.
   - **A chain** shows its members as a row of pills, by level, each with what's left in it,
     pinned under the header with the one you're reading marked: click one, then another, without
-    scrolling back. Graph draws them as before, and a member's counts and "Mark reviewed" show on
-    hover.
+    scrolling back. Its graph is above the code (the header's button hides it, and the browser
+    keeps that): clicking a member shows only its code, without moving the page, and names what
+    its arrows use. A member's counts and "Mark reviewed" show on hover.
 - **The code** has one gutter: the review mark (muted until the pointer is on its line), one
   line number (the old one, in red, for a removed line) and the sign. Same changes elsewhere and
   changed usages are grey notes at the line's end.
@@ -110,8 +111,8 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
 - **Highlighting** with [Shiki](https://shiki.style): VS Code's grammars and its Dark+ theme.
   Names a grammar leaves plain (variables, properties, parameters) are colored as VS Code's
   semantic highlighting does.
-- **The language server's dot** in the top bar: green when it's up; hover for untangle's and the
-  language server's memory and CPU, as px0 shows them.
+- **The language server's dot** in the top bar: green when it's up; hover for its process id,
+  and untangle's and the language server's memory and CPU, as px0 shows them.
 - **Open in editor** from a view's ⋯ menu and from peeks: a `vscode://` link by default (through WSL
   when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
   or a URL template such as `cursor://file{file}:{line}:{col}`.

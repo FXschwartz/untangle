@@ -145,7 +145,8 @@ a.t-pr:hover { text-decoration: underline; text-decoration-color: var(--text-3);
 .dot.failed { background: var(--del-ink); }
 .lsp-pop { display: none; position: absolute; right: -10px; top: calc(100% + 10px); z-index: 45; width: 280px; padding: 12px 14px; border-radius: 12px; background: var(--raised); box-shadow: var(--float); gap: 7px; font-size: 12.5px; color: var(--text-2); white-space: normal; }
 .vw-lsp:hover .lsp-pop, .vw-lsp:focus .lsp-pop { display: grid; }
-.lsp-pop .lsp-h { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+.lsp-pop .lsp-h { display: grid; gap: 2px; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+.lsp-pid { color: var(--text-3); font: 500 12px/1.45 var(--code); }
 .lsp-row { display: flex; justify-content: space-between; gap: 12px; }
 .lsp-row b { color: var(--text); font: 500 12px/1.45 var(--code); }
 .vw-review { position: relative; flex: none; }
@@ -319,7 +320,7 @@ button.sb-group:hover { color: var(--text-2); }
 .graph-box { position: sticky; left: 0; display: grid; gap: 8px; padding: 0 22px 16px; }
 .graph-scroll { overflow: auto; max-height: 420px; border-radius: 10px; background: var(--ground); }
 .graph-scroll.tall { max-height: none; }
-.graph { display: block; color: var(--text-3); }
+.graph { display: block; color: #8A8A95; }
 .g-node { cursor: pointer; }
 .g-box { fill: var(--raised); stroke: var(--hair-2); stroke-width: 1; }
 .g-node.root .g-box { stroke: var(--text-3); stroke-width: 1.5; }
@@ -336,8 +337,8 @@ button.sb-group:hover { color: var(--text-2); }
 .g-l2 { fill: var(--text); font: 600 12px var(--code); }
 .g-node.ok .g-l2 { fill: var(--text-3); }
 .g-cnt { fill: var(--text-3); font: 500 10.5px var(--ui); }
-.g-edge { fill: none; stroke: var(--text-3); stroke-width: 1.2; }
-.g-elabel { fill: var(--text-2); font: 500 10.5px var(--code); paint-order: stroke; stroke: var(--ground); stroke-width: 4px; stroke-linejoin: round; }
+.g-edge { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.g-elabel { fill: var(--text-2); font: 500 10.5px var(--code); paint-order: stroke; stroke: var(--ground); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
 .g-more { cursor: pointer; }
 .g-more rect { fill: var(--sheet); stroke: var(--hair-2); stroke-dasharray: 4 3; }
 .g-more text { fill: var(--text-2); font: 600 12px var(--ui); }
@@ -345,7 +346,7 @@ button.sb-group:hover { color: var(--text-2); }
 .graph-legend span { display: inline-flex; gap: 6px; align-items: center; }
 .graph-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .lg-open { background: var(--accent); } .lg-ok { background: var(--done); }
-.graph-legend i.lg-share { width: 18px; height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-3); }
+.graph-legend i.lg-share { width: 18px; height: 0; border-radius: 0; border-top: 1.5px dashed #8A8A95; }
 
 /* ---- Sections of a view: a member in a chain, a test, a symbol. Their counts and actions show on hover. */
 .sec { padding-bottom: 10px; }
@@ -740,9 +741,9 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
     <div class="vw-lsp" id="vw-lsp" tabindex="0" aria-describedby="lsp-pop" hidden>
       <i class="dot off" id="lsp-dot"></i>
       <span class="lsp-pop" id="lsp-pop" role="tooltip">
-        <span class="lsp-h" id="lsp-state">Language server</span>
-        <span class="lsp-row"><span>untangle’s memory (RSS)</span><b data-m="rss">…</b></span>
-        <span class="lsp-row"><span>untangle’s CPU</span><b data-m="cpu">…</b></span>
+        <span class="lsp-h"><span id="lsp-state">Language server</span><span class="lsp-pid" id="lsp-pid" hidden></span></span>
+        <span class="lsp-row"><span>Memory (RSS)</span><b data-m="rss">…</b></span>
+        <span class="lsp-row"><span>CPU</span><b data-m="cpu">…</b></span>
         <span class="lsp-row"><span>Active resources</span><b data-m="resources">…</b></span>
         <span class="lsp-row"><span>Language server’s memory</span><b data-m="lspRss">…</b></span>
         <span class="lsp-row"><span>Language server’s CPU</span><b data-m="lspCpu">…</b></span>

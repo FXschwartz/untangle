@@ -322,8 +322,11 @@ From the review of v11:
   GitHub. untangle builds the new review in the background, and the page reloads on the same
   view when it's ready.
 - **A chain's members** show as a row of pills by level, each with what's left in it, pinned
-  under the header with the member being read marked; clicking one scrolls to its code. Graph
-  draws them, and clicking a graph node shows only that node's code and dims unrelated nodes.
+  under the header with the member being read marked; clicking one scrolls to its code. The
+  graph draws them above the code, shown by default, with an icon in the header to hide it.
+  Clicking a graph node shows only that node's code and dims unrelated nodes, without scrolling,
+  so the graph stays under the pointer; the names its arrows stand for show then, in the gaps
+  between rows of nodes.
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. Keys `n` and `p` walk the same order.
 - **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
@@ -591,6 +594,10 @@ through the page.
   - Asked: more room in the sidebar and the top bar, guides that close on their last row, the
     marks' panel as a note with a Reset button, the chain's members pinned, a peek that closes on
     a click outside and changes in place from inside. Done.
+  - Asked: the graph shown by default, behind an icon in the header instead of the menu (and no
+    chain map in the menu), arrows' names only for the node clicked, lighter arrows, filtering
+    from the graph without scrolling, and the language server's process id on its own line.
+    Done.
 
 ## References
 
