@@ -289,6 +289,12 @@ From the review of v11:
   previous and next change, the whole file or only its changed chunks, inline or side by side.
 - **The Files tab is a folder tree,** folders first, with a folder that holds only one folder
   shown with it (`lib/src/mcp`), as VS Code compacts them.
+- **The pull request's comments, as on GitHub.** Threads show under their lines (a resolved one
+  folds), with replies, reactions and suggestions. A Comments tab lists them, open ones first,
+  with the conversation (description, comments, reviews). The **+** over a line starts a comment
+  (shift-click for a range in the hunk): a single comment, or one kept in the pending review that
+  "Finish your review" submits as a comment, an approval or a request for changes. A reviewed
+  hunk doesn't fold while a conversation in it is open.
 - **Clicking a graph node** shows only that node's code and dims unrelated nodes.
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. "Next unreviewed" (key `n`) walks the same order.
@@ -418,6 +424,7 @@ untangle [flags] <pr-url>      # cloned into the cache first
 | Search | Changed lines | Changed lines, plus the repository at either revision (`git grep`) |
 | Highlighting | A regex tokenizer, with real rules for Dart and YAML only | [Shiki](https://shiki.style): VS Code's TextMate grammars and its Dark+ theme |
 | Review marks | Browser storage | Commits on the reviewed-snapshot branch |
+| GitHub comments | None | Read and written through `gh`, as the user: threads, replies, pending reviews, reviews |
 
 - **The server:**
   - **Git:** diffs, files at either revision, and the reviewed-snapshot branch, with
@@ -539,6 +546,9 @@ through the page.
   - Asked: bands that show more of the file, as GitHub's; the file whole in the page,
     read-only, with go to definition, and a switch back to the changed chunks; VS Code's
     icons for a view's tools, with unified/split moved there; the Files tab as a tree. Done.
+  - Asked: the pull request's comments from GitHub, to review without leaving the page (adding,
+    showing, pending reviews, replies), through the local `gh` login rather than a token. Done,
+    tested on a throwaway pull request of this repository.
 
 ## References
 

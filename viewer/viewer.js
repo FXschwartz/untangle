@@ -37,6 +37,15 @@
     unfold: path1('M7.53 6.51v-4l-1 1-.71-.71L7.65 1h.71l1.84 1.83-.71.7-1-1v3.98h-.96zm0 2.98v4l-1-1-.71.71L7.65 15h.71l1.84-1.83-.71-.7-1 1V9.49h-.96zM13.73 4L14 5.02l-3.68 2.93L14 10.98 13.73 12h-4.2v-1h3L9.55 8.57H6.54L3.45 11h3.08v1H2.27L2 10.98l3.68-2.92L2 5.02 2.27 4h4.26v1H3.45l3 2.42h3.01L12.53 5h-3V4h4.2z'),
     chevronRight: path1('M10.072 8.024L5.715 3.667l.618-.62L11 7.716v.618L6.333 13l-.618-.619 4.357-4.357z'),
     chevronDown: path1('M7.976 10.072l4.357-4.357.62.618L8.284 11h-.618L3 6.333l.619-.618 4.357 4.357z'),
+    comment: svg('<path d="M14.5 2h-13l-.5.5v9l.5.5H4v2.5l.854.354L7.707 12H14.5l.5-.5v-9l-.5-.5zm-.5 9H7.5l-.354.146L5 13.293V11.5l-.5-.5H2V3h12v8z"/>'),
+    discussion: path1('M4 11.29l1-1v1.42l-1.15 1.14L3 12.5V10H1.5L1 9.5v-8l.5-.5h12l.5.5V6h-1V2H2v7h1.5l.5.5v1.79zM10.29 13l1.86 1.85.85-.35V13h1.5l.5-.5v-5l-.5-.5h-8l-.5.5v5l.5.5h3.79zm.21-1H7V8h7v4h-1.5l-.5.5v.79l-1.15-1.14-.35-.15z'),
+    edit: svg('<path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l8-8 1.77 1.77-8 8z"/>'),
+    trash: path1('M10 3h3v1h-1v9l-1 1H4l-1-1V4H2V3h3V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zM9 2H6v1h3V2zM4 13h7V4H4v9zm2-8H5v7h1V5zm1 0h1v7H7V5zm2 0h1v7H9V5z'),
+    smiley: path1('M4.111 2.18a7 7 0 1 1 7.778 11.64A7 7 0 0 1 4.11 2.18zm.556 10.809a6 6 0 1 0 6.666-9.978 6 6 0 0 0-6.666 9.978zM6.5 7a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm5 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM8 11a3 3 0 0 1-2.65-1.58l-.87.48a4 4 0 0 0 7.12-.16l-.9-.43A3 3 0 0 1 8 11z'),
+    external: svg('<path d="M1.5 1H6v1H2v12h12v-4h1v4.5l-.5.5h-13l-.5-.5v-13l.5-.5z"/><path d="M15 1.5V8h-1V2.707L7.243 9.465l-.707-.708L13.293 2H8V1h6.5l.5.5z"/>'),
+    refresh: path1('M4.681 3H2V2h3.5l.5.5V6H5V4a5 5 0 1 0 4.53-.761l.302-.954A6 6 0 1 1 4.681 3z'),
+    suggest: path1('M2 3.5l.5-.5h5l.5.5v9l-.5.5h-5l-.5-.5v-9zM3 12h4V6H3v6zm0-7h4V4H3v1zm6.5-2h5l.5.5v9l-.5.5h-5l-.5-.5v-9l.5-.5zm.5 9h4v-2h-4v2zm0-4h4V4h-4v4z'),
+    check: path1('M14.431 3.323l-8.47 10-.79-.036-3.35-4.77.818-.574 2.978 4.24 8.051-9.506.764.646z'),
   };
   // An icon button: its tooltip says what a click does; a toggle keeps one name and says whether it's on.
   const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
@@ -101,6 +110,7 @@
     const m = { name, raw, files: raw.files, edits: raw.edits, groups: raw.groups, chains: raw.chains, generated: raw.generated };
     m.blockById = new Map();
     m.head = new Map();
+    m.old = new Map();
     m.files.forEach((f, fi) => {
       f.idx = fi;
       f.hunks.forEach((h) => {
@@ -115,7 +125,7 @@
         b.firstRowOfEdit = new Map();
         for (let i = b.first; i < b.first + b.len; i++) (h.rows[i][2] || []).forEach(([, , id]) => { if (!b.firstRowOfEdit.has(id)) b.firstRowOfEdit.set(id, i); });
       });
-      f.hunks.forEach((h, hi) => h.meta.forEach((r, ri) => { if (r.n != null) m.head.set(f.p + ':' + r.n, { f, hi, ri, r }); }));
+      f.hunks.forEach((h, hi) => h.meta.forEach((r, ri) => { if (r.n != null) m.head.set(f.p + ':' + r.n, { f, hi, ri, r }); if (r.o != null && r.t !== '+') m.old.set(f.p + ':' + r.o, { f, hi, ri, r }); }));
     });
     m.groupById = new Map(m.groups.map((g) => [g.id, g]));
     m.chainsOf = new Map();
@@ -321,12 +331,13 @@
   function peekAfterOld(f, o) {
     return state.peek && state.peek.old && state.peek.path === f.p && state.peek.o === o ? peekHtml(state.peek) : '';
   }
-  // One unified row.
+  // One unified row. o.c: the row takes comments (a line of the pull request's diff).
   function uRow(f, meta, text, ranges, o) {
     const sign = o.sign != null ? o.sign : meta.t === '+' ? '+' : meta.t === '-' ? '−' : '';
     const n = meta.t !== '-' ? meta.n : null;
     const oldNo = meta.t === '-' ? meta.o : null;
-    return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '');
+    const c = o.c ? (meta.t === '-' ? (o.mv ? '' : 'L:' + meta.o) : n != null ? 'R:' + n : '') : '';
+    return `<div class="ln ${o.cls}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
   // A moved declaration. The removed copy is one line pointing at the new place. The added
   // copy shows the diff between the two bodies: unchanged lines are moved code, and long runs
@@ -359,9 +370,10 @@
       flush();
       const meta = { t: t === ' ' ? ' ' : t, o: t === '+' ? null : o, n: t === '-' ? null : n };
       const colors = rowColors(rows, f.p, i);
-      if (t === ' ') h += uRow(f, { t: ' ', o, n }, text, null, { cls: 'mv' + (d ? ' rvd' : ''), sign: '', refs: !ctx.noRefs, colors });
+      // The new copy's lines are added lines of this file; the removed ones are another file's.
+      if (t === ' ') h += uRow(f, { t: ' ', o, n }, text, null, { cls: 'mv' + (d ? ' rvd' : ''), sign: '', refs: !ctx.noRefs, colors, c: true, mv: true });
       else if (t === '-') h += uRow(fromFile, meta, text, ranges, { cls: 'del' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs, colors });
-      else h += uRow(f, meta, text, ranges, { cls: 'add' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs, colors });
+      else h += uRow(f, meta, text, ranges, { cls: 'add' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs, colors, c: true });
     });
     flush();
     return h;
@@ -380,9 +392,12 @@
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
         if (!placed.has(b.id)) { placed.add(b.id); out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b); }
+        // A block moved away is one row here; threads on its removed lines still show.
+        if (b.movedTo) out += threadsAt(f, 'LEFT', meta.o);
         continue;
       }
-      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors }); continue; }
+      const sel = inCompose(f, hi, ri);
+      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors, c: true, sel }); continue; }
       const d = done(b);
       const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
       const other = ctx.chain && !ctx.chain.blockSet.has(b.id) ? ' other' : '';
@@ -393,17 +408,19 @@
             placed.add(b.id);
             out += `<div class="ln gone"><span class="g">${tickHtml(b)}</span><span class="no"></span><span class="no"></span><span class="sg"></span><span class="tx">${b.dels} removed line${b.dels > 1 ? 's' : ''}, reviewed</span><span class="bdgs">${diffToggle(b)}</span></div>`;
           }
+          // The removed line is hidden; its threads aren't.
+          out += threadsAt(f, 'LEFT', meta.o);
           continue;
         }
         const first = !placed.has(b.id);
         placed.add(b.id);
-        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other, sign: '', hideOld: true, tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors });
+        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other, sign: '', hideOld: true, tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel });
         continue;
       }
       const first = !placed.has(b.id);
       placed.add(b.id);
       out += uRow(f, meta, text, ranges, {
-        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other, emphasis, refs: !ctx.noRefs, colors,
+        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other, emphasis, refs: !ctx.noRefs, colors, c: true, sel,
         tick: first ? tickHtml(b) : '', toggle: first && d ? diffToggle(b) : '',
         badges: ctx.noBadges ? '' : badgesHtml(f, b, ri, t !== '-' ? meta.n : null),
       });
@@ -417,7 +434,8 @@
     const num = side === 'l' ? meta.o : meta.n;
     const sign = o.sign != null ? o.sign : side === 'l' && meta.t === '-' ? '−' : side === 'r' && meta.t === '+' ? '+' : '';
     const oldNo = side === 'l' && meta.t === '-' ? meta.o : null;
-    return `<span class="half ${side} ${o.cls || ''}"><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
+    const c = o.c && num != null ? ` data-c="${side === 'l' ? 'L' : 'R'}:${num}"` : '';
+    return `<span class="half ${side} ${o.cls || ''}"${c}><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
   }
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
@@ -429,13 +447,13 @@
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
         out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b);
-        while (ri < end && h.meta[ri].block === b) ri++;
+        while (ri < end && h.meta[ri].block === b) { if (b.movedTo) out += threadsAt(f, 'LEFT', h.meta[ri].o); ri++; }
         continue;
       }
       if (!b || !b.edits.length) {
         const [, text] = h.rows[ri];
         const colors = rowColors(h.rows, f.p, ri);
-        out += `<div class="sl" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx', colors })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs, colors })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '');
+        out += `<div class="sl${inCompose(f, hi, ri) ? ' cm-sel' : ''}" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx', colors, c: true })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs, colors, c: true })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '') + threadsAt(f, 'LEFT', meta.o) + threadsAt(f, 'RIGHT', meta.n);
         ri++;
         continue;
       }
@@ -451,20 +469,22 @@
         if (!adds.length) {
           out += `<div class="sl gone"><span class="g">${tickHtml(b)}</span><span class="half l"><span class="tx">${b.dels} removed line${b.dels > 1 ? 's' : ''}, reviewed</span></span><span class="half r"><span class="bdgs">${diffToggle(b)}</span></span></div>`;
         }
+        dels.forEach((i) => { out += threadsAt(f, 'LEFT', h.meta[i].o); });
         adds.forEach((i, k) => {
           const m2 = h.meta[i];
           const colors = rowColors(h.rows, f.p, i);
-          out += `<div class="sl rvd-quiet${other}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors })}</div>` + peekAfter(f, m2.n);
+          out += `<div class="sl rvd-quiet${other}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
         });
       } else {
         const rows = Math.max(dels.length, adds.length);
         for (let k = 0; k < rows; k++) {
           const li = dels[k], ai = adds[k];
           const lm = li != null ? h.meta[li] : null, am = ai != null ? h.meta[ai] : null;
-          out += `<div class="sl${d ? ' rvd' : ''}${other}" data-n="${am ? am.n : ''}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>`
-            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null })
-            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null })
-            + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '');
+          const sel = (li != null && inCompose(f, hi, li)) || (ai != null && inCompose(f, hi, ai));
+          out += `<div class="sl${d ? ' rvd' : ''}${other}${sel ? ' cm-sel' : ''}" data-n="${am ? am.n : ''}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>`
+            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null, c: true })
+            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null, c: true })
+            + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '') + (lm ? threadsAt(f, 'LEFT', lm.o) : '') + (am ? threadsAt(f, 'RIGHT', am.n) : '');
         }
       }
       ri = bEnd;
@@ -587,10 +607,11 @@
     const blocks = (f.blocks || []).filter((b) => b.hunk === S.hi && b.edits.length && b.first < S.e0 && b.first + b.len > S.s0);
     const open = blocks.filter((b) => !done(b)).length;
     const allDone = blocks.length > 0 && open === 0;
-    // Reviewed sections fold, and so do long ones in a chain.
+    // Reviewed sections fold, and so do long ones in a chain, unless a conversation is open in them.
     const folds = !!f.blocks;
-    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key)));
-    return { S, blocks, open, allDone, folds, collapsed };
+    const threads = threadsIn(f, S.hi, S.s0, S.e0);
+    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key) && !threads.open));
+    return { S, blocks, open, allDone, folds, collapsed, threads };
   }
   const grown = (key) => state.more.get(key) || { above: 0, below: 0 };
   const moreAttrs = (key, side, n) => `data-act="more" data-key="${esc(key)}" data-side="${side}" data-n="${n}"`;
@@ -621,6 +642,7 @@
     if (x.blocks.length) out += `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(x.blocks.map((b) => b.id).join(' '))}">${x.open ? '✓ Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
     if (x.collapsed) {
       out += `<span class="hh-note">${S.e0 - S.s0} lines${x.allDone ? ' · all reviewed' : ''}</span>`;
+      if (x.threads.all) out += `<span class="hh-cm" title="Threads in these lines">${ICON.comment}${x.threads.all}</span>`;
       const focus = ctx.chain && ctx.chain.focus ? x.blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
       if (focus.length && !x.allDone) out += `<span class="hh-note">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(S.key)}" data-line="${ln}">line ${ln}</button>`).join('')}`;
     }
@@ -665,7 +687,7 @@
     blocks.forEach((b) => { if (!byFile.has(b.file)) byFile.set(b.file, []); byFile.get(b.file).push(b); });
     let h = '';
     [...byFile.keys()].sort((x, y) => x.idx - y.idx).forEach((f) => {
-      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code">`;
+      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code" data-p="${esc(f.p)}">`;
       const byHunk = new Map();
       byFile.get(f).forEach((b) => { if (!byHunk.has(b.hunk)) byHunk.set(b.hunk, []); byHunk.get(b.hunk).push(b); });
       const secs = [];
@@ -949,6 +971,7 @@
       const whole = state.whole.has(f.p);
       h += iconBtn(whole ? ICON.mapFilled : ICON.map, whole ? 'Showing the whole file: show only the changed chunks' : 'Showing the changed chunks: show the whole file', `data-act="whole" data-p="${esc(f.p)}"`, { label: 'Only the changed chunks', on: !whole });
     }
+    if (o.comment && GH.on && GH.data && !GH.data.pr.locked) h += iconBtn(ICON.comment, 'Comment on this file', `data-act="file-comment" data-p="${esc(o.comment)}"`);
     if (o.layout) h += iconBtn(ICON.split, state.layout === 'split' ? 'Side by side: show inline' : 'Inline: show side by side', 'data-act="layout"', { label: 'Side by side', on: state.layout === 'split' });
     return h ? `<span class="tools" role="toolbar" aria-label="View">${h}</span>` : '';
   }
@@ -1047,6 +1070,410 @@
       .catch((e) => { peek.live = { q, status: 'error', error: e.message }; })
       .then(() => { if (state.peek === peek) render(); });
   }
+
+  // ---------- GitHub: the pull request's conversation
+  // Review threads show under the lines they're on, the Comments tab lists them with the
+  // conversation, and the review is finished from the top bar. untangle asks GitHub through gh,
+  // as the user. What's written waits as a draft (kept in this browser) until it's sent.
+  const GH = {
+    on: !!(CONFIG.served && CONFIG.github && !CONFIG.github.off),
+    data: null, sig: '', error: null, loading: false, at: 0, stale: false,
+    anchors: new Map(), files: new Map(),
+    busy: null, errors: new Map(), focus: null, reveal: null,
+    opened: new Set(), replying: new Set(), editing: null, picker: null, previews: new Map(), preview: new Set(),
+    showResolved: false, away: new Set(), fileCompose: null, reviewOpen: false, event: 'COMMENT',
+  };
+  const DRAFTS = 'untangle:drafts:' + (CONFIG.key || 'review');
+  const drafts = new Map();
+  try { Object.entries(JSON.parse(localStorage.getItem(DRAFTS) || '{}')).forEach(([k, v]) => { if (typeof v === 'string') drafts.set(k, v); }); } catch (e) { /* storage unavailable */ }
+  let draftTimer = null;
+  function setDraft(key, text) {
+    if (text) drafts.set(key, text); else drafts.delete(key);
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => { try { localStorage.setItem(DRAFTS, JSON.stringify(Object.fromEntries(drafts))); } catch (e) { /* storage unavailable */ } }, 300);
+  }
+  // Whether lines can take new comments: GitHub places them on its head, which must be this review's.
+  const canCommentLines = () => GH.on && GH.data && !GH.stale && !GH.data.pr.locked;
+
+  function ghSet(d) {
+    GH.data = d;
+    GH.sig = JSON.stringify(d);
+    GH.stale = d.pr.head !== CONFIG.head;
+    GH.anchors = new Map();
+    GH.files = new Map();
+    const fileOf = (p) => { if (!GH.files.has(p)) GH.files.set(p, { line: [], file: [], away: [], open: 0 }); return GH.files.get(p); };
+    d.threads.forEach((t) => {
+      const e = fileOf(t.path);
+      if (!t.resolved) e.open++;
+      t.at = null;
+      if (t.file) { e.file.push(t); return; }
+      // GitHub gives a thread's lines on the pull request's head; when that's newer than this
+      // review, a thread written on this review's commit keeps its original lines.
+      const line = t.outdated ? null : !GH.stale ? t.line : t.commit === CONFIG.head ? t.originalLine : null;
+      if (line == null) { e.away.push(t); return; }
+      t.at = line;
+      t.from = !GH.stale ? t.startLine : t.originalStartLine;
+      const k = t.path + '\n' + t.side + '\n' + line;
+      if (!GH.anchors.has(k)) GH.anchors.set(k, []);
+      GH.anchors.get(k).push(t);
+      e.line.push(t);
+    });
+  }
+  function ghLoad(quiet) {
+    if (!GH.on || GH.loading) return;
+    GH.loading = true;
+    if (!quiet) render();
+    fetch('api/github', { cache: 'no-store' })
+      .then((r) => r.json().catch(() => ({ error: r.statusText })).then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => {
+        GH.loading = false; GH.error = null; GH.at = Date.now();
+        // Polled: the page changes only when the conversation did.
+        if (JSON.stringify(j) !== GH.sig) { ghSet(j); render(); } else if (!quiet) render();
+      })
+      .catch((e) => { GH.loading = false; GH.error = e.message; GH.at = Date.now(); render(); });
+  }
+  // A change on GitHub: the answer is the conversation after it. `done` runs when it worked.
+  function ghAct(key, payload, done) {
+    if (GH.busy) return;
+    GH.busy = key;
+    GH.errors.delete(key);
+    render();
+    fetch('api/github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+      .then((r) => r.json().catch(() => ({ error: r.statusText })).then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => { GH.at = Date.now(); ghSet(j); if (done) done(); })
+      .catch((e) => { GH.errors.set(key, e.message); ghLoad(true); })
+      .then(() => { GH.busy = null; render(); });
+  }
+  function ghPreview(key) {
+    const text = drafts.get(key) || '';
+    const p = GH.previews.get(key);
+    if (p && p.text === text) return;
+    const entry = { text, html: null, error: null };
+    GH.previews.set(key, entry);
+    if (!text.trim()) { entry.html = '<p class="muted">Nothing to preview.</p>'; return; }
+    fetch('api/github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'preview', text }) })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => { entry.html = j.html; })
+      .catch((e) => { entry.error = e.message; })
+      .then(() => { if (GH.previews.get(key) === entry) render(); });
+  }
+
+  // GitHub's rendered markdown, cleaned once more here: only content stays (no scripts, styles,
+  // handlers or frames), and links open GitHub in a new tab.
+  const KEEP_TAGS = new Set('a abbr b blockquote br code dd del details div dl dt em g-emoji h1 h2 h3 h4 h5 h6 hr i img input ins kbd li ol p picture pre q s samp source span strike strong sub summary sup table tbody td tfoot th thead tr tt ul video'.split(' '));
+  const DROP_TAGS = new Set('script style iframe frame frameset object embed form link meta base template noscript textarea select button svg math'.split(' '));
+  const KEEP_ATTRS = new Set('href src srcset alt title width height align colspan rowspan open type checked disabled lang dir class media controls poster start data-line-number'.split(' '));
+  const cleanCache = new Map();
+  function clean(html) {
+    if (cleanCache.has(html)) return cleanCache.get(html);
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html || '';
+    const walk = (node) => {
+      [...node.childNodes].forEach((el) => {
+        if (el.nodeType === 8) { el.remove(); return; }
+        if (el.nodeType !== 1) return;
+        const tag = el.localName;
+        if (DROP_TAGS.has(tag)) { el.remove(); return; }
+        walk(el);
+        if (!KEEP_TAGS.has(tag)) { el.replaceWith(...el.childNodes); return; }
+        [...el.attributes].forEach((a) => {
+          const n = a.name.toLowerCase(), v = a.value.trim();
+          if (!KEEP_ATTRS.has(n) || ((n === 'href' || n === 'src' || n === 'poster') && !/^(https?:|mailto:|#)/i.test(v)) || (n === 'srcset' && /(javascript|data|vbscript):/i.test(v))) el.removeAttribute(a.name);
+          // GitHub's highlighting classes stay; the page's own can't be borrowed.
+          if (n === 'class') { const keep = v.split(/\s+/).filter((c) => /^(pl-|blob-|js-suggested-changes-blob$|highlight|user-mention|team-mention|issue-link|commit-link|task-list|contains-task-list|markdown-)/.test(c)); if (keep.length) el.setAttribute('class', keep.join(' ')); else el.removeAttribute('class'); }
+        });
+        if (tag === 'input') { if (el.getAttribute('type') !== 'checkbox') { el.remove(); return; } el.setAttribute('disabled', ''); }
+        if (tag === 'a' && /^https?:/i.test(el.getAttribute('href') || '')) { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
+        if (tag === 'img') el.setAttribute('loading', 'lazy');
+      });
+    };
+    walk(tpl.content);
+    if (cleanCache.size > 500) cleanCache.clear();
+    cleanCache.set(html, tpl.innerHTML);
+    return tpl.innerHTML;
+  }
+  function ago(iso) {
+    const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    if (s < 2 * 86400) return 'yesterday';
+    if (s < 30 * 86400) return `${Math.floor(s / 86400)} days ago`;
+    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  const avatar = (p, size) => p.avatar ? `<img class="av" src="${esc(p.avatar + (p.avatar.includes('?') ? '&' : '?') + 's=' + (size || 56))}" alt="" loading="lazy">` : '<span class="av"></span>';
+  const ROLE = { OWNER: 'Owner', MEMBER: 'Member', COLLABORATOR: 'Collaborator', CONTRIBUTOR: 'Contributor' };
+  const EMOJI = { THUMBS_UP: '👍', THUMBS_DOWN: '👎', LAUGH: '😄', HOORAY: '🎉', CONFUSED: '😕', HEART: '❤️', ROCKET: '🚀', EYES: '👀' };
+  const busyAttr = (key) => (GH.busy ? ` disabled${GH.busy === key ? ' aria-busy="true"' : ''}` : '');
+  // A text box for markdown: Write and Preview, an error, and its buttons ([label, attrs, primary]).
+  function composerHtml(key, o) {
+    const previewing = GH.preview.has(key);
+    const p = previewing ? GH.previews.get(key) : null;
+    const err = GH.errors.get(key);
+    const btns = o.buttons.map(([label, attrs, primary]) => `<button type="button" class="btn sm${primary ? ' primary' : ''}" ${attrs} data-key="${esc(key)}"${primary ? ' data-primary="1"' : ''}${busyAttr(key)}>${GH.busy === key && primary ? 'Sending…' : label}</button>`).join('');
+    return `<div class="cmp" data-cmp="${esc(key)}"><div class="cmp-tabs"><button type="button" data-act="cmp-pane" data-key="${esc(key)}" data-pane="write" aria-pressed="${!previewing}">Write</button><button type="button" data-act="cmp-pane" data-key="${esc(key)}" data-pane="preview" aria-pressed="${previewing}">Preview</button><span class="sp"></span>`
+      + (o.suggest ? iconBtn(ICON.suggest, 'Suggest a change: the lines, to edit into what they should be', `data-act="cmp-suggest" data-key="${esc(key)}"`) : '') + '</div>'
+      + (previewing ? `<div class="cmp-pre cm-body">${p && p.html != null ? clean(p.html) : p && p.error ? `<p class="cmp-err">${esc(p.error)}</p>` : '<p class="muted">Rendering…</p>'}</div>`
+        : `<textarea class="cmp-ta" data-draft="${esc(key)}" placeholder="${esc(o.placeholder || 'Leave a comment')}" rows="${o.rows || 4}">${esc(drafts.get(key) || '')}</textarea>`)
+      + (err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : '') + (o.extra || '')
+      + `<div class="cmp-f"><span class="cmp-hint">Markdown · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busyAttr(key)}>Cancel</button>` : ''}${btns}</div></div>`;
+  }
+  // The buttons to send a comment: into the pending review, or (with none pending) on its own.
+  function sendButtons(act, attrs) {
+    if (GH.data && GH.data.pending) return [['Add review comment', `data-act="${act}" data-mode="review" ${attrs || ''}`, true]];
+    return [['Add single comment', `data-act="${act}" data-mode="single" ${attrs || ''}`, false], ['Start a review', `data-act="${act}" data-mode="review" ${attrs || ''}`, true]];
+  }
+  function reactionsHtml(c) {
+    const chips = c.reactions.map((r) => `<button type="button" class="rx${r.mine ? ' on' : ''}" data-act="gh-react" data-subject="${esc(c.id)}" data-content="${r.content}" data-on="${!r.mine}" title="${esc(r.content.toLowerCase().replace('_', ' '))}"${c.canReact ? '' : ' disabled'}>${EMOJI[r.content] || r.content} ${r.count}</button>`).join('');
+    const picker = GH.picker === c.id ? `<span class="rx-pick" role="group" aria-label="Reactions">${Object.entries(EMOJI).map(([k, e]) => { const mine = c.reactions.some((r) => r.content === k && r.mine); return `<button type="button" class="rx${mine ? ' on' : ''}" data-act="gh-react" data-subject="${esc(c.id)}" data-content="${k}" data-on="${!mine}" title="${esc(k.toLowerCase().replace('_', ' '))}">${e}</button>`; }).join('')}</span>` : '';
+    return chips || picker ? `<div class="cm-rx">${chips}${picker}</div>` : '';
+  }
+  // A comment: kind 'review' (in a thread), 'issue' (the conversation) or 'pr' (the description).
+  function commentHtml(c, kind) {
+    const editKey = 'edit:' + c.id;
+    const tools = (c.canReact ? iconBtn(ICON.smiley, 'React', `data-act="react-open" data-subject="${esc(c.id)}"`) : '')
+      + (c.canEdit && kind !== 'pr' ? iconBtn(ICON.edit, 'Edit', `data-act="edit-open" data-id="${esc(c.id)}"`) : '')
+      + (c.canDelete && kind !== 'pr' ? iconBtn(ICON.trash, 'Delete', `data-act="gh-delete" data-id="${esc(c.id)}" data-kind="${kind}"${busyAttr('del:' + c.id)}`) : '')
+      + (c.url ? `<a class="ib" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer" title="Open on GitHub" aria-label="Open on GitHub">${ICON.external}</a>` : '');
+    const body = GH.editing === c.id
+      ? composerHtml(editKey, { buttons: [['Update comment', `data-act="gh-edit" data-id="${esc(c.id)}" data-kind="${kind}"`, true]], cancel: 'edit-cancel' })
+      : `<div class="cm-body">${c.html ? clean(c.html) : '<p class="muted">No description.</p>'}</div>`;
+    const err = GH.errors.get('del:' + c.id);
+    return `<div class="cm${c.pending ? ' pending' : ''}" data-comment="${esc(c.id)}">${avatar(c.author)}<div class="cm-main"><div class="cm-h"><a class="cm-who" href="${esc(c.author.url)}" target="_blank" rel="noopener noreferrer">${esc(c.author.login)}</a><span class="muted" title="${esc(new Date(c.created).toLocaleString())}">${ago(c.created)}</span>${c.edited ? '<span class="muted">· edited</span>' : ''}${c.pending ? '<span class="cm-tag pending">Pending</span>' : ''}${ROLE[c.association] ? `<span class="cm-tag">${ROLE[c.association]}</span>` : ''}<span class="sp"></span><span class="cm-tools">${tools}</span></div>${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}${reactionsHtml(c)}</div></div>`;
+  }
+  // A review thread, under its line. Resolved threads fold, as on GitHub.
+  function threadHtml(t, o) {
+    o = o || {};
+    const open = !t.resolved || GH.opened.has(t.id);
+    const n = t.comments.length;
+    const pending = t.comments.some((c) => c.pending);
+    const lines = t.file ? 'the file' : t.at != null && t.from != null && t.from !== t.at ? `lines ${t.from} to ${t.at}` : t.at != null ? `line ${t.at}` : `line ${t.originalLine}`;
+    let h = `<div class="th${t.resolved ? ' resolved' : ''}${pending ? ' pending' : ''}" data-thread="${esc(t.id)}">`;
+    if (t.resolved || o.head) {
+      h += `<button type="button" class="th-fold" data-act="thread-toggle" data-thread="${esc(t.id)}" aria-expanded="${open}"><span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span>${t.resolved ? `${ICON.check}<b>Resolved</b>${t.resolvedBy ? ` by ${esc(t.resolvedBy)}` : ''}` : ''}${o.head ? ` ${o.head}` : ''}<span class="muted">· ${esc(lines)} · ${n} comment${n === 1 ? '' : 's'}</span></button>`;
+    }
+    if (!open) return h + '</div>';
+    if (t.outdated && !o.head) h += '<div class="th-note">Outdated: the code changed since.</div>';
+    h += t.comments.map((c) => commentHtml(c, 'review')).join('');
+    const key = 'reply:' + t.id, err = GH.errors.get('resolve:' + t.id);
+    h += '<div class="th-f">';
+    if (GH.replying.has(t.id) || drafts.has(key)) h += composerHtml(key, { placeholder: 'Reply…', rows: 3, buttons: sendButtons('gh-reply', `data-thread="${esc(t.id)}"`), cancel: 'reply-cancel' });
+    else if (t.canReply) h += `<button type="button" class="th-reply" data-act="reply-open" data-thread="${esc(t.id)}">Write a reply…</button>`;
+    const res = t.resolved ? (t.canUnresolve ? 'Unresolve conversation' : '') : t.canResolve ? 'Resolve conversation' : '';
+    if (res) h += `<div class="th-acts"><button type="button" class="btn xs" data-act="gh-resolve" data-thread="${esc(t.id)}" data-on="${!t.resolved}"${busyAttr('resolve:' + t.id)}>${GH.busy === 'resolve:' + t.id ? 'Saving…' : res}</button></div>`;
+    if (err) h += `<div class="cmp-err" role="alert">${esc(err)}</div>`;
+    return h + '</div></div>';
+  }
+  // The composer for a new thread, under the last of its lines.
+  function newThreadHtml(c) {
+    const sign = (side) => (side === 'LEFT' ? '−' : '+');
+    const what = c.startLine != null && (c.startLine !== c.line || c.startSide !== c.side) ? `lines ${sign(c.startSide)}${c.startLine} to ${sign(c.side)}${c.line}` : `line ${sign(c.side)}${c.line}`;
+    return `<div class="th new" data-thread="new"><div class="th-new-h">${ICON.comment}<b>Comment on ${what}</b><span class="muted">Shift-click + on another line of this hunk to comment on a range.</span></div>`
+      + composerHtml(c.key, { buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
+  }
+  // Threads on a side's line of a file, and the comment being written there.
+  function threadsAt(f, side, line) {
+    if (!GH.on || line == null || !GH.data) return '';
+    const list = GH.anchors.get(f.p + '\n' + side + '\n' + line);
+    let h = list ? list.map((t) => threadHtml(t)).join('') : '';
+    const c = state.compose;
+    if (c && c.path === f.p && c.side === side && c.line === line) h += newThreadHtml(c);
+    return h;
+  }
+  // Threads under a unified row: on its new line, and on its old one (a removed or unchanged line).
+  function threadsRow(f, meta, noLeft) {
+    if (!GH.on || !GH.data) return '';
+    return (meta.t !== '-' ? threadsAt(f, 'RIGHT', meta.n) : '') + (!noLeft && meta.t !== '+' && meta.o != null ? threadsAt(f, 'LEFT', meta.o) : '');
+  }
+  // Whether a row of a hunk is in the range a comment is being written on.
+  const inCompose = (f, hi, ri) => { const c = state.compose; return !!c && c.path === f.p && c.hi === hi && ri >= c.r0 && ri <= c.r1; };
+  // Comments on a file (not a line), threads whose line isn't in this version, and a new file comment.
+  function fileThreadsHtml(f) {
+    if (!GH.on || !GH.data) return '';
+    const e = GH.files.get(f.p) || { file: [], away: [] };
+    let h = '';
+    if (GH.fileCompose === f.p) {
+      const key = 'file:' + f.p;
+      h += `<div class="th new" data-thread="new"><div class="th-new-h">${ICON.comment}<b>Comment on the file</b></div>${composerHtml(key, { buttons: sendButtons('gh-thread', 'data-file="1"'), cancel: 'file-cancel' })}</div>`;
+    }
+    h += e.file.map((t) => threadHtml(t, { head: '<b>On the file</b>' })).join('');
+    if (e.away.length) {
+      const open = GH.away.has(f.p);
+      h += `<button type="button" class="th-away" data-act="away-toggle" data-p="${esc(f.p)}" aria-expanded="${open}"><span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span>${e.away.length} thread${e.away.length > 1 ? 's' : ''} on code this version doesn’t have (outdated${GH.stale ? ', or on newer commits' : ''})</button>`;
+      if (open) h += e.away.map((t) => hunkSnippet(t) + threadHtml(t, { head: `<b>${t.outdated ? 'Outdated' : 'On a newer commit'}</b>` })).join('');
+    }
+    return h ? `<div class="fthreads">${h}</div>` : '';
+  }
+  // The end of the diff hunk a thread was written on, for a thread that has no line here.
+  function hunkSnippet(t) {
+    if (!t.hunk) return '';
+    const lines = t.hunk.split('\n').slice(1).slice(-5);
+    return `<div class="th-hunk">${lines.map((l) => `<div class="${l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : ''}">${esc(l)}</div>`).join('')}</div>`;
+  }
+  // The threads on a section's lines, and how many of them are open.
+  function threadsIn(f, hi, s0, e0) {
+    const out = { all: 0, open: 0 };
+    if (!GH.on || !GH.data) return out;
+    const meta = hunkMeta(f.hunks[hi]);
+    const add = (list) => (list || []).forEach((t) => { out.all++; if (!t.resolved) out.open++; });
+    for (let i = s0; i < e0; i++) {
+      const r = meta[i];
+      if (r.n != null && r.t !== '-') add(GH.anchors.get(f.p + '\nRIGHT\n' + r.n));
+      if (r.o != null && r.t !== '+') add(GH.anchors.get(f.p + '\nLEFT\n' + r.o));
+    }
+    return out;
+  }
+  const openThreadsHtml = (p) => { const e = GH.on && GH.files.get(p); return e && e.open ? `<span class="cm-cnt" title="Open threads">${ICON.comment}${e.open}</span>` : ''; };
+  // A line of a file's diff by side: its hunk and row.
+  function rowAt(path, side, line) {
+    const x = side === 'LEFT' ? M().old.get(path + ':' + line) : M().head.get(path + ':' + line);
+    return x ? { hi: x.hi, ri: x.ri, side, line } : null;
+  }
+  // Opens the composer on a line; with shift, stretches the open one to it (within its hunk).
+  function openCompose(at, extend) {
+    const c = state.compose;
+    if (extend && c && c.path === at.path && c.hi != null) {
+      const a = rowAt(at.path, c.anchor.side, c.anchor.line), b = rowAt(at.path, at.side, at.line);
+      if (!a || !b || a.hi !== b.hi) return toast('A comment’s lines must be in one hunk.');
+      const [s, e] = a.ri <= b.ri ? [a, b] : [b, a];
+      state.compose = { ...c, side: e.side, line: e.line, startSide: s.side, startLine: s.line, r0: s.ri, r1: e.ri };
+    } else {
+      const a = rowAt(at.path, at.side, at.line);
+      state.compose = { key: `new:${at.path}:${at.side}:${at.line}`, anchor: { side: at.side, line: at.line }, path: at.path, side: at.side, line: at.line, startSide: null, startLine: null, hi: a ? a.hi : null, r0: a ? a.ri : -1, r1: a ? a.ri : -1 };
+    }
+    GH.focus = state.compose.key;
+    render();
+  }
+  // The lines a suggestion starts from: the new side's lines in the comment's range.
+  function suggestionLines(c) {
+    const f = M().files.find((x) => x.p === c.path);
+    if (!f || c.hi == null) return [];
+    const h = f.hunks[c.hi];
+    const out = [];
+    for (let i = c.r0; i <= c.r1; i++) if (h.meta[i].t !== '-') out.push(h.rows[i][1]);
+    return out;
+  }
+  function openThread(id) {
+    const t = GH.data && GH.data.threads.find((x) => x.id === id);
+    if (!t) return;
+    GH.opened.add(t.id);
+    state.peek = null;
+    const inModel = M().files.some((f) => f.p === t.path) || M().generated.some((f) => f.p === t.path);
+    state.view = inModel ? { kind: 'file', path: t.path } : { kind: 'conversation' };
+    if (t.at != null) {
+      const r = rowAt(t.path, t.side, t.at);
+      if (r) { const k = 'file|' + t.path + '#' + r.hi + ':0'; state.collapsed.delete(k); state.expanded.add(k); }
+    } else if (!t.file) GH.away.add(t.path);
+    GH.reveal = t.id;
+    render({ top: true });
+  }
+  // The pull request's conversation: its description, comments and reviews, and a new comment.
+  function renderConversation() {
+    if (!GH.on) return `<div class="empty">${esc((CONFIG.github && CONFIG.github.off) || 'This review has no pull request.')}</div>`;
+    const d = GH.data;
+    if (!d) return `<div class="empty">${GH.error ? esc(GH.error) : 'Loading the conversation from GitHub…'}</div>`;
+    const pr = d.pr;
+    const state1 = pr.draft ? 'Draft' : { OPEN: 'Open', MERGED: 'Merged', CLOSED: 'Closed' }[pr.state] || pr.state;
+    const decision = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required' }[pr.decision] || '';
+    const open = d.threads.filter((t) => !t.resolved).length;
+    let h = headerHtml(`<b>${esc(pr.title)}</b> <span class="muted">#${pr.number}</span>`,
+      `<span class="pr-state ${esc(pr.state.toLowerCase())}${pr.draft ? ' draft' : ''}">${state1}</span>${decision ? `<span>${decision}</span>` : ''}<span>${esc(pr.author.login)} opened ${ago(pr.created)}</span><span>${open} unresolved conversation${open === 1 ? '' : 's'}</span>`,
+      `<a class="btn sm" href="${esc(pr.url)}" target="_blank" rel="noopener noreferrer">Open on GitHub</a>`);
+    h += '<div class="conv">' + commentHtml({ id: pr.id, author: pr.author, association: '', html: pr.html, created: pr.created, edited: null, url: pr.url, pending: false, canEdit: false, canDelete: false, canReact: pr.canReact, reactions: pr.reactions }, 'pr');
+    const items = d.comments.map((c) => ({ at: c.created, c })).concat(d.reviews.map((r) => ({ at: r.created, r }))).sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
+    const VERB = { APPROVED: ['approved these changes', 'ok'], CHANGES_REQUESTED: ['requested changes', 'no'], COMMENTED: ['reviewed', ''], DISMISSED: ['reviewed (dismissed)', ''] };
+    items.forEach(({ c, r }) => {
+      if (c) { h += commentHtml(c, 'issue'); return; }
+      const [verb, cls] = VERB[r.state] || ['reviewed', ''];
+      h += `<div class="tl-ev ${cls}">${avatar(r.author, 40)}<span><a class="cm-who" href="${esc(r.author.url)}" target="_blank" rel="noopener noreferrer">${esc(r.author.login)}</a> ${verb}${r.comments ? ` · ${r.comments} comment${r.comments > 1 ? 's' : ''}` : ''} <span class="muted">${ago(r.created)}</span></span></div>`;
+      if (r.body) h += `<div class="tl-body cm-body">${clean(r.html)}</div>`;
+    });
+    h += `<div class="conv-new">${composerHtml('issue', { placeholder: 'Add a comment to the conversation', buttons: [['Comment', 'data-act="gh-comment"', true]] })}</div></div>`;
+    return h;
+  }
+  // The Comments tab: the conversation, then threads, open ones first, in the files' order.
+  function commentsTabHtml(v) {
+    if (!GH.on) return `<div class="sb-gh">${esc((CONFIG.github && CONFIG.github.off) || 'This review has no pull request, so no comments.')}</div>`;
+    const d = GH.data;
+    let h = `<div class="sb-gh">${GH.error ? `<span class="d">${esc(GH.error)}</span>` : !d ? 'Loading comments from GitHub…' : GH.loading ? 'Refreshing…' : `Updated ${ago(new Date(GH.at).toISOString())}`}<span class="sp"></span>${iconBtn(ICON.refresh, 'Refresh from GitHub', 'data-act="gh-refresh"')}</div>`;
+    if (!d) return h;
+    if (GH.stale) h += `<div class="sb-warn">GitHub has newer commits (${esc(d.pr.head.slice(0, 7))}). Restart untangle to review them; comments on lines need this review to be on the pull request’s head.</div>`;
+    if (d.pending) h += `<button type="button" class="sb-pend" data-act="review-toggle">${d.pending.comments} pending comment${d.pending.comments === 1 ? '' : 's'} · Finish your review</button>`;
+    h += `<button type="button" class="sb-row" data-act="conversation"${v.kind === 'conversation' ? ' aria-current="true"' : ''}><span class="tw">${ICON.discussion}</span><span class="nm">Conversation<span class="sub">description · ${d.comments.length} comment${d.comments.length === 1 ? '' : 's'} · ${d.reviews.length} review${d.reviews.length === 1 ? '' : 's'}</span></span><span class="cnt">›</span></button>`;
+    const order = new Map(M().files.map((f, i) => [f.p, i]));
+    const sorted = d.threads.slice().sort((x, y) => (order.has(x.path) ? order.get(x.path) : 1e9) - (order.has(y.path) ? order.get(y.path) : 1e9) || (x.path < y.path ? -1 : x.path > y.path ? 1 : 0) || (x.at || x.originalLine || 0) - (y.at || y.originalLine || 0));
+    const row = (t) => {
+      const c = t.comments[0];
+      const text = c ? c.body.replace(/```[\s\S]*?```/g, '[code]').replace(/[#>*_`]/g, '').replace(/\s+/g, ' ').trim() : '';
+      const where = t.file ? 'file' : t.at != null ? t.at : t.originalLine;
+      const tag = t.comments.some((x) => x.pending) ? ' pend' : t.resolved ? ' done' : t.at == null && !t.file ? ' away' : '';
+      return `<button type="button" class="sb-row thr${tag}" data-act="thread-open" data-thread="${esc(t.id)}" title="${esc(t.path)}"><span class="st"></span><span class="nm">${esc(fileName(t.path))}:${where}<span class="sub">${esc(c ? c.author.login : '')}: ${esc(trunc(text, 90))}</span></span><span class="cnt">${t.comments.length > 1 ? t.comments.length - 1 + ' ↩' : ''}</span></button>`;
+    };
+    const open = sorted.filter((t) => !t.resolved), done = sorted.filter((t) => t.resolved);
+    h += `<div class="sb-h"><span>Open threads</span><span class="sb-hn">${open.length}</span></div>` + (open.length ? open.map(row).join('') : '<div class="sb-gh muted">None open.</div>');
+    if (done.length) {
+      h += `<button type="button" class="sb-h sb-hbtn" data-act="resolved-toggle" aria-expanded="${GH.showResolved}"><span>Resolved threads</span><span class="sb-hn">${done.length} ${GH.showResolved ? '▾' : '▸'}</span></button>`;
+      if (GH.showResolved) h += done.map(row).join('');
+    }
+    return h;
+  }
+  // The top bar's review button and, opened, the review to finish: a summary and a verdict.
+  function renderReviewBar() {
+    const el = $('#vw-review');
+    if (!el) return;
+    el.hidden = !GH.on;
+    if (!GH.on) return;
+    const d = GH.data, n = d && d.pending ? d.pending.comments : 0;
+    let h = `<button type="button" class="btn sm rv-btn${n ? ' primary' : ''}" data-act="review-toggle" aria-expanded="${GH.reviewOpen}">${n ? `Finish your review <span class="rv-n">${n}</span>` : 'Review changes'} ▾</button>`;
+    if (GH.reviewOpen && d) {
+      const mine = d.pr.mine;
+      const opt = (ev, label, note, off) => `<label class="rv-opt${off ? ' off' : ''}"><input type="radio" name="rv-event" value="${ev}"${GH.event === ev ? ' checked' : ''}${off ? ' disabled' : ''}><span><b>${label}</b><span class="muted">${note}</span></span></label>`;
+      h += `<div class="rv-pop" role="dialog" aria-label="Finish your review"><div class="rv-h"><b>Finish your review</b><span class="muted">${n ? `${n} pending comment${n === 1 ? '' : 's'}` : 'no pending comments'}</span></div>`
+        + (GH.stale ? `<div class="sb-warn">GitHub has newer commits than this review (${esc(d.pr.head.slice(0, 7))}).</div>` : '')
+        + composerHtml('review', {
+          placeholder: 'Leave a comment', rows: 4,
+          extra: `<div class="rv-opts">${opt('COMMENT', 'Comment', 'General feedback, without approving.', false)}${opt('APPROVE', 'Approve', mine ? 'Not for your own pull request.' : 'Feedback, and approval to merge.', mine)}${opt('REQUEST_CHANGES', 'Request changes', mine ? 'Not for your own pull request.' : 'Feedback that must be addressed before merging.', mine)}</div>`,
+          buttons: (n ? [['Discard pending review', 'data-act="gh-discard"', false]] : []).concat([['Submit review', 'data-act="gh-submit"', true]]),
+        }) + '</div>';
+    }
+    el.innerHTML = h;
+  }
+  let toastTimer = null;
+  function toast(msg) {
+    let el = $('#vw-toast');
+    if (!el) { el = document.createElement('div'); el.id = 'vw-toast'; el.className = 'toast'; el.setAttribute('role', 'status'); viewer.appendChild(el); }
+    el.textContent = msg;
+    el.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('on'), 3500);
+  }
+  // The + that starts a comment, over the line under the pointer (one button, moved around).
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'cm-add';
+  addBtn.textContent = '+';
+  addBtn.title = 'Comment on this line (shift-click: on the lines from the open comment to this one)';
+  addBtn.setAttribute('aria-label', 'Comment on this line');
+  let addAt = null;
+  function placeAdd(cell) {
+    const code = cell.closest('.code[data-p]');
+    if (!code || !canCommentLines()) { addBtn.classList.remove('on'); return; }
+    const [side, line] = cell.dataset.c.split(':');
+    addAt = { path: code.dataset.p, side: side === 'L' ? 'LEFT' : 'RIGHT', line: Number(line) };
+    const mr = main.getBoundingClientRect(), r = cell.getBoundingClientRect();
+    const sg = cell.querySelector('.sg') || cell;
+    const sr = sg.getBoundingClientRect();
+    addBtn.style.top = `${r.top - mr.top + main.scrollTop + Math.max(0, (Math.min(r.height, 21) - 20) / 2)}px`;
+    addBtn.style.left = `${sr.left - mr.left + main.scrollLeft - 12}px`;
+    addBtn.classList.add('on');
+  }
+  main.addEventListener('mouseover', (e) => {
+    if (!GH.on || e.target === addBtn) return;
+    const cell = e.target.closest('[data-c]');
+    if (cell && main.contains(cell)) placeAdd(cell); else addBtn.classList.remove('on');
+  });
+  main.addEventListener('mouseleave', () => addBtn.classList.remove('on'));
+  addBtn.addEventListener('click', (e) => { e.stopPropagation(); if (addAt) openCompose(addAt, e.shiftKey); });
 
   // ---------- views
   function headerHtml(title, metaHtml, actionHtml, sub) {
@@ -1217,21 +1644,21 @@
     const firstAdd = f.blocks.find((b) => b.adds);
     const editor = { side: f.s === 'D' ? 'base' : 'head', p: f.p, line: (firstAdd && f.hunks[firstAdd.hunk].meta[firstAdd.first].n) || 1 };
     let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`,
-      `<span>${{ A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s}</span><span>${s.open} of ${s.total} changes to review</span>${s.open ? `<span class="a">+${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.adds, 0)}</span><span class="d">−${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.dels, 0)}</span>` : ''}`,
-      `${toolsHtml({ editor, nav: true, whole: f, layout: true })}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
+      `<span>${{ A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s}</span><span>${s.open} of ${s.total} changes to review</span>${openThreadsHtml(f.p)}${s.open ? `<span class="a">+${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.adds, 0)}</span><span class="d">−${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.dels, 0)}</span>` : ''}`,
+      `${toolsHtml({ editor, nav: true, whole: f, comment: f.p, layout: true })}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
       chains.length ? `<div class="fv-sub">In chains: ${chains.slice(0, 6).map((id) => `<button type="button" class="chip-btn" data-chain="${id}">${esc(m.chains[id].name)}</button>`).join('')}${chains.length > 6 ? ` +${chains.length - 6}` : ''}</div>` : '');
     if (state.compare === 'since') h += `<div class="since-note">Left: your reviewed snapshot (as if you had reviewed everything up to <code>${esc(m.raw.left)}</code>). Right: the head <code>${esc(m.raw.right)}</code>.</div>`;
     const ctx = { key: 'file' };
     // Loaded ahead, so the whole file shows at once.
     if (CONFIG.served && f.s === 'M') loadSource({ side: 'head', path: f.p });
-    h += '<div class="code">' + (CONFIG.served && state.whole.has(f.p) ? wholeHtml(f, ctx) : sectionsHtml(f, f.hunks.map((hk, hi) => sectionOf(f, hi, 0, hk.rows.length, ctx)), ctx));
+    h += fileThreadsHtml(f) + `<div class="code" data-p="${esc(f.p)}">` + (CONFIG.served && state.whole.has(f.p) ? wholeHtml(f, ctx) : sectionsHtml(f, f.hunks.map((hk, hi) => sectionOf(f, hi, 0, hk.rows.length, ctx)), ctx));
     return h + '</div>';
   }
   // A generated file's rows: for reference, without definitions.
   function genRowsHtml(f, hi, s, e) {
     const hk = f.hunks[hi], meta = hunkMeta(hk);
     let h = '';
-    for (let i = s; i < e; i++) h += uRow(f, meta[i], hk.rows[i][1], null, { cls: (meta[i].t === '+' ? 'add' : meta[i].t === '-' ? 'del' : 'ctx') + ' gen', refs: false, colors: rowColors(hk.rows, f.p, i) });
+    for (let i = s; i < e; i++) h += uRow(f, meta[i], hk.rows[i][1], null, { cls: (meta[i].t === '+' ? 'add' : meta[i].t === '-' ? 'del' : 'ctx') + ' gen', refs: false, colors: rowColors(hk.rows, f.p, i), c: true });
     return h;
   }
   function renderGenerated(path) {
@@ -1239,7 +1666,7 @@
     f.lang = f.lang || C.langOf(f.p);
     const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
     let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`,
-      toolsHtml({ editor: { side: f.s === 'D' ? 'base' : 'head', p: f.p, line: 1 }, whole: f.hunks ? f : null }),
+      toolsHtml({ editor: { side: f.s === 'D' ? 'base' : 'head', p: f.p, line: 1 }, whole: f.hunks ? f : null, comment: f.p }),
       '<div class="gen-note">Generated: not reviewed and not counted. Shown for reference only.</div>');
     if (!f.hunks) {
       if (!CONFIG.served) return h + `<div class="empty">This file’s ${fmt(f.a + f.d)} changed lines aren’t in this page.</div>`;
@@ -1255,7 +1682,7 @@
       return h + `<div class="empty">Loading ${fmt(f.a + f.d)} changed lines…</div>`;
     }
     const ctx = { key: 'gen', rows: genRowsHtml, noRefs: true, unified: true };
-    h += '<div class="code">' + (CONFIG.served && state.whole.has(f.p) ? wholeHtml(f, ctx) : sectionsHtml(f, f.hunks.map((hk, hi) => sectionOf(f, hi, 0, hk.rows.length, ctx)), ctx));
+    h += fileThreadsHtml(f) + `<div class="code" data-p="${esc(f.p)}">` + (CONFIG.served && state.whole.has(f.p) ? wholeHtml(f, ctx) : sectionsHtml(f, f.hunks.map((hk, hi) => sectionOf(f, hi, 0, hk.rows.length, ctx)), ctx));
     return h + '</div>';
   }
   function renderGroup(id) {
@@ -1361,8 +1788,10 @@
     let h = `<div class="sb-prog"><div class="sb-big"><b>${t.open}</b> of ${t.total} changes to review</div>
       <div class="track" aria-hidden="true"><div class="fill" style="width:${pct}%"></div></div>
       <div class="sb-sub">${pct}% of changed lines reviewed · <button type="button" class="linkish" data-act="reset">Reset</button></div>${snapshotHtml()}</div>
-      <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="chains" aria-selected="${state.tab === 'chains'}">Chains <span>${m.chains.length}</span></button><button type="button" role="tab" data-tab="files" aria-selected="${state.tab === 'files'}">Files <span>${m.files.length}</span></button></div>`;
-    if (state.tab === 'chains') {
+      <div class="tabs${GH.on ? ' three' : ''}" role="tablist"><button type="button" role="tab" data-tab="chains" aria-selected="${state.tab === 'chains'}">Chains <span>${m.chains.length}</span></button><button type="button" role="tab" data-tab="files" aria-selected="${state.tab === 'files'}">Files <span>${m.files.length}</span></button>${GH.on ? `<button type="button" role="tab" data-tab="comments" aria-selected="${state.tab === 'comments'}" title="Open threads on GitHub">Comments <span>${GH.data ? GH.data.threads.filter((t) => !t.resolved).length : '…'}</span></button>` : ''}</div>`;
+    if (state.tab === 'comments') {
+      h += commentsTabHtml(v);
+    } else if (state.tab === 'chains') {
       const row = (c, indent) => {
         const s = stats(blocksOf(c.blocks));
         const frac = s.total ? Math.round(((s.total - s.open) / s.total) * 100) : 100;
@@ -1387,7 +1816,7 @@
         count: (files) => { const s = stats(files.flatMap((f) => f.blocks)); return { text: s.open ? s.open + ' left' : '', done: !s.open }; },
         file: (f, depth) => {
           const s = stats(f.blocks);
-          return `<button type="button" class="sb-row tr${s.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}">${guides(depth)}<span class="st"></span><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
+          return `<button type="button" class="sb-row tr${s.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}">${guides(depth)}<span class="st"></span><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${openThreadsHtml(f.p)}${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
         },
       });
       h += `<div class="sb-h"><span>Generated · not reviewed</span><span class="sb-hn">${m.generated.length}</span></div>`;
@@ -1436,10 +1865,14 @@
   function render(opts) {
     opts = opts || {};
     const keep = main.scrollTop;
+    // A comment being typed keeps its focus, caret and scroll through the new page.
+    const ae = document.activeElement;
+    const typing = ae && ae.dataset && ae.dataset.draft != null && viewer.contains(ae) ? { key: ae.dataset.draft, s: ae.selectionStart, e: ae.selectionEnd, top: ae.scrollTop } : null;
     renderSide();
+    renderReviewBar();
     const v = state.view;
     try {
-      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : renderFile(v.path);
+      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : renderFile(v.path);
     } catch (e) {
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
@@ -1468,6 +1901,24 @@
     const cur = side.querySelector('[aria-current="true"]');
     if (cur && opts.top) {
       if (cur.offsetTop < side.scrollTop || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - side.clientHeight / 3;
+    }
+    if (GH.on) {
+      main.appendChild(addBtn);
+      addBtn.classList.remove('on');
+      if (GH.reveal) {
+        const el = [...main.querySelectorAll('[data-thread]')].find((x) => x.dataset.thread === GH.reveal);
+        if (el) { placeRow(el, headH() + 40); el.classList.add('flash-th'); }
+        GH.reveal = null;
+      }
+      const findDraft = (key) => [...viewer.querySelectorAll('[data-draft]')].find((x) => x.dataset.draft === key);
+      if (typing) {
+        const ta = findDraft(typing.key);
+        if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(typing.s, typing.e); ta.scrollTop = typing.top; }
+      } else if (GH.focus) {
+        const ta = findDraft(GH.focus);
+        if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); if (!opts.top) ta.scrollIntoView({ block: 'nearest' }); }
+      }
+      GH.focus = null;
     }
   }
   function openFile(path, line) {
@@ -1545,6 +1996,107 @@
   }
 
   // ---------- events
+  // A comment's text, or why it can't be sent yet.
+  const bodyOf = (key) => { const b = (drafts.get(key) || '').trim(); if (!b) { GH.errors.set(key, 'Write something first.'); render(); } return b; };
+  // Whether a composer may close: an unsent comment is only dropped when the user says so.
+  const letGo = (key, original) => { const t = drafts.get(key) || ''; if (t.trim() && t !== original && !confirm('Discard this unsent comment?')) return false; setDraft(key, ''); GH.preview.delete(key); GH.errors.delete(key); return true; };
+  const findComment = (id) => { const d = GH.data; if (!d) return null; for (const t of d.threads) { const c = t.comments.find((x) => x.id === id); if (c) return c; } return d.comments.find((x) => x.id === id) || (d.pr.id === id ? d.pr : null); };
+  const GH_ACTS = new Set(['conversation', 'thread-open', 'thread-toggle', 'resolved-toggle', 'away-toggle', 'review-toggle', 'file-comment', 'file-cancel', 'compose-cancel', 'reply-open', 'reply-cancel', 'edit-open', 'edit-cancel', 'cmp-pane', 'cmp-suggest', 'react-open']);
+  function ghClick(act, d) {
+    if (act === 'conversation') { state.view = { kind: 'conversation' }; state.peek = null; return render({ top: true }); }
+    if (act === 'gh-refresh') return ghLoad(false);
+    if (act === 'thread-open') return openThread(d.thread);
+    if (act === 'thread-toggle') { GH.opened.has(d.thread) ? GH.opened.delete(d.thread) : GH.opened.add(d.thread); return render(); }
+    if (act === 'resolved-toggle') { GH.showResolved = !GH.showResolved; return renderSide(); }
+    if (act === 'away-toggle') { GH.away.has(d.p) ? GH.away.delete(d.p) : GH.away.add(d.p); return render(); }
+    if (act === 'review-toggle') { GH.reviewOpen = !GH.reviewOpen; if (GH.reviewOpen) GH.focus = 'review'; return render(); }
+    if (act === 'file-comment') { GH.fileCompose = d.p; GH.focus = 'file:' + d.p; return render(); }
+    if (act === 'file-cancel') { if (letGo(d.key)) { GH.fileCompose = null; render(); } return; }
+    if (act === 'compose-cancel') { if (letGo(d.key)) { state.compose = null; render(); } return; }
+    if (act === 'reply-open') { GH.replying.add(d.thread); GH.focus = 'reply:' + d.thread; return render(); }
+    if (act === 'reply-cancel') { if (letGo(d.key)) { GH.replying.delete(d.key.slice('reply:'.length)); render(); } return; }
+    if (act === 'edit-open') {
+      const c = findComment(d.id);
+      if (!c) return;
+      GH.editing = d.id;
+      if (!drafts.has('edit:' + d.id)) setDraft('edit:' + d.id, c.body);
+      GH.focus = 'edit:' + d.id;
+      return render();
+    }
+    if (act === 'edit-cancel') { const c = findComment(d.key.slice('edit:'.length)); if (letGo(d.key, c && c.body)) { GH.editing = null; render(); } return; }
+    if (act === 'cmp-pane') {
+      if (d.pane === 'preview') { GH.preview.add(d.key); ghPreview(d.key); } else { GH.preview.delete(d.key); GH.focus = d.key; }
+      return render();
+    }
+    if (act === 'cmp-suggest') {
+      const c = state.compose;
+      if (!c || c.key !== d.key) return;
+      const block = '```suggestion\n' + suggestionLines(c).join('\n') + '\n```\n';
+      const now = drafts.get(d.key) || '';
+      setDraft(d.key, now + (now && !now.endsWith('\n') ? '\n' : '') + block);
+      GH.preview.delete(d.key);
+      GH.focus = d.key;
+      return render();
+    }
+    if (act === 'react-open') { GH.picker = GH.picker === d.subject ? null : d.subject; return render(); }
+    if (act === 'gh-react') {
+      // At once on the page; GitHub's answer follows.
+      const c = findComment(d.subject), on = d.on === 'true';
+      if (c) {
+        const r = c.reactions.find((x) => x.content === d.content);
+        if (r) { r.count += on ? 1 : -1; r.mine = on; if (!r.count) c.reactions.splice(c.reactions.indexOf(r), 1); } else if (on) c.reactions.push({ content: d.content, count: 1, mine: true });
+      }
+      GH.picker = null;
+      return ghAct('react:' + d.subject, { action: 'react', subject: d.subject, content: d.content, on });
+    }
+    if (act === 'gh-thread') {
+      const body = bodyOf(d.key);
+      if (!body) return;
+      const c = state.compose;
+      if (!d.file && !c) return;
+      const draft = d.file ? { path: GH.fileCompose, body } : { path: c.path, body, line: c.line, side: c.side, startLine: c.startLine != null ? c.startLine : undefined, startSide: c.startSide || undefined };
+      return ghAct(d.key, { action: 'thread', mode: d.mode, draft }, () => {
+        setDraft(d.key, ''); GH.preview.delete(d.key);
+        if (d.file) GH.fileCompose = null; else state.compose = null;
+        toast(d.mode === 'single' ? 'Comment posted' : 'Added to your pending review');
+      });
+    }
+    if (act === 'gh-reply') {
+      const body = bodyOf(d.key);
+      if (!body) return;
+      return ghAct(d.key, { action: 'reply', mode: d.mode, thread: d.thread, body }, () => { setDraft(d.key, ''); GH.preview.delete(d.key); GH.replying.delete(d.thread); toast(d.mode === 'single' ? 'Reply posted' : 'Reply added to your pending review'); });
+    }
+    if (act === 'gh-edit') {
+      const body = bodyOf(d.key);
+      if (!body) return;
+      return ghAct(d.key, { action: 'edit', kind: d.kind, id: d.id, body }, () => { setDraft(d.key, ''); GH.preview.delete(d.key); GH.editing = null; });
+    }
+    if (act === 'gh-delete') {
+      if (!confirm('Delete this comment on GitHub?')) return;
+      return ghAct('del:' + d.id, { action: 'delete', kind: d.kind, id: d.id }, () => toast('Comment deleted'));
+    }
+    if (act === 'gh-resolve') return ghAct('resolve:' + d.thread, { action: 'resolve', thread: d.thread, resolved: d.on === 'true' });
+    if (act === 'gh-comment') {
+      const body = bodyOf('issue');
+      if (!body) return;
+      return ghAct('issue', { action: 'comment', body }, () => { setDraft('issue', ''); GH.preview.delete('issue'); toast('Comment posted'); });
+    }
+    if (act === 'gh-submit') {
+      const body = (drafts.get('review') || '').trim();
+      return ghAct('review', { action: 'submit', event: GH.event, body }, () => { setDraft('review', ''); GH.preview.delete('review'); GH.reviewOpen = false; toast({ APPROVE: 'Approved', REQUEST_CHANGES: 'Changes requested', COMMENT: 'Review submitted' }[GH.event]); });
+    }
+    if (act === 'gh-discard') {
+      const n = GH.data && GH.data.pending ? GH.data.pending.comments : 0;
+      if (!confirm(`Discard your pending review${n ? ` and its ${n} comment${n === 1 ? '' : 's'}` : ''}? This can’t be undone.`)) return;
+      return ghAct('review', { action: 'discard' }, () => { GH.reviewOpen = false; toast('Pending review discarded'); });
+    }
+  }
+  // The review's popover closes on a click outside it (what's typed in it stays as a draft).
+  document.addEventListener('click', (e) => { if (GH.reviewOpen && !e.target.closest('.vw-review, [data-act="review-toggle"]') && document.contains(e.target)) { GH.reviewOpen = false; render(); } });
+  viewer.addEventListener('input', (e) => {
+    const k = e.target.dataset && e.target.dataset.draft;
+    if (k != null) setDraft(k, e.target.value);
+  });
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],.ref');
     if (t && t.tagName === 'A') return;
@@ -1601,6 +2153,7 @@
     if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
+    if (act && (act.startsWith('gh-') || GH_ACTS.has(act))) return ghClick(act, d);
     if (act === 'reset') { state.rev[state.compare] = new Set(); state.blockDiff.clear(); save(); return render(); }
     if (act === 'close-peek') { state.peek = null; return render(); }
     if (act === 'peek-back') { const prev = state.peek.back.slice(-1)[0]; state.peek = prev; return render(); }
@@ -1675,6 +2228,7 @@
   });
   // "n" walks to the next chain with changes to review, while the viewer is on screen.
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && GH.reviewOpen) { GH.reviewOpen = false; render(); return; }
     if (e.key === 'Escape' && state.peek && !e.defaultPrevented) { state.peek = null; render(); return; }
     if (e.key !== 'n' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
     if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
@@ -1687,9 +2241,15 @@
     render({ top: true });
   });
   viewer.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.dataset && e.target.dataset.draft != null) {
+      const btn = e.target.closest('.cmp') && e.target.closest('.cmp').querySelector('[data-primary]');
+      if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+      return;
+    }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   viewer.addEventListener('change', (e) => {
+    if (e.target.name === 'rv-event') { GH.event = e.target.value; return; }
     if (e.target.id === 'vw-revdiff') { state.showReviewedDiff = e.target.checked; save(); render(); }
   });
   let qTimer = null;
@@ -1741,6 +2301,12 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollMetrics(); });
   }
 
+  if (GH.on) {
+    ghLoad(true);
+    // New comments from others show up while the page is on screen.
+    setInterval(() => { if (document.visibilityState === 'visible' && !GH.busy && Date.now() - GH.at > 60000) ghLoad(true); }, 15000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !GH.busy && Date.now() - GH.at > 20000) ghLoad(true); });
+  }
   render({ top: true });
   if (SHIKI) SHIKI.load().then(() => { if (typeof SHIKI.fg === 'function') shikiFg = SHIKI.fg(); shikiOn = true; render(); }).catch(() => {});
 })();

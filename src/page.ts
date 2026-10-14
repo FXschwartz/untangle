@@ -23,6 +23,8 @@ export interface PageConfig {
   snapshot?: { branch: string; commit: string | null; note: string | null };
   /** Lines in each modified file at the head: how far its diff can grow below the last hunk. */
   lines?: Record<string, number>;
+  /** The pull request's conversation on GitHub (through gh), or why it's off. */
+  github?: { number: number; url: string } | { off: string } | null;
   head?: string;
   base?: string;
 }

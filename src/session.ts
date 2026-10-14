@@ -6,6 +6,7 @@ import { reviewDir } from './cache.js';
 import { LiveSession, openInEditor, type Side } from './live.js';
 import { Metrics } from './metrics.js';
 import type { PageConfig } from './page.js';
+import { ghReady, GitHubError, PullRequestConversation, type Action } from './github.js';
 import { fileHunks, generatedPatterns } from './pipeline/diff.js';
 import { writeAtomic } from './server.js';
 import { Snapshot, snapshotBranch } from './snapshot.js';
@@ -44,6 +45,7 @@ export class ReviewSession {
   private reviewed: Set<string>;
   private readonly metrics = new Metrics();
   private lines: Record<string, number> | null = null;
+  private readonly github: PullRequestConversation | null;
 
   constructor(
     private readonly target: Target,
@@ -77,6 +79,8 @@ export class ReviewSession {
     this.reviewed = loaded.reviewed;
     this.partial = new Set((saved.partial || []).filter((id: number) => this.edits[id] && !this.reviewed.has(this.edits[id].b)));
     this.view = { layout: saved.layout, showReviewedDiff: saved.showReviewedDiff };
+    const pr = target.pr;
+    this.github = pr && ghReady() ? new PullRequestConversation({ owner: pr.owner, repo: pr.repo, number: pr.number }, target.headSha) : null;
   }
 
   /** Edits marked reviewed: the snapshot's blocks, and marks on parts of a change. */
@@ -102,6 +106,7 @@ export class ReviewSession {
       editor: this.editor.mode === 'uri' ? { mode: 'uri', template: this.editor.template } : { mode: 'command' },
       snapshot: this.snapshotInfo,
       lines: this.lines,
+      github: !this.target.pr ? null : this.github ? { number: this.target.pr.number, url: this.target.pr.url } : { off: 'Comments from GitHub need the gh command line, logged in (gh auth login).' },
       head: this.target.headSha,
       base: this.target.baseSha,
     };
@@ -161,6 +166,14 @@ export class ReviewSession {
       if (!file) return { status: 404, data: { error: 'not a file of this review' } };
       openInEditor(this.editor.template, file, b.l || 1, b.c || 0);
       return { data: { opened: file } };
+    }
+    if (route === 'github' && (method === 'GET' || method === 'POST')) {
+      if (!this.github) return { status: 404, data: { error: this.target.pr ? 'Comments from GitHub need the gh command line, logged in (gh auth login).' : 'This review has no pull request.' } };
+      try {
+        return { data: method === 'GET' ? await this.github.load() : await this.github.act(body as Action) };
+      } catch (e) {
+        return { status: e instanceof GitHubError ? 502 : 500, data: { error: (e as Error).message } };
+      }
     }
     if (route === 'roots' && method === 'GET') {
       // The checkouts, made when the review came from the cache: links to the editor need them.

@@ -25,8 +25,10 @@ it runs.
 ## Install
 
 Needs Node 22 or later, git 2.40 or later, and the Dart SDK (`dart` on `PATH`; Flutter's works).
-`gh` is optional: it finds a directory's pull request and reads private repositories. Without it,
-GitHub's public API answers for public ones.
+`gh` is optional: it finds a directory's pull request, reads private repositories, and carries the
+pull request's comments and reviews. untangle asks GitHub through `gh`, as your own login, so it
+never handles a token. Without `gh`, GitHub's public API answers for public repositories, without
+comments.
 
 ```
 npm install
@@ -78,6 +80,20 @@ same review again is immediate.
 - **Open in editor** from a view's tools and from peeks: a `vscode://` link by default (through WSL
   when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
   or a URL template such as `cursor://file{file}:{line}:{col}`.
+- **The pull request's comments, as on GitHub** (through `gh`): threads under the lines they're
+  on, with replies, reactions and suggestions; the Comments tab lists the open and resolved ones,
+  and the conversation (the description, comments and reviews).
+  - **Writing:** the **+** over a line's number starts a comment; shift-click it on another line
+    of the hunk for a range. "Add single comment" posts it now; "Start a review" keeps it, and
+    the comments after it, in your pending review. Write and Preview, Ctrl+Enter, and
+    "Suggest a change" for lines on the new side. Comment on a whole file from its tools.
+  - **Threads:** reply, resolve and unresolve, edit and delete your comments, react. A reviewed
+    hunk stays open while a conversation in it is.
+  - **Finishing:** "Finish your review" in the top bar submits it as a comment, an approval or a
+    request for changes, or discards it.
+  - What you type is kept in the browser until it's sent. The page checks GitHub every minute.
+    When the pull request has newer commits than the review, comments on lines wait for a
+    restart; replies, file comments and reviews don't.
 - **Marks on a branch.** Your review is a local git branch, `untangle/pr-<number>` (or
   `untangle/<branch>`): the base plus every change you marked reviewed, a commit per save.
   `git diff untangle/pr-123 <head>` shows what's left. Marks come back from the branch's
