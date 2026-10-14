@@ -1,5 +1,8 @@
 import 'dart:math' as math;
 
+/// Shapes, for the sandbox.
+/// (A second commit, to move the lines.)
+
 /// A shape on a plane.
 abstract class Shape {
   const Shape();
