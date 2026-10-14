@@ -37,6 +37,8 @@ const BY_NAME = { Dockerfile: 'dockerfile', Makefile: 'make' };
 
 let highlighter = null;
 let loading = null;
+// The theme's color for text no grammar rule colors.
+let fg = '#D4D4D4';
 
 /** Loads the grammars and the theme, once. */
 function load() {
@@ -44,7 +46,11 @@ function load() {
     themes: [darkPlus],
     langs: [css, dart, diff, dockerfile, groovy, html, ini, javascript, json, kotlin, make, markdown, proto, shellscript, sql, swift, toml, typescript, xml, yaml],
     engine: createJavaScriptRegexEngine({ forgiving: true }),
-  }).then((h) => (highlighter = h));
+  }).then((h) => {
+    highlighter = h;
+    fg = (h.getTheme(THEME).fg || fg).toUpperCase();
+    return h;
+  });
   return loading;
 }
 
@@ -74,4 +80,4 @@ function lines(code, lang) {
   return tokens.map((line, li) => line.map((t) => [t.offset - starts[li], t.color || null, !!(t.fontStyle && t.fontStyle & 1)]));
 }
 
-window.UntangleShiki = { load, langFor, lines };
+window.UntangleShiki = { load, langFor, lines, fg: () => fg };

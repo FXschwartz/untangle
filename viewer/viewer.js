@@ -236,7 +236,13 @@
       let cls = 't-' + tk.k, attrs = '';
       if (tk.k === 'id') { const nx = nextCode(i); if (nx && (nx.t === '(' || nx.t === '<')) cls = 't-fn'; }
       if (marks && marks.has(tk.c)) cls += rev().has(marks.get(tk.c)) ? ' rv' : ' ch';
-      if (colors) { const c = colorAt(colors, tk.c); if (c && c[1]) attrs += ` style="color:${c[1]};font-style:${c[2] ? 'italic' : 'normal'}"`; }
+      if (colors) {
+        const c = colorAt(colors, tk.c);
+        // Grammars leave plain names (variables, properties, parameters) in the default color;
+        // VS Code colors them from the language server. The tokenizer's classes stand in there.
+        const plain = !c || !c[1] || (c[1].toUpperCase() === SHIKI.fg() && (tk.k === 'id' || tk.k === 'ty'));
+        if (!plain) attrs += ` style="color:${c[1]};font-style:${c[2] ? 'italic' : 'normal'}"`;
+      }
       if (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann') {
         const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
         const ti = defs ? defs.get(col) : undefined;
