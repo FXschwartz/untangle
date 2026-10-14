@@ -1,14 +1,14 @@
 import 'shapes.dart';
 
-/// Lines describing some shapes, one per shape.
-List<String> report(List<Shape> shapes) {
+/// Lines describing some shapes, one per shape, with areas to [digits] decimals.
+List<String> report(List<Shape> shapes, {int digits = 2}) {
   final lines = <String>[];
   for (final shape in shapes) {
-    lines.add(shape.describe());
+    lines.add(shape.describe(digits: digits));
   }
-  lines.add('Total area: ${totalArea(shapes).toStringAsFixed(2)}');
+  lines.add('Total area: ${totalArea(shapes).toStringAsFixed(digits)}');
   final big = largest(shapes);
-  if (big != null) lines.add('Largest: ${big.describe()}');
+  if (big != null) lines.add('Largest: ${big.describe(digits: digits)}');
   return lines;
 }
 
@@ -18,9 +18,9 @@ void main() {
     const Circle(1),
     const Rectangle(2, 3),
     const Rectangle(4, 4),
+    const Triangle(3, 4, 5),
   ];
-  for (final line in report(shapes)) {
+  for (final line in report(shapes, digits: 1)) {
     print(line);
   }
-  print('Big ones: ${atLeast(shapes, 10).length}');
 }

@@ -10,8 +10,9 @@ abstract class Shape {
   /// The length of the shape's outline.
   double perimeter();
 
-  /// A short description, for reports.
-  String describe() => '$runtimeType with area ${area().toStringAsFixed(2)}';
+  /// A short description, for reports, with the area to [digits] decimals.
+  String describe({int digits = 2}) =>
+      '$runtimeType with area ${area().toStringAsFixed(digits)}';
 }
 
 /// A circle, by its radius.
@@ -44,6 +45,25 @@ class Rectangle extends Shape {
   bool get isSquare => width == height;
 }
 
+/// A triangle, by its three sides.
+class Triangle extends Shape {
+  const Triangle(this.a, this.b, this.c);
+
+  final double a;
+  final double b;
+  final double c;
+
+  /// Heron's formula.
+  @override
+  double area() {
+    final s = perimeter() / 2;
+    return math.sqrt(s * (s - a) * (s - b) * (s - c));
+  }
+
+  @override
+  double perimeter() => a + b + c;
+}
+
 /// The total area of some shapes.
 double totalArea(List<Shape> shapes) {
   var total = 0.0;
@@ -54,18 +74,10 @@ double totalArea(List<Shape> shapes) {
 }
 
 /// The shape with the largest area, or null for none.
-Shape? largest(List<Shape> shapes) {
-  if (shapes.isEmpty) return null;
-  var best = shapes.first;
-  for (final shape in shapes.skip(1)) {
-    if (shape.area() > best.area()) best = shape;
-  }
-  return best;
-}
+Shape? largest(List<Shape> shapes) => shapes.isEmpty
+    ? null
+    : shapes.reduce((best, shape) => shape.area() > best.area() ? shape : best);
 
 /// Shapes whose area is at least [minimum].
 List<Shape> atLeast(List<Shape> shapes, double minimum) =>
     shapes.where((s) => s.area() >= minimum).toList();
-
-/// Scales a circle.
-Circle scaleCircle(Circle c, double factor) => Circle(c.radius * factor);
