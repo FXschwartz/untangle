@@ -87,6 +87,8 @@ same review again is immediate.
     hunk (or shift-click another line's) for a range. "Add single comment" posts it now; "Start a review" keeps it, and
     the comments after it, in your pending review. Write and Preview, Ctrl+Enter, and
     "Suggest a change" for lines on the new side. Comment on a whole file from its tools.
+    Typing `@` suggests people and teams to mention, `#` issues and pull requests to link
+    (↑/↓, Enter or Tab, Esc), as on GitHub.
   - **Threads:** reply, resolve and unresolve, edit and delete your comments, react. A reviewed
     hunk stays open while a conversation in it is.
   - **Finishing:** "Finish your review" in the top bar submits it as a comment, an approval or a

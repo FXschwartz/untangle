@@ -554,6 +554,8 @@ through the page.
     tested on a throwaway pull request of this repository.
   - Asked: drag to comment on several lines, and refresh to new commits without relaunching.
     Done.
+  - Asked: suggestions for `@` (people, teams) and `#` (issues, pull requests) in comments. Done;
+    image uploads aren't possible through GitHub's API.
 
 ## References
 

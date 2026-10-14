@@ -46,6 +46,9 @@
     refresh: path1('M4.681 3H2V2h3.5l.5.5V6H5V4a5 5 0 1 0 4.53-.761l.302-.954A6 6 0 1 1 4.681 3z'),
     suggest: path1('M2 3.5l.5-.5h5l.5.5v9l-.5.5h-5l-.5-.5v-9zM3 12h4V6H3v6zm0-7h4V4H3v1zm6.5-2h5l.5.5v9l-.5.5h-5l-.5-.5v-9l.5-.5zm.5 9h4v-2h-4v2zm0-4h4V4h-4v4z'),
     check: path1('M14.431 3.323l-8.47 10-.79-.036-3.35-4.77.818-.574 2.978 4.24 8.051-9.506.764.646z'),
+    issue: svg('<path d="M7.50002 1C6.21445 1 4.95774 1.38123 3.88882 2.09546C2.8199 2.80969 1.98674 3.82485 1.49478 5.01257C1.00281 6.20029 0.874098 7.50719 1.1249 8.76807C1.37571 10.0289 1.99479 11.1872 2.90383 12.0962C3.81287 13.0052 4.97108 13.6243 6.23196 13.8751C7.49283 14.1259 8.79973 13.9972 9.98745 13.5052C11.1752 13.0133 12.1903 12.1801 12.9046 11.1112C13.6188 10.0423 14 8.78558 14 7.5C14 5.77609 13.3152 4.1228 12.0962 2.90381C10.8772 1.68482 9.22393 1 7.50002 1ZM7.50002 13C6.41223 13 5.34883 12.6775 4.44436 12.0731C3.53989 11.4688 2.83501 10.6097 2.41873 9.60474C2.00244 8.59974 1.89352 7.4939 2.10574 6.427C2.31796 5.36011 2.8418 4.38015 3.61099 3.61096C4.38018 2.84177 5.36013 2.31793 6.42703 2.10571C7.49392 1.89349 8.59977 2.00242 9.60476 2.4187C10.6098 2.83498 11.4688 3.53987 12.0731 4.44434C12.6775 5.34881 13 6.4122 13 7.5C13 8.95869 12.4205 10.3576 11.3891 11.389C10.3576 12.4205 8.95871 13 7.50002 13Z"/><circle cx="7.50002" cy="7.5" r="1"/>'),
+    pr: svg('<path fill-rule="evenodd" clip-rule="evenodd" d="M5.616 4.928a2.487 2.487 0 0 1-1.119.922c-.148.06-.458.138-.458.138v5.008a2.51 2.51 0 0 1 1.579 1.062c.273.412.419.895.419 1.388.008.343-.057.684-.19 1A2.485 2.485 0 0 1 3.5 15.984a2.482 2.482 0 0 1-1.388-.419A2.487 2.487 0 0 1 1.05 13c.095-.486.331-.932.68-1.283.349-.343.79-.579 1.269-.68V5.949a2.6 2.6 0 0 1-1.269-.68 2.503 2.503 0 0 1-.68-1.283 2.487 2.487 0 0 1 1.06-2.565A2.49 2.49 0 0 1 3.5 1a2.504 2.504 0 0 1 1.807.729 2.493 2.493 0 0 1 .729 1.81c.002.494-.144.978-.42 1.389zm-.756 7.861a1.5 1.5 0 0 0-.552-.579 1.45 1.45 0 0 0-.77-.21 1.495 1.495 0 0 0-1.47 1.79 1.493 1.493 0 0 0 1.18 1.179c.288.058.586.03.86-.08.276-.117.512-.312.68-.56.15-.226.235-.49.249-.76a1.51 1.51 0 0 0-.177-.78zM2.708 4.741c.247.161.536.25.83.25.271 0 .538-.075.77-.211a1.514 1.514 0 0 0 .729-1.359 1.513 1.513 0 0 0-.25-.76 1.551 1.551 0 0 0-.68-.56 1.49 1.49 0 0 0-.86-.08 1.494 1.494 0 0 0-1.179 1.18c-.058.288-.03.586.08.86.117.276.312.512.56.68zm10.329 6.296c.48.097.922.335 1.269.68.466.47.729 1.107.725 1.766.002.493-.144.977-.42 1.388a2.499 2.499 0 0 1-4.532-.899 2.5 2.5 0 0 1 1.067-2.565c.267-.183.571-.308.889-.37V5.489a1.5 1.5 0 0 0-1.5-1.499H8.687l1.269 1.27-.71.709L7.117 3.84v-.7l2.13-2.13.71.711-1.269 1.27h1.85a2.484 2.484 0 0 1 2.312 1.541c.125.302.189.628.187.957v5.548zm.557 3.509a1.493 1.493 0 0 0 .191-1.89 1.552 1.552 0 0 0-.68-.559 1.49 1.49 0 0 0-.86-.08 1.493 1.493 0 0 0-1.179 1.18 1.49 1.49 0 0 0 .08.86 1.496 1.496 0 0 0 2.448.49z"/>'),
+    merged: svg('<path d="M13.273 7.73a2.51 2.51 0 0 0-3.159-.31 2.5 2.5 0 0 0-.921 1.12 2.23 2.23 0 0 0-.13.44 4.52 4.52 0 0 1-4-4 2.23 2.23 0 0 0 .44-.13 2.5 2.5 0 0 0 1.54-2.31 2.45 2.45 0 0 0-.19-1A2.48 2.48 0 0 0 5.503.19a2.45 2.45 0 0 0-1-.19 2.5 2.5 0 0 0-2.31 1.54 2.52 2.52 0 0 0 .54 2.73c.35.343.79.579 1.27.68v5.1a2.411 2.411 0 0 0-.89.37 2.5 2.5 0 1 0 3.47 3.468 2.5 2.5 0 0 0 .42-1.387 2.45 2.45 0 0 0-.19-1 2.48 2.48 0 0 0-1.81-1.49v-2.4a5.52 5.52 0 0 0 2 1.73 5.65 5.65 0 0 0 2.09.6 2.5 2.5 0 0 0 4.95-.49 2.51 2.51 0 0 0-.77-1.72zm-8.2 3.38c.276.117.512.312.68.56a1.5 1.5 0 0 1-2.08 2.08 1.55 1.55 0 0 1-.56-.68 1.49 1.49 0 0 1-.08-.86 1.49 1.49 0 0 1 1.18-1.18 1.49 1.49 0 0 1 .86.08zM4.503 4a1.5 1.5 0 0 1-1.39-.93 1.49 1.49 0 0 1-.08-.86 1.49 1.49 0 0 1 1.18-1.18 1.49 1.49 0 0 1 .86.08A1.5 1.5 0 0 1 4.503 4zm8.06 6.56a1.5 1.5 0 0 1-2.45-.49 1.49 1.49 0 0 1-.08-.86 1.49 1.49 0 0 1 1.18-1.18 1.49 1.49 0 0 1 .86.08 1.499 1.499 0 0 1 .49 2.45z"/>'),
   };
   // An icon button: its tooltip says what a click does; a toggle keeps one name and says whether it's on.
   const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
@@ -1981,9 +1984,11 @@
         GH.reveal = null;
       }
       const findDraft = (key) => [...viewer.querySelectorAll('[data-draft]')].find((x) => x.dataset.draft === key);
+      const listing = MN.ta ? MN.key : null;
+      mentionClose();
       if (typing) {
         const ta = findDraft(typing.key);
-        if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(typing.s, typing.e); ta.scrollTop = typing.top; }
+        if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(typing.s, typing.e); ta.scrollTop = typing.top; if (listing === typing.key) mentionUpdate(ta); }
       } else if (GH.focus) {
         const ta = findDraft(GH.focus);
         if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); if (!opts.top) ta.scrollIntoView({ block: 'nearest' }); }
@@ -2064,6 +2069,149 @@
     void row.offsetWidth;
     row.classList.add('flash');
   }
+
+  // ---------- @ and # in comments
+  // Typing @ suggests people (and teams) to mention, # issues and pull requests to link, as on
+  // GitHub. People already in the conversation show at once; GitHub's answers follow as you type.
+  // ↑/↓ choose, Enter or Tab inserts, Esc closes.
+  const MN = { ta: null, key: null, kind: null, query: '', start: 0, items: [], active: 0, loading: 0, cache: new Map(), timer: null };
+  const mnPop = document.createElement('div');
+  mnPop.className = 'mn-pop';
+  mnPop.setAttribute('role', 'listbox');
+  mnPop.hidden = true;
+  viewer.appendChild(mnPop);
+  // The @ or # being typed just before the caret: @login, @org/team, #123 or #word.
+  function mentionAt(ta) {
+    if (ta.selectionStart !== ta.selectionEnd) return null;
+    const before = ta.value.slice(0, ta.selectionStart);
+    const m = /(^|[\s([{,;])([@#])([\w.\/-]{0,40})$/.exec(before);
+    return m ? { kind: m[2], query: m[3], start: before.length - m[3].length - 1 } : null;
+  }
+  // Who's in this conversation, for @ before GitHub answers.
+  function participants() {
+    const d = GH.data, seen = new Map();
+    if (!d) return [];
+    const add = (p) => { if (p && p.login && p.login !== 'ghost' && !seen.has(p.login.toLowerCase())) seen.set(p.login.toLowerCase(), { kind: 'user', value: p.login, label: p.login, detail: '', avatar: p.avatar }); };
+    add(d.pr.author);
+    d.reviews.forEach((r) => add(r.author));
+    d.threads.forEach((t) => t.comments.forEach((c) => add(c.author)));
+    d.comments.forEach((c) => add(c.author));
+    return [...seen.values()];
+  }
+  function mentionItems() {
+    const q = MN.query.toLowerCase();
+    // GitHub's answer for this query, or for the longest part of it already asked, narrowed here.
+    let known = null;
+    for (let i = q.length; i >= 0 && !known; i--) known = MN.cache.get(MN.kind + q.slice(0, i)) || null;
+    const fits = (it) => !q || it.value.toLowerCase().includes(q) || it.detail.toLowerCase().includes(q) || (it.kind === 'issue' || it.kind === 'pr' ? it.value.startsWith(q) : false);
+    const list = (MN.kind === '@' ? participants() : []).filter(fits).concat((known || []).filter(fits));
+    const seen = new Set();
+    const out = list.filter((it) => { const k = it.kind + it.value.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+    // What starts with the query first.
+    return out.sort((x, y) => (y.value.toLowerCase().startsWith(q) ? 1 : 0) - (x.value.toLowerCase().startsWith(q) ? 1 : 0)).slice(0, 10);
+  }
+  function mentionAsk() {
+    const kind = MN.kind, q = MN.query.toLowerCase(), k = kind + q;
+    if (MN.cache.has(k)) return;
+    clearTimeout(MN.timer);
+    MN.timer = setTimeout(() => {
+      MN.loading++;
+      mentionDraw();
+      api('github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'suggest', kind, query: q }) })
+        .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error); return j; }))
+        .then((j) => { MN.cache.set(k, j.items || []); }, () => { MN.cache.set(k, []); })
+        .then(() => { MN.loading--; if (MN.ta) mentionDraw(); });
+    }, 150);
+  }
+  // Where the caret is in a textarea, in the window: a hidden copy of its text up to the caret,
+  // with the textarea's style, puts a marker there.
+  function caretXY(ta) {
+    const cs = getComputedStyle(ta), div = document.createElement('div');
+    ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize'].forEach((p) => { div.style[p] = cs[p]; });
+    Object.assign(div.style, { position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', top: '0', left: '-9999px' });
+    div.textContent = ta.value.slice(0, ta.selectionStart);
+    const mark = document.createElement('span');
+    mark.textContent = '​';
+    div.appendChild(mark);
+    document.body.appendChild(div);
+    const r = ta.getBoundingClientRect(), lh = parseFloat(cs.lineHeight) || 18;
+    const at = { x: r.left + mark.offsetLeft - ta.scrollLeft, y: r.top + mark.offsetTop - ta.scrollTop, lh };
+    div.remove();
+    return at;
+  }
+  const STATE_CLS = { OPEN: 'open', DRAFT: 'draft', CLOSED: 'closed', MERGED: 'merged' };
+  function mentionDraw() {
+    if (!MN.ta) return;
+    MN.items = mentionItems();
+    if (MN.active >= MN.items.length) MN.active = Math.max(0, MN.items.length - 1);
+    if (!MN.items.length && !MN.loading) { mnPop.hidden = true; return; }
+    mnPop.innerHTML = MN.items.map((it, i) => {
+      const lead = it.kind === 'issue' || it.kind === 'pr'
+        ? `<span class="mn-ic ${STATE_CLS[it.state] || ''}">${it.kind === 'issue' ? ICON.issue : it.state === 'MERGED' ? ICON.merged : ICON.pr}</span>`
+        : it.avatar ? `<img class="av" src="${esc(it.avatar + (it.avatar.includes('?') ? '&' : '?') + 's=40')}" alt="">` : `<span class="mn-ic">${ICON.discussion}</span>`;
+      return `<button type="button" class="mn-it${i === MN.active ? ' on' : ''}" data-mn="${i}" role="option" aria-selected="${i === MN.active}" tabindex="-1">${lead}<b>${esc(it.label)}</b><span class="muted">${esc(it.detail)}</span></button>`;
+    }).join('') + (MN.loading && !MN.items.length ? `<div class="mn-wait">Asking GitHub…</div>` : '');
+    mnPop.hidden = false;
+    const c = caretXY(MN.ta), w = Math.min(420, window.innerWidth - 16), h = mnPop.offsetHeight;
+    const below = c.y + c.lh + 4 + h < window.innerHeight - 8;
+    mnPop.style.left = `${Math.max(8, Math.min(c.x, window.innerWidth - w - 8))}px`;
+    mnPop.style.top = `${below ? c.y + c.lh + 4 : Math.max(8, c.y - h - 4)}px`;
+    const on = mnPop.querySelector('.mn-it.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  function mentionClose() {
+    MN.ta = null;
+    mnPop.hidden = true;
+  }
+  // Looks at the text before the caret: a suggestion list opens, follows, or closes.
+  function mentionUpdate(ta) {
+    const m = mentionAt(ta);
+    if (!m) return mentionClose();
+    const moved = MN.ta !== ta || MN.kind !== m.kind || MN.query !== m.query;
+    Object.assign(MN, { ta, key: ta.dataset.draft, kind: m.kind, query: m.query, start: m.start });
+    if (moved) { MN.active = 0; mentionAsk(); }
+    mentionDraw();
+  }
+  function mentionInsert(i) {
+    const it = MN.items[i], ta = MN.ta;
+    if (!it || !ta) return;
+    const token = MN.kind + it.value + ' ', end = ta.selectionStart;
+    ta.value = ta.value.slice(0, MN.start) + token + ta.value.slice(end);
+    const caret = MN.start + token.length;
+    ta.setSelectionRange(caret, caret);
+    setDraft(ta.dataset.draft, ta.value);
+    mentionClose();
+    ta.focus();
+  }
+  // Picked with the mouse: the textarea keeps the focus.
+  mnPop.addEventListener('mousedown', (e) => {
+    const b = e.target.closest('[data-mn]');
+    e.preventDefault();
+    if (b) mentionInsert(Number(b.dataset.mn));
+  });
+  // Choosing with the keyboard, before anything else hears the key.
+  function mentionKey(e) {
+    if (!MN.ta || e.target !== MN.ta || mnPop.hidden) return false;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!MN.items.length) return false;
+      MN.active = (MN.active + (e.key === 'ArrowDown' ? 1 : -1) + MN.items.length) % MN.items.length;
+      mentionDraw();
+    } else if ((e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) || e.key === 'Tab') {
+      if (!MN.items.length) return false;
+      mentionInsert(MN.active);
+    } else if (e.key === 'Escape') mentionClose();
+    else return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+  viewer.addEventListener('keyup', (e) => {
+    if (e.target.dataset && e.target.dataset.draft != null && /^(Arrow(Left|Right)|Home|End)$/.test(e.key)) mentionUpdate(e.target);
+  });
+  viewer.addEventListener('click', (e) => { if (e.target.dataset && e.target.dataset.draft != null) mentionUpdate(e.target); });
+  viewer.addEventListener('focusout', (e) => { if (e.target === MN.ta) setTimeout(() => { if (document.activeElement !== MN.ta) mentionClose(); }, 0); });
+  window.addEventListener('resize', () => { if (MN.ta) mentionDraw(); });
+  main.addEventListener('scroll', () => { if (MN.ta) mentionDraw(); }, { passive: true });
 
   // ---------- refreshing in place
   // untangle looks up the pull request again; when it moved, it builds the new review while this
@@ -2214,7 +2362,7 @@
   document.addEventListener('click', (e) => { if (GH.reviewOpen && !e.target.closest('.vw-review, [data-act="review-toggle"]') && document.contains(e.target)) { GH.reviewOpen = false; render(); } });
   viewer.addEventListener('input', (e) => {
     const k = e.target.dataset && e.target.dataset.draft;
-    if (k != null) setDraft(k, e.target.value);
+    if (k != null) { setDraft(k, e.target.value); if (GH.on) mentionUpdate(e.target); }
   });
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],.ref');
@@ -2362,6 +2510,7 @@
     render({ top: true });
   });
   viewer.addEventListener('keydown', (e) => {
+    if (mentionKey(e)) return;
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.dataset && e.target.dataset.draft != null) {
       const btn = e.target.closest('.cmp') && e.target.closest('.cmp').querySelector('[data-primary]');
       if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }

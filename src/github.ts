@@ -143,7 +143,13 @@ export type Action =
   | { action: 'comment'; body: string }
   | { action: 'submit'; event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'; body: string }
   | { action: 'discard' }
-  | { action: 'preview'; text: string };
+  | { action: 'preview'; text: string }
+  | { action: 'suggest'; kind: '@' | '#'; query: string };
+
+/** What @ and # complete to: a person or team to mention, or an issue or pull request to link. */
+export interface Suggestion { kind: 'user' | 'team' | 'issue' | 'pr'; value: string; label: string; detail: string; avatar?: string; state?: string }
+type IssueBits = { __typename: 'Issue' | 'PullRequest'; number: number; title: string; state: string; isDraft?: boolean };
+const ISSUE_BITS = '__typename ... on Issue { number title state } ... on PullRequest { number title state isDraft }';
 
 /** gh, ready to use: it's on PATH. (Whether it's logged in shows on the first call.) */
 export const ghReady = () => has('gh');
@@ -172,8 +178,9 @@ export class PullRequestConversation {
   }
 
   /** Carries out a change, and answers with the conversation after it. */
-  act(a: Action): Promise<Conversation | { html: string }> {
+  act(a: Action): Promise<Conversation | { html: string } | { items: Suggestion[] }> {
     if (a.action === 'preview') return this.preview(a.text);
+    if (a.action === 'suggest') return this.suggest(a.kind, a.query);
     const run = this.queue.then(() => this.change(a));
     this.queue = run.catch(() => {});
     return run;
@@ -182,6 +189,59 @@ export class PullRequestConversation {
   private async preview(text: string): Promise<{ html: string }> {
     const html = await ghApi(['markdown'], { text, mode: 'gfm', context: `${this.pr.owner}/${this.pr.repo}` });
     return { html: String(html) };
+  }
+
+  // Suggestions for @ and #, for a few minutes: typing asks again and again.
+  private readonly suggestions = new Map<string, { at: number; items: Suggestion[] }>();
+  // Whether the repository's owner is an organization (with teams); null until known.
+  private org: boolean | null = null;
+
+  private async suggest(kind: '@' | '#', query: string): Promise<{ items: Suggestion[] }> {
+    const q = query.trim().slice(0, 60);
+    const key = kind + q.toLowerCase();
+    const hit = this.suggestions.get(key);
+    if (hit && Date.now() - hit.at < 300_000) return { items: hit.items };
+    const items = kind === '@' ? await this.people(q) : await this.issues(q);
+    if (this.suggestions.size > 300) this.suggestions.clear();
+    this.suggestions.set(key, { at: Date.now(), items });
+    return { items };
+  }
+
+  /** People who can be mentioned here, by login or name, and the organization's teams (org/team). */
+  private async people(q: string): Promise<Suggestion[]> {
+    const { owner, repo } = this.pr;
+    const slash = q.indexOf('/');
+    const users = slash >= 0 ? Promise.resolve(null) : graphql<{ repository: { mentionableUsers: { nodes: Array<{ login: string; name: string | null; avatarUrl: string }> } } }>(
+      'query($owner: String!, $repo: String!, $q: String) { repository(owner: $owner, name: $repo) { mentionableUsers(query: $q, first: 12) { nodes { login name avatarUrl } } } }',
+      { owner, repo, q: q || null },
+    );
+    // Teams only show to who may see them; a user's repository has none.
+    const teams = this.org === false ? Promise.resolve(null) : graphql<{ organization: { teams: { nodes: Array<{ combinedSlug: string; name: string; avatarUrl: string | null }> } } | null }>(
+      'query($owner: String!, $q: String) { organization(login: $owner) { teams(query: $q, first: 6) { nodes { combinedSlug name avatarUrl } } } }',
+      { owner, q: (slash >= 0 ? q.slice(slash + 1) : q) || null },
+    ).then((d) => { this.org = !!d.organization; return d; }, (e) => { if (/resolve to an Organization/i.test((e as Error).message)) this.org = false; return null; });
+    const [u, t] = await Promise.all([users, teams]);
+    const out: Suggestion[] = (u?.repository.mentionableUsers.nodes || []).map((x) => ({ kind: 'user', value: x.login, label: x.login, detail: x.name || '', avatar: x.avatarUrl }));
+    (t?.organization?.teams.nodes || []).filter((x) => slash < 0 || x.combinedSlug.toLowerCase().startsWith(q.toLowerCase().slice(0, slash + 1))).forEach((x) => out.push({ kind: 'team', value: x.combinedSlug, label: x.combinedSlug, detail: x.name, avatar: x.avatarUrl || undefined }));
+    return out;
+  }
+
+  /** Issues and pull requests to link: the one with that number first, then matches by title, newest activity first. */
+  private async issues(q: string): Promise<Suggestion[]> {
+    const { owner, repo } = this.pr;
+    const n = /^\d+$/.test(q) ? Number(q) : 0;
+    const d = await graphql<{ search: { nodes: Array<IssueBits | Record<string, never>> }; repository: { exact?: IssueBits | null } }>(
+      `query($s: String!, $owner: String!, $repo: String!, $n: Int!, $exact: Boolean!) {
+        search(query: $s, type: ISSUE, first: 12) { nodes { ${ISSUE_BITS} } }
+        repository(owner: $owner, name: $repo) { exact: issueOrPullRequest(number: $n) @include(if: $exact) { ${ISSUE_BITS} } }
+      }`,
+      { s: `repo:${owner}/${repo} ${q && !n ? q + ' in:title' : q} sort:updated-desc`, owner, repo, n, exact: n > 0 },
+    );
+    const seen = new Set<number>();
+    return [d.repository.exact, ...d.search.nodes].filter((x): x is IssueBits => !!x && 'number' in x && !seen.has(x.number) && !!seen.add(x.number)).map((x) => ({
+      kind: x.__typename === 'PullRequest' ? 'pr' : 'issue', value: String(x.number), label: '#' + x.number, detail: x.title,
+      state: x.isDraft && x.state === 'OPEN' ? 'DRAFT' : x.state,
+    }));
   }
 
   /** A mutation that returns the pull request at `path` in its payload. */
@@ -204,7 +264,7 @@ export class PullRequestConversation {
     return (await this.load()).pr.id;
   }
 
-  private async change(a: Exclude<Action, { action: 'preview' }>): Promise<Conversation> {
+  private async change(a: Exclude<Action, { action: 'preview' | 'suggest' }>): Promise<Conversation> {
     const pullRequestId = await this.pullRequestId();
     switch (a.action) {
       case 'thread': {
