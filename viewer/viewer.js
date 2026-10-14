@@ -22,6 +22,24 @@
     const t = a + d, g = t ? Math.round((5 * a) / t) : 0;
     return `<span class="dstat"><span class="a">+${fmt(a)}</span><span class="d">−${fmt(d)}</span><span class="sq" aria-hidden="true">${'<i class="sa"></i>'.repeat(g)}${'<i class="sd"></i>'.repeat(5 - g)}</span></span>`;
   }
+  // Icons: VS Code's Codicons (https://github.com/microsoft/vscode-codicons), CC BY 4.0.
+  const svg = (paths) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${paths}</svg>`;
+  const path1 = (d) => svg(`<path fill-rule="evenodd" clip-rule="evenodd" d="${d}"/>`);
+  const ICON = {
+    goToFile: path1('M6 5.914l2.06-2.06v-.708L5.915 1l-.707.707.043.043.25.25 1 1h-3a2.5 2.5 0 0 0 0 5H4V7h-.5a1.5 1.5 0 1 1 0-3h3L5.207 5.293 5.914 6 6 5.914zM11 2H8.328l-1-1H12l.71.29 3 3L16 5v9l-1 1H6l-1-1V6.5l1 .847V14h9V6h-4V2zm1 0v3h3l-3-3z'),
+    up: path1('M13.854 7l-5-5h-.707l-5 5 .707.707L8 3.561V14h1V3.56l4.146 4.147.708-.707z'),
+    down: path1('M3.147 9l5 5h.707l5-5-.707-.707L9 12.439V2H8v10.44L3.854 8.292 3.147 9z'),
+    map: svg('<path d="M2.5 5.77705V12.0978L5.5 10.2228V3.90205L2.5 5.77705ZM6.5 3.90205V10.2228L9.5 12.0978V5.77705L6.5 3.90205ZM6 11.0896L2.265 13.4239L1.5 12.9999V5.49993L1.735 5.07593L5.735 2.57593H6.265L10 4.9103L13.735 2.57593L14.5 2.99993V10.4999L14.265 10.9239L10.265 13.4239H9.735L6 11.0896ZM10.5 5.77705V12.0978L13.5 10.2228V3.90205L10.5 5.77705Z"/>'),
+    mapFilled: svg('<path d="M2 5.5V13L5.5 10.8125V3.3125L2 5.5Z"/><path d="M9.5 12.6875V5.1875L6.5 3.3125V10.8125L9.5 12.6875Z"/><path d="M10.5 12.6875V5.1875L14 3V10.5L10.5 12.6875Z"/>'),
+    split: svg('<path d="M14 1H3L2 2v11l1 1h11l1-1V2l-1-1zM8 13H3V2h5v11zm6 0H9V2h5v11z"/>'),
+    foldUp: svg('<path d="M1 7.4l.7.7 6-6 6 6 .7-.7L8.1 1h-.7L1 7.4zm0 6l.7.7 6-6 6 6 .7-.7L8.1 7h-.7L1 13.4z"/>'),
+    foldDown: path1('M14.207 1.707L13.5 1l-6 6-6-6-.707.707 6.353 6.354h.708l6.353-6.354zm0 6L13.5 7l-6 6-6-6-.707.707 6.353 6.354h.708l6.353-6.354z'),
+    unfold: path1('M7.53 6.51v-4l-1 1-.71-.71L7.65 1h.71l1.84 1.83-.71.7-1-1v3.98h-.96zm0 2.98v4l-1-1-.71.71L7.65 15h.71l1.84-1.83-.71-.7-1 1V9.49h-.96zM13.73 4L14 5.02l-3.68 2.93L14 10.98 13.73 12h-4.2v-1h3L9.55 8.57H6.54L3.45 11h3.08v1H2.27L2 10.98l3.68-2.92L2 5.02 2.27 4h4.26v1H3.45l3 2.42h3.01L12.53 5h-3V4h4.2z'),
+    chevronRight: path1('M10.072 8.024L5.715 3.667l.618-.62L11 7.716v.618L6.333 13l-.618-.619 4.357-4.357z'),
+    chevronDown: path1('M7.976 10.072l4.357-4.357.62.618L8.284 11h-.618L3 6.333l.619-.618 4.357 4.357z'),
+  };
+  // An icon button: its tooltip says what a click does; a toggle keeps one name and says whether it's on.
+  const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
 
   const viewer = $('#viewer'), side = $('#vw-side'), main = $('#vw-main'), qInput = $('#vw-q');
 
@@ -32,6 +50,9 @@
     rev: {},
     blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
     search: { q: '', scope: 'unreviewed' },
+    // Files shown whole, lines shown around each section of a diff ({ above, below } by its key),
+    // and folders closed in the Files tab.
+    whole: new Set(), more: new Map(), closedDirs: new Set(),
   };
   const STORE = 'untangle:' + (CONFIG.key || 'review');
   try {
@@ -206,6 +227,20 @@
     return textColorCache.get(k);
   }
   const lineColors = (text, path) => { const c = textColors(text, path); return c ? c[0] : null; };
+  // A class per color the theme uses (a rule added the first time), lighter than a style per token.
+  const colorClasses = new Map();
+  let colorSheet = null;
+  function colorClass(color, italic) {
+    const k = color + (italic ? ' i' : '');
+    if (!colorClasses.has(k)) {
+      if (!/^#[0-9a-f]{3,8}$/i.test(color)) return '';
+      const name = 'k' + colorClasses.size;
+      colorClasses.set(k, name);
+      if (!colorSheet) { colorSheet = document.createElement('style'); document.head.appendChild(colorSheet); }
+      colorSheet.sheet.insertRule(`.${name}{color:${color};font-style:${italic ? 'italic' : 'normal'}}`, colorSheet.sheet.cssRules.length);
+    }
+    return colorClasses.get(k);
+  }
   function colorAt(colors, col) {
     let lo = 0, hi = colors.length - 1, best = null;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (colors[mid][0] <= col) { best = colors[mid]; lo = mid + 1; } else hi = mid - 1; }
@@ -243,7 +278,7 @@
         // Grammars leave plain names (variables, properties, parameters) in the default color;
         // VS Code colors them from the language server. The tokenizer's classes stand in there.
         const plain = !c || !c[1] || (c[1].toUpperCase() === shikiFg && (tk.k === 'id' || tk.k === 'ty'));
-        if (!plain) attrs += ` style="color:${c[1]};font-style:${c[2] ? 'italic' : 'normal'}"`;
+        if (!plain) cls += ' ' + colorClass(c[1], c[2]);
       }
       if (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann') {
         const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
@@ -438,29 +473,192 @@
   }
   const anyRowsHtml = (f, hi, s, e, ctx) => (state.layout === 'split' ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
   const BIG = 150;
-  function hunkView(f, hi, s0, e0, ctx) {
-    ctx = ctx || {};
-    const h = f.hunks[hi];
-    const key = (ctx.key || 'file') + '|' + f.p + '#' + hi + ':' + s0;
-    const blocks = f.blocks.filter((b) => b.hunk === hi && b.edits.length && b.first < e0 && b.first + b.len > s0);
+
+  // ---------- more of the file
+  // A file's diff is one stream of rows: the unchanged lines before the first hunk (a gap), the
+  // hunk's rows, the next gap, and so on, then the unchanged lines after the last hunk. A view
+  // shows sections of that stream (whole hunks, or the parts of them a chain needs). The band
+  // above a section is its header, and stands for the lines hidden above it: clicking it shows
+  // more of them, as GitHub's do. Gap lines come from the file at the head, which untangle sends
+  // when they're first shown; a page saved on its own only grows within hunks.
+  const MORE = 20;
+  function hunkMeta(h) {
+    if (!h.meta) {
+      let o = h.o, n = h.n;
+      h.meta = h.rows.map(([t]) => { const r = { t, o: t !== '+' ? o : null, n: t !== '-' ? n : null, block: null }; if (t !== '+') o++; if (t !== '-') n++; return r; });
+    }
+    return h.meta;
+  }
+  // The stream's pieces ({ gap, at, size, n, o } with the gap's first new and old line, or
+  // { hi, at, size } for a hunk), and where the lines after the last hunk start.
+  function streamOf(f) {
+    if (f.stream) return f.stream;
+    const segs = [];
+    let at = 0, n = 1, o = 1;
+    (f.hunks || []).forEach((h, hi) => {
+      const meta = hunkMeta(h);
+      const fn = meta.find((r) => r.n != null), fo = meta.find((r) => r.o != null);
+      const gaps = [fn && fn.n - n, fo && fo.o - o].filter((x) => x != null);
+      const size = f.s === 'M' && gaps.length ? Math.max(0, Math.min(...gaps)) : 0;
+      if (size) segs.push({ gap: true, at, size, n, o });
+      at += size;
+      segs.push({ hi, at, size: h.rows.length });
+      at += h.rows.length;
+      meta.forEach((r) => { if (r.n != null) n = r.n + 1; if (r.o != null) o = r.o + 1; });
+    });
+    return (f.stream = { segs, at, n, o });
+  }
+  const segAt = (st, pos) => st.segs.find((g) => pos >= g.at && pos < g.at + g.size) || null;
+  // Lines in the file at the head: untangle sends how many, or the file once it's loaded.
+  function headLines(f) {
+    if (CONFIG.lines && CONFIG.lines[f.p] != null) return CONFIG.lines[f.p];
+    const s = sources.get(srcKey({ side: 'head', path: f.p }));
+    return s && s.status === 'ok' ? s.count : null;
+  }
+  // The end of the stream, or null while the file's length is unknown.
+  function streamEnd(f) {
+    const st = streamOf(f);
+    if (f.s !== 'M') return st.at;
+    const total = headLines(f);
+    return total == null ? null : st.at + Math.max(0, total - (st.n - 1));
+  }
+  // Unchanged lines from the file at the head: count of them (null: to its end) from new line n0, old line o0.
+  function gapRowsHtml(f, n0, o0, count, ctx) {
+    const s = CONFIG.served ? loadSource({ side: 'head', path: f.p }, true) : { status: 'error', error: 'These lines aren’t in this page.' };
+    if (s.status !== 'ok') return `<div class="ln skip${s.status === 'loading' ? ' loading' : ''}"><span class="g"></span><span class="tx">${s.status === 'loading' ? 'Loading lines…' : esc(s.error)}</span></div>`;
+    if (count == null) count = Math.max(0, s.count - (n0 - 1));
+    const colors = textColors(s.text, f.p);
+    const split = state.layout === 'split' && !ctx.unified;
+    let h = '';
+    for (let k = 0; k < count; k++) {
+      const n = n0 + k, meta = { t: ' ', o: o0 + k, n }, text = s.lines[n - 1] != null ? s.lines[n - 1] : '', c = colors && colors[n - 1];
+      h += split
+        ? `<div class="sl" data-n="${n}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx', colors: c })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs, colors: c })}</div>` + peekAfter(f, n)
+        : uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors: c });
+    }
+    return h;
+  }
+  // Rows [a, b) of the stream (b may be Infinity: to the end of the file).
+  function streamRowsHtml(f, a, b, ctx) {
+    const st = streamOf(f), rows = ctx.rows || anyRowsHtml;
+    let h = '';
+    st.segs.forEach((g) => {
+      const s = Math.max(a, g.at), e = Math.min(b, g.at + g.size);
+      if (s < e) h += g.gap ? gapRowsHtml(f, g.n + s - g.at, g.o + s - g.at, e - s, ctx) : rows(f, g.hi, s - g.at, e - g.at, ctx);
+    });
+    if (b > st.at) {
+      const s = Math.max(a, st.at);
+      h += gapRowsHtml(f, st.n + s - st.at, st.o + s - st.at, b === Infinity ? null : b - s, ctx);
+    }
+    return h;
+  }
+  // The first old and new line numbers in rows [a, b).
+  function numbersFrom(f, a, b) {
+    const st = streamOf(f);
+    let o = null, n = null;
+    for (const g of st.segs) {
+      if (g.at + g.size <= a || g.at >= b) continue;
+      const i0 = Math.max(a, g.at) - g.at;
+      if (g.gap) return { o: o != null ? o : g.o + i0, n: n != null ? n : g.n + i0 };
+      const meta = f.hunks[g.hi].meta;
+      for (let i = i0; i < Math.min(b, g.at + g.size) - g.at; i++) {
+        if (o == null && meta[i].o != null) o = meta[i].o;
+        if (n == null && meta[i].n != null) n = meta[i].n;
+        if (o != null && n != null) return { o, n };
+      }
+    }
+    return { o, n };
+  }
+  // How many of the hidden rows [from, to) can be shown going up from `to`, or down from `from`:
+  // all of them when untangle serves the page, else those inside the hunk next to them.
+  function canShow(f, from, to, dir) {
+    if (to <= from) return 0;
+    if (CONFIG.served) return to - from;
+    const g = segAt(streamOf(f), dir === 'up' ? to - 1 : from);
+    if (!g || g.gap) return 0;
+    return dir === 'up' ? to - Math.max(from, g.at) : Math.min(to, g.at + g.size) - from;
+  }
+  // A section: rows [s0, e0) of hunk hi, at [a, b) in the stream.
+  function sectionOf(f, hi, s0, e0, ctx) {
+    const g = streamOf(f).segs.find((x) => x.hi === hi);
+    return { key: (ctx.key || 'file') + '|' + f.p + '#' + hi + ':' + s0, hi, s0, e0, a: g.at + s0, b: g.at + e0 };
+  }
+  function sectionInfo(f, S, ctx) {
+    const blocks = (f.blocks || []).filter((b) => b.hunk === S.hi && b.edits.length && b.first < S.e0 && b.first + b.len > S.s0);
     const open = blocks.filter((b) => !done(b)).length;
     const allDone = blocks.length > 0 && open === 0;
-    const big = !!ctx.chain && e0 - s0 > BIG;
-    const collapsed = state.collapsed.has(key) || ((allDone || big) && !state.expanded.has(key));
-    let o = null, n = null;
-    for (let i = s0; i < e0; i++) { if (o == null && h.meta[i].o != null) o = h.meta[i].o; if (n == null && h.meta[i].n != null) n = h.meta[i].n; }
-    let out = `<div class="hh${allDone ? ' hh-done' : ''}"><button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(key)}" aria-expanded="${!collapsed}" title="${collapsed ? 'Expand hunk' : 'Collapse hunk'}">${collapsed ? '▸' : '▾'}</button><span class="hh-tx">@@ −${o != null ? o : h.o} +${n != null ? n : h.n} @@ <span class="hh-ctx">${s0 === 0 ? esc(h.h) : ''}</span></span>`;
-    if (blocks.length) out += `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(blocks.map((b) => b.id).join(' '))}">${open ? '✓ Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
-    if (collapsed) {
-      out += `<span class="hh-note">${e0 - s0} lines${allDone ? ' · all reviewed' : ''}</span>`;
-      const focus = ctx.chain && ctx.chain.focus ? blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
-      if (focus.length && !allDone) out += `<span class="hh-note">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(key)}" data-line="${ln}">line ${ln}</button>`).join('')}`;
-    }
-    out += '</div>';
-    if (!collapsed) out += anyRowsHtml(f, hi, s0, e0, ctx);
-    return out;
+    // Reviewed sections fold, and so do long ones in a chain.
+    const folds = !!f.blocks;
+    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key)));
+    return { S, blocks, open, allDone, folds, collapsed };
   }
-  const hunkHtml = (f, hi, ctx) => hunkView(f, hi, 0, f.hunks[hi].rows.length, ctx);
+  const grown = (key) => state.more.get(key) || { above: 0, below: 0 };
+  const moreAttrs = (key, side, n) => `data-act="more" data-key="${esc(key)}" data-side="${side}" data-n="${n}"`;
+  const moreBtn = (key, side, n, ic, title) => `<button type="button" class="ib" ${moreAttrs(key, side, n)} title="${esc(title)}" aria-label="${esc(title)}">${ic}</button>`;
+  const linesWord = (n) => `${fmt(n)} line${n === 1 ? '' : 's'}`;
+  // The band above section x: the hidden rows [from, to) sit between the rows shown below the
+  // section before it (P) and the rows shown above x. Clicking the band shows more of them.
+  function bandHtml(f, x, P, from, to, ctx) {
+    const S = x.S, hk = f.hunks[S.hi];
+    const hidden = to - from;
+    const up = x.collapsed ? 0 : canShow(f, from, to, 'up');
+    const down = P && !P.collapsed ? canShow(f, from, to, 'down') : 0;
+    let icons = '', click = null;
+    if (hidden <= MORE && (up === hidden || down === hidden) && hidden) {
+      click = up === hidden ? [S.key, 'above', hidden] : [P.S.key, 'below', hidden];
+      icons = moreBtn(...click, ICON.unfold, `Expand all: ${linesWord(hidden)}`);
+    } else {
+      if (down) icons += moreBtn(P.S.key, 'below', Math.min(MORE, down), ICON.foldDown, `Expand down: ${linesWord(Math.min(MORE, down))}`);
+      if (up) icons += moreBtn(S.key, 'above', Math.min(MORE, up), ICON.foldUp, `Expand up: ${linesWord(Math.min(MORE, up))}`);
+      click = up ? [S.key, 'above', Math.min(MORE, up)] : down ? [P.S.key, 'below', Math.min(MORE, down)] : null;
+    }
+    const { o, n } = numbersFrom(f, x.collapsed ? S.a : to, S.b);
+    const label = `@@ −${o != null ? o : hk.o} +${n != null ? n : hk.n} @@ <span class="hh-ctx">${S.s0 === 0 && to === S.a && hk.h ? esc(hk.h) : ''}</span>`;
+    const tip = click ? (click[1] === 'above' ? `Show ${linesWord(click[2])} more above` : `Show ${linesWord(click[2])} more below the code above`) + (hidden > click[2] ? ` (${fmt(hidden)} hidden)` : '') : '';
+    let out = `<div class="hh${x.allDone ? ' hh-done' : ''}${P && !hidden ? ' joined' : ''}${click ? ' more' : ''}" data-sec="${esc(S.key)}"${x.collapsed && x.open ? ' data-nav="1"' : ''}${click ? ` ${moreAttrs(...click)} title="${esc(tip)}"` : ''}>`
+      + `<span class="hh-gut"><span class="hh-g">${x.folds ? `<button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(S.key)}" aria-expanded="${!x.collapsed}" title="${x.collapsed ? 'Expand hunk' : 'Collapse hunk'}">${x.collapsed ? ICON.chevronRight : ICON.chevronDown}</button>` : ''}</span><span class="hh-x">${icons}</span></span>`
+      + `<span class="hh-tx">${label}</span>`;
+    if (x.blocks.length) out += `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(x.blocks.map((b) => b.id).join(' '))}">${x.open ? '✓ Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
+    if (x.collapsed) {
+      out += `<span class="hh-note">${S.e0 - S.s0} lines${x.allDone ? ' · all reviewed' : ''}</span>`;
+      const focus = ctx.chain && ctx.chain.focus ? x.blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
+      if (focus.length && !x.allDone) out += `<span class="hh-note">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(S.key)}" data-line="${ln}">line ${ln}</button>`).join('')}`;
+    }
+    return out + '</div>';
+  }
+  // The band after a file's last section, while lines follow it (rest: how many, null if unknown).
+  function tailHtml(key, rest) {
+    const n = rest == null ? MORE : Math.min(MORE, rest);
+    const title = rest != null && rest <= MORE ? `Expand all: ${linesWord(rest)}` : `Expand down: ${linesWord(n)}`;
+    return `<div class="hh hh-tail more" ${moreAttrs(key, 'below', n)} title="${esc(title)}"><span class="hh-gut"><span class="hh-g"></span><span class="hh-x">${moreBtn(key, 'below', n, rest != null && rest <= MORE ? ICON.unfold : ICON.foldDown, title)}</span></span><span class="hh-tx">${rest == null ? 'More lines below' : `${linesWord(rest)} below`}</span></div>`;
+  }
+  // A file's sections, sorted, with their bands and the rows shown around them.
+  function sectionsHtml(f, secs, ctx) {
+    const xs = secs.map((S) => sectionInfo(f, S, ctx));
+    let h = '';
+    xs.forEach((x, i) => {
+      const P = i ? xs[i - 1] : null, S = x.S;
+      const from = !P ? 0 : P.collapsed ? P.S.b : Math.min(P.S.b + grown(P.S.key).below, S.a);
+      const to = x.collapsed ? S.a : Math.max(S.a - grown(S.key).above, from);
+      if (P && from > P.S.b) h += streamRowsHtml(f, P.S.b, from, ctx);
+      h += bandHtml(f, x, P, from, to, ctx);
+      if (!x.collapsed) h += streamRowsHtml(f, to, S.b, ctx);
+    });
+    const L = xs[xs.length - 1];
+    if (L && !L.collapsed) {
+      const end = streamEnd(f), want = L.S.b + grown(L.S.key).below;
+      const stop = end == null ? want : Math.min(want, end);
+      if (stop > L.S.b) h += streamRowsHtml(f, L.S.b, stop, ctx);
+      const rest = end == null ? null : end - stop;
+      if (CONFIG.served && (rest == null ? f.s === 'M' : rest > 0)) h += tailHtml(L.S.key, rest);
+    }
+    return h;
+  }
+  // The whole file: every hunk and every line between them.
+  function wholeHtml(f, ctx) {
+    const end = streamEnd(f);
+    return streamRowsHtml(f, 0, end == null ? Infinity : end, ctx);
+  }
   // The hunks a set of changes needs: each change with 3 lines of context, merged when they touch.
   function subHunksHtml(blocks, ctx) {
     const byFile = new Map();
@@ -470,14 +668,15 @@
       h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code">`;
       const byHunk = new Map();
       byFile.get(f).forEach((b) => { if (!byHunk.has(b.hunk)) byHunk.set(b.hunk, []); byHunk.get(b.hunk).push(b); });
+      const secs = [];
       [...byHunk.keys()].sort((x, y) => x - y).forEach((hi) => {
         const rows = f.hunks[hi].rows.length;
         const ranges = byHunk.get(hi).map((b) => [Math.max(0, b.first - 3), Math.min(rows, b.first + b.len + 3)]).sort((x, y) => x[0] - y[0]);
         const merged = [];
         ranges.forEach((r) => { const last = merged[merged.length - 1]; if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]); else merged.push(r.slice()); });
-        merged.forEach(([s0, e0]) => { h += hunkView(f, hi, s0, e0, ctx); });
+        merged.forEach(([s0, e0]) => secs.push(sectionOf(f, hi, s0, e0, ctx)));
       });
-      h += '</div>';
+      h += sectionsHtml(f, secs, ctx) + '</div>';
     });
     return h;
   }
@@ -717,11 +916,15 @@
     return `<button type="button" class="${cls || 'btn sm'}" data-act="open-source" data-side="${loc.side || ''}" data-p="${esc(loc.p || '')}" data-ext="${loc.ext != null ? loc.ext : ''}" data-line="${loc.line || ''}" data-label="${esc(loc.label || '')}" data-where="${esc(loc.where || '')}">${label}</button>`;
   }
   let rootsAsked = false;
-  // "Open in editor": a link from the editor's URL template, or a button when untangle runs a command.
-  function editorHtml(loc) {
+  // "Open in editor": a link from the editor's URL template, or a button when untangle runs a
+  // command. As an icon in a view's tools, or a small button in a peek.
+  function editorHtml(loc, icon) {
     if (!CONFIG.served || !CONFIG.editor) return '';
     const line = loc.line || 1, col = loc.col || 0;
-    if (CONFIG.editor.mode === 'command') return `<button type="button" class="btn xs" data-act="open-editor" data-side="${loc.side || ''}" data-p="${esc(loc.p || '')}" data-ext="${loc.ext != null ? loc.ext : ''}" data-line="${line}" data-col="${col}">Open in editor</button>`;
+    if (CONFIG.editor.mode === 'command') {
+      const attrs = `data-act="open-editor" data-side="${loc.side || ''}" data-p="${esc(loc.p || '')}" data-ext="${loc.ext != null ? loc.ext : ''}" data-line="${line}" data-col="${col}"`;
+      return icon ? iconBtn(ICON.goToFile, 'Open in editor', attrs) : `<button type="button" class="btn xs" ${attrs}>Open in editor</button>`;
+    }
     let abs = loc.abs || null;
     if (!abs && loc.side && loc.p) {
       if (!CONFIG.roots) {
@@ -732,20 +935,52 @@
     }
     if (!abs) return '';
     const href = CONFIG.editor.template.replace('{file}', encodeURI(abs)).replace('{line}', line).replace('{col}', col + 1);
-    return `<a class="btn xs" href="${esc(href)}" title="${esc(abs)}:${line}">Open in editor</a>`;
+    return icon ? `<a class="ib" href="${esc(href)}" title="Open in editor: ${esc(abs)}:${line}" aria-label="Open in editor">${ICON.goToFile}</a>`
+      : `<a class="btn xs" href="${esc(href)}" title="${esc(abs)}:${line}">Open in editor</a>`;
+  }
+  // The view's tools, as VS Code's diff editor has them: open in the editor, the previous and next
+  // change, the whole file or only its changed chunks, inline or side by side.
+  function toolsHtml(o) {
+    let h = '';
+    if (o.editor) h += editorHtml(o.editor, true);
+    if (o.nav) h += iconBtn(ICON.up, 'Previous change', 'data-act="nav" data-step="-1"') + iconBtn(ICON.down, 'Next change', 'data-act="nav" data-step="1"');
+    const f = o.whole;
+    if (f && CONFIG.served && f.s === 'M' && f.hunks && f.hunks.length) {
+      const whole = state.whole.has(f.p);
+      h += iconBtn(whole ? ICON.mapFilled : ICON.map, whole ? 'Showing the whole file: show only the changed chunks' : 'Showing the changed chunks: show the whole file', `data-act="whole" data-p="${esc(f.p)}"`, { label: 'Only the changed chunks', on: !whole });
+    }
+    if (o.layout) h += iconBtn(ICON.split, state.layout === 'split' ? 'Side by side: show inline' : 'Inline: show side by side', 'data-act="layout"', { label: 'Side by side', on: state.layout === 'split' });
+    return h ? `<span class="tools" role="toolbar" aria-label="View">${h}</span>` : '';
   }
   const sources = new Map();
   const srcKey = (v) => (v.ext != null ? 'ext:' + v.ext : v.side + ':' + v.path);
-  function loadSource(v) {
+  let pendingLine = null;
+  // A whole file from untangle. When it arrives, the view that showed it loading shows it, with
+  // the line on screen kept where it was. `wanted`: a view is waiting for it (else it's loaded ahead).
+  function loadSource(v, wanted) {
     const key = srcKey(v);
-    if (sources.has(key)) return sources.get(key);
-    const s = { status: 'loading' };
+    if (sources.has(key)) {
+      const s = sources.get(key);
+      if (wanted) s.wanted = true;
+      return s;
+    }
+    const s = { status: 'loading', wanted: !!wanted };
     sources.set(key, s);
     const q = new URLSearchParams(v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
     fetch('api/file?' + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
-      .then((j) => Object.assign(s, { status: 'ok', text: j.text, lines: j.text.split('\n'), abs: j.abs, generated: j.generated }))
+      .then((j) => {
+        const lines = j.text === '' ? [] : j.text.replace(/\r?\n$/, '').split(/\r?\n/);
+        Object.assign(s, { status: 'ok', text: j.text, lines, count: lines.length, abs: j.abs, generated: j.generated });
+      })
       .catch((e) => Object.assign(s, { status: 'error', error: e.message }))
-      .then(() => { if (state.view.kind === 'source' && srcKey(state.view) === key) render(state.view.line ? { line: state.view.line } : { top: true }); });
+      .then(() => {
+        if (state.view.kind === 'source' && srcKey(state.view) === key) return render(state.view.line ? { line: state.view.line } : { top: true });
+        if (!s.wanted) return;
+        if (pendingLine && pendingLine.view === state.view) { const line = pendingLine.line; pendingLine = null; return render({ line }); }
+        const at = lineOnScreen();
+        render();
+        backTo(at);
+      });
     return s;
   }
   // A whole file at one side, or outside the repository. Names in it ask the server where
@@ -760,9 +995,9 @@
     if (f) f.hunks.forEach((hk) => hk.meta.forEach((r) => { if (v.side === 'base' ? r.t === '-' : r.t === '+') changed.add(v.side === 'base' ? r.o : r.n); }));
     const dir = name.slice(0, name.lastIndexOf('/') + 1);
     const meta = `<span>${v.ext != null ? esc(v.where || 'outside the repository') : `${v.side} · ${esc((sha || '').slice(0, 7))}`}</span>${s.lines ? `<span>${fmt(s.lines.length)} lines</span>` : ''}${changed.size ? `<span class="${v.side === 'base' ? 'd' : 'a'}">${changed.size} line${changed.size > 1 ? 's' : ''} ${v.side === 'base' ? 'removed' : 'added'} by this review</span>` : ''}${s.generated || g ? '<span>generated</span>' : ''}`;
-    const actions = (f || g ? `<button type="button" class="btn sm" data-open="${esc(v.path)}">Show changes</button>` : '')
-      + (f && f.s === 'M' ? sourceButton({ side: v.side === 'base' ? 'head' : 'base', p: v.path }, v.side === 'base' ? 'Head side' : 'Base side') : '')
-      + editorHtml({ side: v.side, p: v.path, ext: v.ext, abs: s.abs, line: v.line || 1 }).replace('btn xs', 'btn sm');
+    const actions = toolsHtml({ editor: { side: v.side, p: v.path, ext: v.ext, abs: s.abs, line: v.line || 1 } })
+      + (f || g ? `<button type="button" class="btn sm" data-open="${esc(v.path)}">Show changes</button>` : '')
+      + (f && f.s === 'M' ? sourceButton({ side: v.side === 'base' ? 'head' : 'base', p: v.path }, v.side === 'base' ? 'Head side' : 'Base side') : '');
     let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(name))}</b>`, meta, actions);
     if (s.status === 'loading') return h + '<div class="empty">Loading the file…</div>';
     if (s.status === 'error') return h + `<div class="empty">${esc(s.error)}</div>`;
@@ -778,8 +1013,11 @@
     return h + '</div>';
   }
   function openSource(d) {
-    state.view = { kind: 'source', side: d.side || null, path: d.p || null, ext: d.ext !== '' && d.ext != null ? Number(d.ext) : null, line: d.line ? Number(d.line) : null, label: d.label || null, where: d.where || null };
-    if (state.view.ext == null && !state.view.side) state.view.side = 'head';
+    const ext = d.ext !== '' && d.ext != null ? Number(d.ext) : null, side = d.side || (ext == null ? 'head' : null);
+    // A file this review changes opens in its diff, whole.
+    const f = side === 'head' && d.p ? M().files.find((x) => x.p === d.p && x.s !== 'D') : null;
+    if (f) { if (f.s === 'M') state.whole.add(f.p); return openFile(f.p, d.line); }
+    state.view = { kind: 'source', side, path: d.p || null, ext, line: d.line ? Number(d.line) : null, label: d.label || null, where: d.where || null };
     state.peek = null;
     render(state.view.line ? { line: state.view.line } : { top: true });
   }
@@ -908,7 +1146,7 @@
     }
     let h = headerHtml(`<b>${wbr(c.name)}</b>`,
       `<span>${c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain'}</span>${diffstat(c.adds, c.dels)}<span>${s.total} changes · ${c.files} file${c.files > 1 ? 's' : ''}</span><span>${s.total - s.open}/${s.total} reviewed</span>`,
-      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>${nextBtn()}`, sub);
+      `${toolsHtml({ nav: true, layout: true })}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>${nextBtn()}`, sub);
     const all = blocksOf(c.blocks);
     const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
     if (oneTestFile) return h + `<p class="sec-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + testListHtml(c, all);
@@ -962,7 +1200,7 @@
     const m = M();
     const s = stats(m.standalone);
     let h = headerHtml('<b>Not in a chain</b>', `<span>${s.total} changes</span><span>${s.total - s.open} reviewed</span>`,
-      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
+      `${toolsHtml({ nav: true, layout: true })}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
       '<div class="fv-sub">Changes that don’t use, and aren’t used by, anything changed elsewhere. Grouped by file.</div>');
     return h + '<div class="sec">' + subHunksHtml(m.standalone, { key: 'standalone' }) + '</div>';
   }
@@ -976,19 +1214,32 @@
     const s = stats(f.blocks);
     const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
     const chains = [...new Set(f.blocks.flatMap((b) => m.chainsOf.get(b.id) || []))];
+    const firstAdd = f.blocks.find((b) => b.adds);
+    const editor = { side: f.s === 'D' ? 'base' : 'head', p: f.p, line: (firstAdd && f.hunks[firstAdd.hunk].meta[firstAdd.first].n) || 1 };
     let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`,
       `<span>${{ A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s}</span><span>${s.open} of ${s.total} changes to review</span>${s.open ? `<span class="a">+${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.adds, 0)}</span><span class="d">−${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.dels, 0)}</span>` : ''}`,
-      `${sourceButton({ side: f.s === 'D' ? 'base' : 'head', p: f.p }, 'Whole file')}${editorHtml({ side: f.s === 'D' ? 'base' : 'head', p: f.p, line: (f.blocks.find((b) => b.adds) && f.hunks[f.blocks.find((b) => b.adds).hunk].meta[f.blocks.find((b) => b.adds).first].n) || 1 }).replace('btn xs', 'btn sm')}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
+      `${toolsHtml({ editor, nav: true, whole: f, layout: true })}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
       chains.length ? `<div class="fv-sub">In chains: ${chains.slice(0, 6).map((id) => `<button type="button" class="chip-btn" data-chain="${id}">${esc(m.chains[id].name)}</button>`).join('')}${chains.length > 6 ? ` +${chains.length - 6}` : ''}</div>` : '');
     if (state.compare === 'since') h += `<div class="since-note">Left: your reviewed snapshot (as if you had reviewed everything up to <code>${esc(m.raw.left)}</code>). Right: the head <code>${esc(m.raw.right)}</code>.</div>`;
-    h += '<div class="code">';
-    f.hunks.forEach((hk, hi) => { h += hunkHtml(f, hi, { key: 'file' }); });
+    const ctx = { key: 'file' };
+    // Loaded ahead, so the whole file shows at once.
+    if (CONFIG.served && f.s === 'M') loadSource({ side: 'head', path: f.p });
+    h += '<div class="code">' + (CONFIG.served && state.whole.has(f.p) ? wholeHtml(f, ctx) : sectionsHtml(f, f.hunks.map((hk, hi) => sectionOf(f, hi, 0, hk.rows.length, ctx)), ctx));
     return h + '</div>';
+  }
+  // A generated file's rows: for reference, without definitions.
+  function genRowsHtml(f, hi, s, e) {
+    const hk = f.hunks[hi], meta = hunkMeta(hk);
+    let h = '';
+    for (let i = s; i < e; i++) h += uRow(f, meta[i], hk.rows[i][1], null, { cls: (meta[i].t === '+' ? 'add' : meta[i].t === '-' ? 'del' : 'ctx') + ' gen', refs: false, colors: rowColors(hk.rows, f.p, i) });
+    return h;
   }
   function renderGenerated(path) {
     const f = M().generated.find((x) => x.p === path);
+    f.lang = f.lang || C.langOf(f.p);
     const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
-    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`, sourceButton({ side: f.s === 'D' ? 'base' : 'head', p: f.p }, 'Whole file'),
+    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`,
+      toolsHtml({ editor: { side: f.s === 'D' ? 'base' : 'head', p: f.p, line: 1 }, whole: f.hunks ? f : null }),
       '<div class="gen-note">Generated: not reviewed and not counted. Shown for reference only.</div>');
     if (!f.hunks) {
       if (!CONFIG.served) return h + `<div class="empty">This file’s ${fmt(f.a + f.d)} changed lines aren’t in this page.</div>`;
@@ -1003,17 +1254,8 @@
       }
       return h + `<div class="empty">Loading ${fmt(f.a + f.d)} changed lines…</div>`;
     }
-    h += '<div class="code">';
-    f.hunks.forEach((hk) => {
-      h += `<div class="hh"><span class="hh-tx">@@ −${hk.o} +${hk.n} @@ <span class="hh-ctx">${esc(hk.h)}</span></span></div>`;
-      let o = hk.o, n = hk.n;
-      hk.rows.forEach(([t, text], i) => {
-        const meta = { t, o: t !== '+' ? o : null, n: t !== '-' ? n : null };
-        if (t !== '+') o++;
-        if (t !== '-') n++;
-        h += uRow({ p: f.p, lang: C.langOf(f.p) }, meta, text, null, { cls: (t === '+' ? 'add' : t === '-' ? 'del' : 'ctx') + ' gen', refs: false, colors: rowColors(hk.rows, f.p, i) });
-      });
-    });
+    const ctx = { key: 'gen', rows: genRowsHtml, noRefs: true, unified: true };
+    h += '<div class="code">' + (CONFIG.served && state.whole.has(f.p) ? wholeHtml(f, ctx) : sectionsHtml(f, f.hunks.map((hk, hi) => sectionOf(f, hi, 0, hk.rows.length, ctx)), ctx));
     return h + '</div>';
   }
   function renderGroup(id) {
@@ -1027,7 +1269,7 @@
     const syms = bySym.size > 1 ? [...bySym.values()] : null;
     let h = headerHtml(`<b class="mono">${esc(groupLabel(g))}</b>`,
       `<span>same change in ${g.count} places · ${g.files} files${syms ? ` · ${syms.length} declarations` : ''}</span><span>${e0.op === 'token' ? 'token replaced, as ' + esc(e0.where) : esc(e0.op) + ' of ' + esc(e0.where)}</span>${g.parts.length > 1 ? `<span>${g.parts.length} edits that always appear together</span>` : ''}`,
-      `<button type="button" class="btn sm${ok ? '' : ' primary'}" data-act="mark-group" data-group-id="${g.id}">${ok ? 'Mark all unreviewed' : `Mark all ${g.count} reviewed`}</button>`);
+      `${toolsHtml({ nav: true, layout: true })}<button type="button" class="btn sm${ok ? '' : ' primary'}" data-act="mark-group" data-group-id="${g.id}">${ok ? 'Mark all unreviewed' : `Mark all ${g.count} reviewed`}</button>`);
     if (!syms) return h + instancesHtml(g, null, 'group' + g.id);
     syms.forEach((sy, i) => {
       const blocks = sy.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, k, arr) => arr.indexOf(b) === k);
@@ -1139,21 +1381,55 @@
       const s = stats(m.standalone);
       h += `<div class="sb-h"><span>Outside chains</span></div><button type="button" class="sb-row chain${s.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">Not in a chain<span class="sub">${s.total} changes · grouped by file</span></span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
     } else {
-      let lastDir = null;
-      m.files.forEach((f) => {
-        const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
-        if (dir !== lastDir) { h += `<div class="sb-dir" title="${esc(dir)}">${esc(dir)}</div>`; lastDir = dir; }
-        const s = stats(f.blocks);
-        const on = v.kind === 'file' && v.path === f.p;
-        h += `<button type="button" class="sb-row${s.open ? '' : ' done'}" data-open="${esc(f.p)}"${on ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
+      const on = (f) => (v.kind === 'file' && v.path === f.p ? ' aria-current="true"' : '');
+      h += treeHtml(fileTree(m.files), 0, {
+        prefix: '',
+        count: (files) => { const s = stats(files.flatMap((f) => f.blocks)); return { text: s.open ? s.open + ' left' : '', done: !s.open }; },
+        file: (f, depth) => {
+          const s = stats(f.blocks);
+          return `<button type="button" class="sb-row tr${s.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}">${guides(depth)}<span class="st"></span><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${s.open ? s.open + ' left' : 'reviewed'}</span></button>`;
+        },
       });
       h += `<div class="sb-h"><span>Generated · not reviewed</span><span class="sb-hn">${m.generated.length}</span></div>`;
-      m.generated.forEach((f) => {
-        const on = v.kind === 'file' && v.path === f.p;
-        h += `<button type="button" class="sb-row gen" data-open="${esc(f.p)}"${on ? ' aria-current="true"' : ''}><span class="st"></span><span class="nm">${esc(fileName(f.p))}<span class="sub">${esc(f.p.slice(0, f.p.lastIndexOf('/')))}</span></span><span class="cnt"><span class="a">+${f.a}</span></span></button>`;
+      h += treeHtml(fileTree(m.generated), 0, {
+        prefix: 'gen:',
+        count: () => ({ text: '', done: false }),
+        file: (f, depth) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}">${guides(depth)}<span class="st"></span><span class="nm">${esc(fileName(f.p))}</span><span class="cnt"><span class="a">+${fmt(f.a)}</span></span></button>`,
       });
     }
-    side.innerHTML = h;
+    // Most clicks change only the code: the sidebar stays as it is.
+    if (h !== sideHtml) { side.innerHTML = h; sideHtml = h; }
+  }
+  let sideHtml = '';
+  // The Files tab: folders first, then files, by name. A folder that holds only a folder shows
+  // with it ("lib/src/mcp"), as VS Code compacts them; lines mark the levels.
+  function fileTree(files) {
+    const root = { dirs: new Map(), files: [] };
+    files.forEach((f) => {
+      const parts = f.p.split('/');
+      let node = root;
+      parts.slice(0, -1).forEach((name, i) => {
+        if (!node.dirs.has(name)) node.dirs.set(name, { name, path: parts.slice(0, i + 1).join('/'), dirs: new Map(), files: [] });
+        node = node.dirs.get(name);
+      });
+      node.files.push(f);
+    });
+    return root;
+  }
+  const byName = (x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
+  const filesIn = (d) => d.files.concat(...[...d.dirs.values()].map(filesIn));
+  const guides = (depth) => Array.from({ length: depth }, (_, i) => `<i class="ig" style="left:${14 + i * 14}px"></i>`).join('');
+  function treeHtml(node, depth, o) {
+    let h = '';
+    [...node.dirs.values()].sort((x, y) => byName(x.name, y.name)).forEach((d) => {
+      let name = d.name;
+      while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
+      const key = o.prefix + d.path, open = !state.closedDirs.has(key), c = o.count(filesIn(d));
+      h += `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${depth}" title="${esc(d.path)}/">${guides(depth)}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span><span class="cnt">${c.text}</span></button>`;
+      if (open) h += treeHtml(d, depth + 1, o);
+    });
+    node.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => { h += o.file(f, depth); });
+    return h;
   }
 
   // ---------- render
@@ -1176,17 +1452,17 @@
       title.innerHTML = (CONFIG.url ? `<a href="${esc(CONFIG.url)}" target="_blank" rel="noopener">${name}</a>` : `<span>${name}</span>`)
         + `<span class="vw-where">${esc(CONFIG.where || M().raw.label)}</span>`;
     }
-    viewer.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
     viewer.classList.toggle('split', state.layout === 'split');
     const rd = $('#vw-revdiff');
     if (rd) rd.checked = state.showReviewedDiff;
-    const headH = () => { const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
     if (opts.line) {
       const el = main.querySelector(`[data-n="${opts.line}"]`);
-      if (el) { main.scrollTop = el.offsetTop - headH() - 60; el.classList.add('flash'); }
+      if (el) { placeRow(el, headH() + 60); el.classList.add('flash'); } else main.scrollTop = opts.top ? 0 : keep;
+      // A line still loading, or lines loading above it: shown again once they're there.
+      pendingLine = !el || main.querySelector('.ln.loading') ? { view: state.view, line: opts.line } : null;
     } else if (opts.section != null) {
       const el = main.querySelector('#sec-' + opts.section);
-      if (el) { main.scrollTop = el.offsetTop - headH() - 8; el.classList.add('flash-sec'); }
+      if (el) { placeRow(el, headH() + 8); el.classList.add('flash-sec'); }
     } else if (opts.top) main.scrollTop = 0;
     else main.scrollTop = keep;
     const cur = side.querySelector('[aria-current="true"]');
@@ -1197,16 +1473,80 @@
   function openFile(path, line) {
     state.view = { kind: 'file', path };
     state.peek = null;
+    // The Files tab shows it.
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++) { const dir = parts.slice(0, i).join('/'); state.closedDirs.delete(dir); state.closedDirs.delete('gen:' + dir); }
     if (line) {
       const hl = M().head.get(path + ':' + line);
       if (hl) { const k = 'file|' + path + '#' + hl.hi + ':0'; state.collapsed.delete(k); state.expanded.add(k); }
     }
-    render(line ? { line: Number(line) } : { top: true });
+    render(line ? { line: Number(line), top: true } : { top: true });
+  }
+  const headH = () => { const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
+  // Puts a row y pixels below the top of the code pane. Rows off screen only estimate their
+  // height until they're drawn (a long line wraps when side by side), so the row is put there
+  // again once the rows around it have been drawn.
+  function placeRow(row, y) {
+    const put = () => { if (row.isConnected) main.scrollTop += row.getBoundingClientRect().top - main.getBoundingClientRect().top - y; };
+    put();
+    requestAnimationFrame(() => requestAnimationFrame(() => { put(); requestAnimationFrame(put); }));
+  }
+  // The first line on screen (in which block of code, and how far down), to keep it where it is
+  // while the view changes around it.
+  function lineOnScreen() {
+    const top = main.getBoundingClientRect().top + headH();
+    const codes = [...main.querySelectorAll('.code')];
+    for (const el of main.querySelectorAll('[data-n]')) {
+      if (!el.dataset.n) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom > top + 1) return { code: codes.indexOf(el.closest('.code')), n: Number(el.dataset.n), off: r.top - top };
+    }
+    return null;
+  }
+  function backTo(at) {
+    if (!at) return;
+    const code = main.querySelectorAll('.code')[at.code];
+    if (!code) return;
+    const rows = [...code.querySelectorAll('[data-n]')].filter((x) => x.dataset.n);
+    const el = rows.find((x) => Number(x.dataset.n) === at.n) || rows.find((x) => Number(x.dataset.n) > at.n);
+    if (el) placeRow(el, headH() + at.off);
+  }
+  // ↑ and ↓: the previous or next change in the view, counted from the one they last went to while
+  // it's on screen, else from the top of the screen, wrapping around at either end. A folded
+  // section with changes to review opens on the way.
+  let navAt = null;
+  function gotoChange(step) {
+    const box = main.getBoundingClientRect(), ref = box.top + headH() + 48;
+    const rowOf = (el) => el.closest('.ln, .sl, .hh');
+    const y = (el) => rowOf(el).getBoundingClientRect().top;
+    const id = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
+    const marks = [...main.querySelectorAll('.tick[data-block], .hh[data-nav]')];
+    if (!marks.length) return;
+    let i = navAt ? marks.findIndex((el) => id(el) === navAt) : -1;
+    if (i >= 0 && y(marks[i]) >= box.top && y(marks[i]) < box.bottom) i += step;
+    else if (step > 0) i = marks.findIndex((el) => y(el) > ref + 2);
+    else { i = -1; marks.forEach((el, k) => { if (y(el) < ref - 2) i = k; }); }
+    if (i < 0 || i >= marks.length) i = step > 0 ? 0 : marks.length - 1;
+    let el = marks[i];
+    if (el.matches('.hh')) {
+      const key = el.dataset.sec;
+      state.collapsed.delete(key); state.expanded.add(key);
+      render();
+      const band = [...main.querySelectorAll('.hh[data-sec]')].find((b) => b.dataset.sec === key);
+      el = band && [...main.querySelectorAll('.tick[data-block]')].find((x) => band.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING);
+      if (!el) return;
+    }
+    navAt = id(el);
+    const row = rowOf(el);
+    placeRow(row, ref - box.top);
+    main.querySelectorAll('.flash').forEach((x) => x.classList.remove('flash'));
+    void row.offsetWidth;
+    row.classList.add('flash');
   }
 
   // ---------- events
   viewer.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-layout],[data-usage],[data-scope],.ref');
+    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],.ref');
     if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
     const m = M();
@@ -1217,7 +1557,13 @@
       state.view = { kind: 'map', family: null }; state.focus = null;
       return render({ top: true });
     }
-    if (d.layout) { state.layout = d.layout; save(); return render(); }
+    if (d.dir !== undefined && !d.act) {
+      state.closedDirs.has(d.dir) ? state.closedDirs.delete(d.dir) : state.closedDirs.add(d.dir);
+      renderSide();
+      const again = [...side.querySelectorAll('[data-dir]')].find((x) => x.dataset.dir === d.dir);
+      if (again) again.focus();
+      return;
+    }
     if (d.tab) { state.tab = d.tab; return render(); }
     if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
     if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
@@ -1295,6 +1641,17 @@
       return render();
     }
     if (act === 'expand-to') { state.collapsed.delete(d.key); state.expanded.add(d.key); return render({ line: Number(d.line) }); }
+    if (act === 'more') { const g = { ...grown(d.key) }; g[d.side] += Number(d.n); state.more.set(d.key, g); return render(); }
+    if (act === 'nav') return gotoChange(Number(d.step));
+    if (act === 'whole' || act === 'layout') {
+      // The line at the top of the screen stays there.
+      const at = lineOnScreen();
+      if (act === 'whole') state.whole.has(d.p) ? state.whole.delete(d.p) : state.whole.add(d.p);
+      else { state.layout = state.layout === 'split' ? 'unified' : 'split'; save(); }
+      render();
+      backTo(at);
+      return;
+    }
     if (act === 'mark-file') { toggleBlocks(m.files[Number(d.file)].blocks.filter((b) => b.edits.length)); return render(); }
     if (act === 'mark-blocks') { toggleBlocks(blocksOf(d.blocks.split(' '))); return render(); }
     if (act === 'mark-chain') { toggleBlocks(blocksOf(m.chains[Number(d.chainId)].blocks)); return render(); }

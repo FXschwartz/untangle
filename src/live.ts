@@ -2,7 +2,7 @@
 // outside the repository (a package, the SDK), search over the repository, and opening a
 // location in the editor. One Dart analysis server answers them, kept from the build or
 // started on the first request.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { prepareCheckouts, type Checkouts, type Progress } from './build.js';
@@ -182,6 +182,35 @@ export class LiveSession {
       if (results.length >= SEARCH_MAX) break;
     }
     return { results, truncated: results.length >= SEARCH_MAX };
+  }
+
+  /** Lines in each file at the head (a file that isn't there is left out), with one git call. */
+  lineCounts(paths: string[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    const list = paths.filter((p) => !p.includes('\n'));
+    if (!list.length) return out;
+    let buf: Buffer;
+    try {
+      buf = execFileSync('git', ['-C', this.target.repo, 'cat-file', '--batch'], { input: list.map((p) => `${this.target.headSha}:${p}\n`).join(''), maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch {
+      return out;
+    }
+    // Each answer: "<oid> blob <size>\n<content>\n", or "<name> missing\n".
+    let at = 0;
+    for (const p of list) {
+      const nl = buf.indexOf(10, at);
+      if (nl < 0) break;
+      const m = / blob (\d+)$/.exec(buf.toString('utf8', at, nl));
+      at = nl + 1;
+      if (!m) continue;
+      const size = Number(m[1]);
+      let lines = 0;
+      for (let i = at; i < at + size; i++) if (buf[i] === 10) lines++;
+      if (size && buf[at + size - 1] !== 10) lines++;
+      out[p] = lines;
+      at += size + 1;
+    }
+    return out;
   }
 
   /** The absolute path behind a location, for the editor. */

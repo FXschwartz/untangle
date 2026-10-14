@@ -280,6 +280,15 @@ From the review of v11:
   to the chain.
 - **Each view has its own hunks.** A chain section shows each change with 3 lines of
   context, merged when they touch. Folding a hunk in one place never folds another.
+- **More of the file, as on GitHub.** The band above a hunk is its header and stands for the
+  lines hidden above it. Clicking it shows 20 more, up from the hunk or down from the one
+  before, or all of them when 20 or fewer are left; a band after the last hunk shows the rest.
+  A chain section grows the same way, across hunks and the lines between them. The map icon
+  shows the whole file around the diff, read-only, with go to definition on every name.
+- **A view's tools** are icons, as VS Code's diff editor has them: open in the editor,
+  previous and next change, the whole file or only its changed chunks, inline or side by side.
+- **The Files tab is a folder tree,** folders first, with a folder that holds only one folder
+  shown with it (`lib/src/mcp`), as VS Code compacts them.
 - **Clicking a graph node** shows only that node's code and dims unrelated nodes.
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. "Next unreviewed" (key `n`) walks the same order.
@@ -297,8 +306,8 @@ From the review of v11:
   it. "Back to definition" returns. Usage snippets are highlighted like the code.
 - **Dark palette** with VS Code Dark+-style syntax colors. Function names are told apart
   from other identifiers.
-- **Unified by default, split on demand.** Split pairs removed and added lines per
-  change and wraps long lines.
+- **Unified by default, split on demand** from a view's tools. Split pairs removed and added
+  lines per change and wraps long lines.
 
 ## Numbers on #168 (computed by the prototype)
 
@@ -405,7 +414,7 @@ untangle [flags] <pr-url>      # cloned into the cache first
 | | Prototype page (static) | Served by `untangle` |
 |---|---|---|
 | Go to definition | Answered ahead of time for the identifiers in the diff (about 8,500 on the new side). A definition outside the diff opens as a snippet of up to 10 lines. | Asked live on click, anywhere: whole files, inside a peek, removed lines. |
-| Files | Diff hunks only | Any file at either revision |
+| Files | Diff hunks only (a chain section grows within its hunk) | The whole file around its diff, and any file at either revision |
 | Search | Changed lines | Changed lines, plus the repository at either revision (`git grep`) |
 | Highlighting | A regex tokenizer, with real rules for Dart and YAML only | [Shiki](https://shiki.style): VS Code's TextMate grammars and its Dark+ theme |
 | Review marks | Browser storage | Commits on the reviewed-snapshot branch |
@@ -527,6 +536,9 @@ through the page.
   - Asked: the rest of the local web app (live go to definition, whole files, repository
     search, Shiki, open in editor, marks on the snapshot branch, `-export`). Done in
     `untangle`.
+  - Asked: bands that show more of the file, as GitHub's; the file whole in the page,
+    read-only, with go to definition, and a switch back to the changed chunks; VS Code's
+    icons for a view's tools, with unified/split moved there; the Files tab as a tree. Done.
 
 ## References
 

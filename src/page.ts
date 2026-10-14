@@ -21,6 +21,8 @@ export interface PageConfig {
   editor?: { mode: 'uri'; template: string } | { mode: 'command' };
   /** The branch that holds the marks. */
   snapshot?: { branch: string; commit: string | null; note: string | null };
+  /** Lines in each modified file at the head: how far its diff can grow below the last hunk. */
+  lines?: Record<string, number>;
   head?: string;
   base?: string;
 }

@@ -43,6 +43,7 @@ export class ReviewSession {
   // Blocks the snapshot branch holds.
   private reviewed: Set<string>;
   private readonly metrics = new Metrics();
+  private lines: Record<string, number> | null = null;
 
   constructor(
     private readonly target: Target,
@@ -87,6 +88,10 @@ export class ReviewSession {
 
   config(): PageConfig {
     const roots = this.live.roots;
+    if (!this.lines) {
+      const c = this.data.model.compares.base;
+      this.lines = this.live.lineCounts([...c.files, ...c.generated].filter((f: { s: string }) => f.s === 'M').map((f: { p: string }) => f.p));
+    }
     return {
       served: true,
       key: this.page.key,
@@ -96,6 +101,7 @@ export class ReviewSession {
       roots,
       editor: this.editor.mode === 'uri' ? { mode: 'uri', template: this.editor.template } : { mode: 'command' },
       snapshot: this.snapshotInfo,
+      lines: this.lines,
       head: this.target.headSha,
       base: this.target.baseSha,
     };

@@ -90,12 +90,10 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .vw-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .vw-title { font: 500 13px/1.35 var(--font-mono); color: var(--ink-2); min-width: 0; flex: 1 1 220px; }
 .vw-title b { color: var(--ink); }
-.ctl { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.seg-label { font: 600 10.5px/1 var(--font-mono); color: var(--ink-3); letter-spacing: .06em; text-transform: uppercase; }
-.seg, .mini-seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: var(--surface); }
-.seg button, .mini-seg button { appearance: none; border: 0; background: transparent; color: var(--ink-2); font: 600 12px/1 var(--font-mono); padding: 7px 10px; cursor: pointer; white-space: nowrap; }
-.seg button + button, .mini-seg button + button { border-left: 1px solid var(--line-2); }
-.seg button[aria-pressed="true"], .mini-seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.mini-seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.mini-seg button { appearance: none; border: 0; background: transparent; color: var(--ink-2); font: 600 12px/1 var(--font-mono); padding: 7px 10px; cursor: pointer; white-space: nowrap; }
+.mini-seg button + button { border-left: 1px solid var(--line-2); }
+.mini-seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .mini-seg button { font-size: 11px; padding: 5px 8px; }
 .check { display: inline-flex; gap: 6px; align-items: center; font: 500 12px/1.2 var(--font-mono); color: var(--ink-2); cursor: pointer; }
 .vw-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; padding: 0 10px; min-width: min(220px, 100%); flex: 0 1 260px; }
@@ -116,7 +114,6 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
 .sb-h { display: flex; justify-content: space-between; gap: 8px; font: 600 10.5px/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 14px 8px 6px; }
 .sb-hn { letter-spacing: 0; text-transform: none; font-weight: 500; }
-.sb-dir { font: 400 11px/1.4 var(--font-mono); color: var(--ink-3); padding: 8px 8px 2px; overflow-wrap: anywhere; }
 .sb-row { appearance: none; border: 0; background: transparent; color: inherit; text-align: left; width: 100%; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
 .sb-row:hover { background: var(--surface-3); }
 .sb-row[aria-current="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-2); }
@@ -131,12 +128,13 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .mini-track span { display: block; height: 100%; background: var(--fold); }
 .a { color: var(--add-ink); } .d { color: var(--del-ink); }
 
-.fv-head { position: sticky; top: 0; left: 0; z-index: 4; background: var(--surface); border-bottom: 1px solid var(--line); padding: 12px 16px 10px; display: grid; gap: 6px; }
+.fv-head { position: sticky; top: 0; left: 0; z-index: 4; background: var(--surface); border-bottom: 1px solid var(--line); padding: 12px 16px 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .fv-title { font: 400 14px/1.4 var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
 .fv-title b { font-weight: 700; font-size: 15px; }
 .fv-dir { color: var(--ink-3); font-size: 12.5px; }
 .fv-sub { font-size: 12.5px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fv-sub code { font-size: 11.5px; background: var(--surface-3); padding: .05em .35em; border-radius: 4px; }
+.fv-sub .chip-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fv-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font: 500 12px/1.4 var(--font-mono); color: var(--ink-3); }
 .fv-meta .sp, .pk-h .sp, .sec-m .sp { flex: 1; }
 .since-note, .gen-note { margin: 10px 16px 0; padding: 9px 12px; border-radius: 8px; background: var(--fold-bg); color: var(--fold-ink); font-size: 13px; position: sticky; left: 16px; max-width: 760px; }
@@ -200,6 +198,10 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 
 .code { font: 400 12.5px/1.65 var(--font-mono); width: max-content; min-width: 100%; }
 .ln { display: flex; align-items: flex-start; }
+/* A whole file has thousands of rows: the ones off screen skip layout and paint until scrolled to. */
+.code > .ln, .code > .sl { content-visibility: auto; contain-intrinsic-size: auto 20.625px; }
+/* That clips what overflows a row, so focus rings inside rows are drawn inward. */
+.code > .ln :focus-visible, .code > .sl :focus-visible, .vw-side .sb-row.tr:focus-visible { outline-offset: -2px; }
 .ln .g, .sl .g { width: 30px; flex: none; display: flex; justify-content: center; position: sticky; left: 0; z-index: 1; background: inherit; }
 .ln .no { width: 46px; flex: none; text-align: right; padding-right: 8px; color: var(--ink-3); user-select: none; font-variant-numeric: tabular-nums; }
 .ln .no.wide { width: 60px; }
@@ -226,10 +228,19 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .ln.gen .g { width: 8px; }
 .ln.flash, .sl.flash { animation: flash 1.6s ease-out 1; }
 @keyframes flash { 0% { box-shadow: inset 4px 0 0 var(--accent); filter: brightness(.94); } 100% { box-shadow: inset 4px 0 0 transparent; } }
-.hh { display: flex; align-items: center; gap: 10px; background: var(--hunk-bg); color: var(--ink-3); padding: 3px 16px 3px 4px; border-block: 1px solid var(--line); margin-top: 8px; }
-.hh-tx { white-space: pre; } .hh-ctx { color: var(--ink-2); }
+.hh { display: flex; align-items: center; gap: 10px; background: var(--hunk-bg); color: var(--ink-3); padding: 2px 16px 2px 0; border-block: 1px solid var(--line); margin-top: 8px; min-height: 30px; }
+.hh-tx { white-space: pre; margin-left: 8px; } .hh-ctx { color: var(--ink-2); }
 .hh-note { font: 500 11.5px/1 var(--font-body); color: var(--ink-3); }
-.chev { appearance: none; border: 0; background: none; color: var(--ink-2); width: 22px; height: 22px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+/* The band's gutter lines up with the rows': the fold toggle over the ticks, the expand icons over the line numbers. */
+.hh-gut { display: flex; align-items: center; flex: none; width: 122px; position: sticky; left: 0; z-index: 1; background: inherit; }
+.hh-g { width: 30px; flex: none; display: flex; justify-content: center; }
+.hh-x { flex: 1; display: flex; justify-content: flex-end; gap: 2px; padding-right: 2px; }
+.hh.joined { margin-top: 0; }
+.hh.more { cursor: pointer; }
+.hh.more:hover { background: var(--surface-3); color: var(--ink-2); }
+.hh.more:hover .hh-x .ib { color: var(--ink); }
+.hh-tail .hh-tx { font: 500 12px/1 var(--font-body); }
+.chev { appearance: none; border: 0; background: none; color: var(--ink-2); width: 22px; height: 22px; border-radius: 4px; cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .chev:hover { background: var(--surface-3); }
 .tick { appearance: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 5px; border: 1.5px solid var(--mark-strong); background: var(--mark); color: transparent; font: 700 12px/1 var(--font-body); cursor: pointer; padding: 0; }
 .tick:hover { color: var(--mark-ink); }
@@ -299,6 +310,26 @@ a.btn { text-decoration: none; display: inline-block; }
 .code.src .ln.add .sg, .code.src .ln.del .sg { font-weight: 700; }
 .inst-file .linkish { font: inherit; }
 
+/* A view's tools: icon buttons, as VS Code's editor title bar has them. */
+.tools { display: inline-flex; align-items: center; gap: 2px; }
+.ib { appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-2); cursor: pointer; text-decoration: none; flex: none; }
+.ib:hover { background: var(--surface-3); color: var(--ink); }
+.ib[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-2); color: var(--ink); }
+.ib svg { display: block; }
+.hh .ib { width: 24px; height: 22px; }
+
+/* The Files tab's tree. */
+.sb-row.tr { position: relative; padding: 3px 8px 3px calc(8px + var(--d, 0) * 14px); align-items: center; }
+.sb-row.tr .st { margin-top: 0; align-self: center; }
+.sb-row.dir .tw { width: 12px; height: 16px; display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
+.sb-row.dir .tw svg { flex: none; }
+.sb-row.tr .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-row.dir .nm { font-weight: 500; color: var(--ink-2); }
+.sb-row.dir.done .nm { color: var(--ink-3); }
+.ig { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line-2); pointer-events: none; }
+/* One line each, so a long tree can skip the rows off screen. */
+.vw-side .sb-row.tr { content-visibility: auto; contain-intrinsic-size: auto 23.5px; }
+
 /* The status bar: the language server and the process's metrics. */
 .vw-status { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 3px 12px; border-top: 1px solid var(--line); background: var(--surface-2); font: 500 11.5px/1.5 var(--font-mono); color: var(--ink-3); }
 .vw-status[hidden] { display: none; }
@@ -330,17 +361,16 @@ body { overflow: hidden; }
   body { overflow: auto; }
   .vw { height: auto; min-height: 100vh; }
 }
+/* The panes are as big as the window gives them: what changes in one never lays out the other. */
+@media (min-width: 961px) {
+  .vw-side, .vw-main { contain: strict; }
+}
 </style>
 </head>
 <body>
 <div class="vw" id="viewer">
   <div class="vw-bar">
     <div class="vw-title" id="vw-title"></div>
-    <div class="ctl"><span class="seg-label">Diff</span>
-      <div class="seg" role="group" aria-label="Diff layout">
-        <button type="button" data-layout="unified" aria-pressed="true">Unified</button>
-        <button type="button" data-layout="split" aria-pressed="false">Split</button>
-      </div></div>
     <label class="check"><input type="checkbox" id="vw-revdiff"> Diffs of reviewed code</label>
     <label class="vw-search"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 11 L15 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input id="vw-q" type="search" placeholder="Search changes" aria-label="Search changed lines" autocomplete="off"></label>
   </div>

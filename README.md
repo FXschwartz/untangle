@@ -57,16 +57,25 @@ same review again is immediate.
 - **Go to definition anywhere.** Names on changed lines answer at once (computed ahead). Any
   other name, in a whole file, inside a peek or on a removed line, asks the language server;
   in a peek, clicking a name moves the peek there and Back returns.
-- **Whole files** at either side: "Whole file" in a file's header, "Open file" in a peek, or a
-  search result. Lines the review changes are marked. Files outside the repository (a package,
-  the SDK) open the same way from a definition.
+- **More of the file.** The band above each hunk stands for the lines hidden above it: click it
+  for 20 more (up from the hunk, or down from the one before), or all of them when 20 or fewer
+  are left, as on GitHub. The band after the last hunk shows the rest of the file. Chain views
+  grow the same way. An exported page grows only within hunks.
+- **Whole files.** A file's map icon shows the whole file around its diff, and back to the
+  changed chunks. "Open file" in a peek or a search result opens a changed file that way, at
+  the line; any other file, at either side or outside the repository (a package, the SDK),
+  opens on its own with the lines the review changes marked. Names in them go to definition.
+- **Tools** in each view's header, with VS Code's icons: open in the editor, previous and next
+  change, the whole file or only its changed chunks, and inline or side by side.
+- **The Files tab** is a folder tree, folders first; a folder holding only one folder shows with
+  it (`lib/src/mcp`), as VS Code compacts them.
 - **Search** the changed lines, or the whole repository at the head or the base (`git grep`).
 - **Highlighting** with [Shiki](https://shiki.style): VS Code's grammars and its Dark+ theme.
   Names a grammar leaves plain (variables, properties, parameters) are colored as VS Code's
   semantic highlighting does.
 - **Status bar:** whether the language server is up, and untangle's and the language server's
   memory and CPU (hover for the details), as px0 shows them.
-- **Open in editor** from file headers and peeks: a `vscode://` link by default (through WSL
+- **Open in editor** from a view's tools and from peeks: a `vscode://` link by default (through WSL
   when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
   or a URL template such as `cursor://file{file}:{line}:{col}`.
 - **Marks on a branch.** Your review is a local git branch, `untangle/pr-<number>` (or
@@ -118,4 +127,6 @@ in 1 MB.
 | `src/` | The CLI, the server and the pipeline, in TypeScript |
 | `analysis/` | The analysis rules (`analyze.js`) and the generated-code adapters, shared with the prototype |
 | `viewer/` | The page: `index.html`, `viewer.js`, `highlight.js` (Shiki, bundled by the build), and `core.js` (the tokenizer and diff, used by both sides) |
+
+The page's icons are VS Code's [Codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0).
 | `docs/` | The UX proposal, the test runs, and the prototype pipeline that produced them |
