@@ -1,12 +1,13 @@
 """Calls reachable from what changed tests call.
 
-For each declaration that a changed test line uses, follow the Dart language server's
-outgoing calls (call hierarchy) up to DEPTH levels, inside the repository only. analyze.js
-then links the test to the first changed function on each path.
+For each declaration that a changed test line uses (production code or an unchanged test
+helper), follow the Dart language server's outgoing calls (call hierarchy) up to DEPTH levels,
+inside the repository only. analyze.js then links the test to the first changed function on
+each path.
 
     python3 lsp_calls.py <head-worktree> <diff.json> <defs.json> <calls.json>
 """
-import json, os, re, subprocess, sys, threading, time, urllib.parse
+import collections, json, os, re, subprocess, sys, threading, time, urllib.parse
 
 DEPTH = 3
 head = os.path.abspath(sys.argv[1])
@@ -87,14 +88,15 @@ for cmp in diff['compares'].values():
                     plus.add(f"{f['p']}:{n}")
                 if line[0] != '-':
                     n += 1
-is_test = lambda p: re.search(r'(^|/)test/', p)
+is_test = lambda p: re.search(r'(^|/)(test|test_[a-z0-9_]+|integration_test)/|_test\.dart$', p)
 seeds = set()
 for key, (tpath, tl, tc) in defs.items():
     p, line, _ = key.rsplit(':', 2)
     if not is_test(p) or f'{p}:{line}' not in plus or not tpath.startswith(head + '/'):
         continue
     rel = tpath[len(head) + 1:]
-    if '/generated/' in rel or is_test(rel) or f'{rel}:{tl + 1}' in plus:
+    # Unchanged test helpers count too: a test often reaches changed code through one.
+    if '/generated/' in rel or f'{rel}:{tl + 1}' in plus:
         continue
     seeds.add((rel, tl, tc))
 print('seeds', len(seeds), flush=True)
@@ -107,10 +109,11 @@ for rel, tl, tc in sorted(seeds):
         k = node_key(res[0])
         if k:
             items[k] = (res[0], 0)
-frontier = [(k, item, d) for k, (item, d) in items.items()]
+# Breadth first, so each function is expanded at its shortest distance from a seed.
+frontier = collections.deque((k, item, d) for k, (item, d) in items.items())
 seen = set()
 while frontier:
-    k, item, d = frontier.pop()
+    k, item, d = frontier.popleft()
     if k in seen:
         continue
     seen.add(k)

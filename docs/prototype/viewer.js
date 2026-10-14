@@ -6,6 +6,7 @@
   const $ = (sel, el) => (el || document).querySelector(sel);
   const MODEL = JSON.parse($('#d-model').textContent);
   const DEFS_ALL = JSON.parse($('#d-defs').textContent);
+  const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/;
   const defsNow = () => { if (DEFS_ALL.targets) return DEFS_ALL; const d = DEFS_ALL[state.compare]; return typeof d === 'string' ? DEFS_ALL[d] : d; };
   const REFS = JSON.parse($('#d-refs').textContent);
   const DEFS_OLD = JSON.parse($('#d-defs-old').textContent);
@@ -136,7 +137,7 @@
       return { l1: `same change · ${n.files} file${n.files > 1 ? 's' : ''}`, l2: g ? groupLabel(g) : '' };
     }
     const { owner, name } = memberParts(n.member);
-    if (!n.member || n.member === 'main') return { l1: /(^|\/)test\//.test(n.file) ? 'test file' : 'top level', l2: fileName(n.file), owner: '' };
+    if (!n.member || n.member === 'main') return { l1: TEST_FILE.test(n.file) ? 'test file' : 'top level', l2: fileName(n.file), owner: '' };
     return { l1: fileName(n.file), l2: name, owner };
   }
   const kindWord = { member: 'changed member', type: 'changed type', param: 'parameter ripple', local: 'variable ripple' };
@@ -520,7 +521,7 @@
       }
       const dim = spec.focus && !(e.from === spec.focus || e.to === spec.focus);
       const long = spec.faintLong && Math.abs(a.n.layer - b.n.layer) > 1;
-      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}" d="${d}" marker-end="url(#gar-${spec.id})"/>`;
+      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}${e.share ? ' share' : ''}" d="${d}"${e.share ? '' : ` marker-end="url(#gar-${spec.id})"`}/>`;
       if (e.labels && e.labels.length) {
         const text = trunc(e.labels[0], 18) + (e.labels.length > 1 ? ' +' + (e.labels.length - 1) : '');
         if (!shown.has(e.to + '|' + text) && !dim) { shown.add(e.to + '|' + text); labels += `<text class="g-elabel" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`; }
@@ -566,8 +567,26 @@
     };
     const edges = [];
     fam.chains.forEach((c) => out.get(c.id).forEach((o) => { if (!reach(c.id, o, [c.id, o])) edges.push({ from: 'k' + c.id, to: 'k' + o, labels: [] }); }));
+    // Chains that share changes are one family too. One dashed line joins each group of chains
+    // that uses links to the chain it shares the most changes with.
+    const group = new Map(fam.chains.map((c) => [c.id, c.id]));
+    const find = (x) => { while (group.get(x) !== x) x = group.get(x); return x; };
+    fam.chains.forEach((c) => out.get(c.id).forEach((o) => group.set(find(c.id), find(o))));
+    const pairs = [];
+    fam.chains.forEach((c) => (c.shares || []).forEach((o) => {
+      if (o <= c.id || !ids.has(o)) return;
+      const ob = new Set(M().chains[o].blocks);
+      pairs.push({ a: c, b: M().chains[o], n: c.blocks.filter((x) => ob.has(x)).length });
+    }));
+    pairs.sort((x, y) => y.n - x.n || x.a.id - y.a.id || x.b.id - y.b.id);
+    pairs.forEach(({ a, b }) => {
+      if (find(a.id) === find(b.id)) return;
+      group.set(find(a.id), find(b.id));
+      const [from, to] = a.depth <= b.depth ? [a, b] : [b, a];
+      edges.push({ from: 'k' + from.id, to: 'k' + to.id, labels: [], share: true });
+    });
     return layeredSvg({
-      id: 'map' + fam.id, w: 236, cap: 9, faintLong: true, label: `Map of ${fam.chains.length} linked chains; arrows point from a chain to the chains its root member uses.`,
+      id: 'map' + fam.id, w: 236, cap: 9, faintLong: true, label: `Map of ${fam.chains.length} linked chains; arrows point from a chain to the chains its root member uses, and dashed lines join chains that share changes.`,
       edges,
       nodes: fam.chains.map((c) => {
         const s = stats(blocksOf(c.blocks));
@@ -678,7 +697,7 @@
       `<span>${c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain'}</span>${diffstat(c.adds, c.dels)}<span>${s.total} changes · ${c.files} file${c.files > 1 ? 's' : ''}</span><span>${s.total - s.open}/${s.total} reviewed</span>`,
       `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>${nextBtn()}`, sub);
     const all = blocksOf(c.blocks);
-    const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && /(^|\/)test\//.test(all[0].file.p);
+    const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
     if (oneTestFile) return h + `<p class="sec-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + testListHtml(c, all);
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
@@ -721,9 +740,9 @@
     const fam = m.families.find((f) => f.id === famId) || m.families[0];
     const linked = m.families.filter((f) => f.chains.length > 1);
     let h = headerHtml('<b>Chain map</b>', `<span>${fam.chains.length} linked chains</span><span>${fam.depth + 1} levels</span>`, nextBtn(),
-      `<div class="fv-sub">A chain uses another when its root member uses that chain’s function, method, field or type. Chains that nothing uses sit on the left.</div>${linked.length > 1 ? `<div class="fv-sub"><span class="links-k">Families</span>${linked.map((f) => `<button type="button" class="chip-btn${f === fam ? ' on' : ''}" data-map="${f.id}">${esc(f.top.name)} · ${f.chains.length}</button>`).join('')}</div>` : ''}`);
+      `<div class="fv-sub">A chain uses another when its root member uses that chain’s function, method, field or type. Chains that nothing uses sit on the left. A dashed line joins chains that share changes.</div>${linked.length > 1 ? `<div class="fv-sub"><span class="links-k">Families</span>${linked.map((f) => `<button type="button" class="chip-btn${f === fam ? ' on' : ''}" data-map="${f.id}">${esc(f.top.name)} · ${f.chains.length}</button>`).join('')}</div>` : ''}`);
     h += `<div class="graph-box"><div class="graph-scroll tall">${mapSvg(fam)}</div>
-      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Faint arrows skip levels.</span><span>Click a chain to open it.</span></div></div>`;
+      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Faint arrows skip levels.</span><span><i class="lg-share"></i>shares changes</span><span>Click a chain to open it.</span></div></div>`;
     return h;
   }
   function renderStandalone() {
@@ -758,7 +777,7 @@
     const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
     let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`, '',
       '<div class="gen-note">Generated: not reviewed and not counted. Shown for reference only.</div>');
-    if (!f.hunks) return h + `<div class="empty">This file has ${f.a + f.d} changed lines, too many to embed in the prototype. The tool opens it on demand.</div>`;
+    if (!f.hunks) return h + `<div class="empty">This file’s ${f.a + f.d} changed lines aren’t embedded in the prototype. The tool opens it on demand.</div>`;
     h += '<div class="code">';
     f.hunks.forEach((hk) => {
       h += `<div class="hh"><span class="hh-tx">@@ −${hk.o} +${hk.n} @@ <span class="hh-ctx">${esc(hk.h)}</span></span></div>`;

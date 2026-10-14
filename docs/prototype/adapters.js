@@ -5,8 +5,8 @@ const ADAPTERS = {
   // Serverpod: a generated class maps to its model class (minus the suffix), a field to the
   // model field of the same name, and a relation's …Id column to the relation.
   serverpod: {
-    detect: /\.spy\.yaml$/, generated: ['**/generated/**', '**/migrations/**'],
-    model: { kind: 'yaml', generated: ['**/generated/**'], source: '**/*.spy.yaml', classSuffixes: 'Table|Include|IncludeList|Repository|AttachRepository|AttachRowRepository|DetachRepository|DetachRowRepository' },
+    detect: /\.spy(\.ya?ml)?$/, generated: ['**/generated/**', '**/migrations/**'],
+    model: { kind: 'yaml', generated: ['**/generated/**'], source: ['**/*.spy.yaml', '**/*.spy.yml', '**/*.spy'], classSuffixes: 'Table|Include|IncludeList|Repository|AttachRepository|AttachRowRepository|DetachRepository|DetachRowRepository' },
   },
   // Generated part files (build_runner: freezed, json_serializable, built_value, riverpod...):
   // a generated declaration maps to the one it was generated for, in the library that owns

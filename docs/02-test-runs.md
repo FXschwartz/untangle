@@ -1,4 +1,4 @@
-# Test runs: the rules on three other PRs
+# Test runs: the rules on seven other PRs
 
 > 2026-10-13. The rules of [UX proposal v9](01-ux-proposal.md), run unchanged on three more
 > PRs of serverpod_offline_sync. Every rule was written while looking at #168 only; this
@@ -235,3 +235,77 @@ rule only knows `test/`.
 
 **Still untested:** none of these PRs renames a file, and none touches freezed or protobuf
 generated code.
+
+### After the fixes
+
+All nine became rules ([UX proposal v13](01-ux-proposal.md)), and all eight PRs ran again,
+the Serverpod ones and the offline_sync ones.
+
+| PR | Chains | Changes in a chain | Outside | Tests in chains | Families |
+|---|---:|---:|---:|---:|---:|
+| #5864 | 5 → 7 | 38% → 93% | 18 → 2 | 0 / 8 → 7 / 8 | 2 → 2 |
+| #5706 | 56 → 50 | 81% | 49 | 89 / 112 | 25 → 5 |
+| #5471 | 23 → 22 | 99% | 2 | 85 / 86 | 12 → 3 |
+| #5630 | 78 → 80 | 80% → 85% | 52 → 39 | 28 / 49 → 36 / 49 | 38 → 7 |
+| #168 | 56 → 62 | 95% | 30 → 29 | 417 / 424 | 17 → 2 |
+| #157 | 11 | 97% | 3 | 34 / 34 | 8 → 4 |
+| #166 | 14 | 91% | 11 | 84 / 89 | 5 → 1 |
+| #162 | 12 → 13 | 94% | 6 | 33 / 33 | 8 → 4 |
+
+1. **Names in strings.** #5864's tool name is a chain, `“tail_runner_logs”`, of 14 changes:
+   the tool, its tests, its error message and the docs. `“runner.log”` is another of 3.
+   A string links only when it looks like a name: 4 to 80 characters, no spaces, and a
+   capital after the first letter, an underscore, a dot, a dash or a digit. When it names a
+   changed declaration it links to it; otherwise two or more changes that introduce it, one
+   of them code, form a chain.
+2. **Test detection.** #5630's `test_integration/` files now split per test, and tests in
+   chains went from 28 to 36 of 49.
+3. **Test helpers.** The call graph starts from unchanged test helpers too: #5864's tests
+   reach the changed `BridgeMcpServer` constructor through `_makeBridgePair`.
+4. **Import prefixes.** The chains `p`, `pg` and `path` are gone (34 changes in #5471, 11 in
+   #5706). Each import joins the chains that use its prefix.
+5. **Fields and `this.field`.** `EmbeddedPostgresOptions()` is one chain instead of six,
+   `TypeDefinition()` one of 44 changes instead of four, and `ResolvedEmbeddedPostgres()`
+   one instead of three.
+6. **New models.** #5630's thirteen field chains of new test models are now one chain per
+   model, the largest `ProjectedOrder` with 16 changes.
+7. **`.spy` files.** `projected_json_field.spy` is in the `ProjectedJsonField` chain.
+8. **Families.** #5864's feature, six chains that share changes, is one family. On large PRs
+   almost everything becomes one family: 61 of #168's 62 chains, and all 14 of #166's. Most
+   of the shared changes are tests that reach two chains. The map draws one dashed line per
+   group of chains joined this way. Counting only shared changes outside tests would leave
+   #168 with 4 families, #166 with 5 and #5471 with 10. That's an open question in v13.
+9. **Same-package imports.** `package:` imports resolve to the workspace package that has
+   the file. Serverpod keeps a second `serverpod_cli` pubspec under `templates/`, which first
+   took the name, so the fix only worked after that. #5864's `runner_paths.dart` import now
+   joins the `serverpodRunnerLogName` chain.
+
+**Three bugs in the test rule, found while checking these runs:**
+- **The call graph was walked depth first.** A function first met three calls away, through
+  a new test-helper seed, was never expanded when met again one call away. It's breadth first
+  now; #157's graph went from 47 to 96 functions.
+- **A method changed only in its body didn't count as changed.** Its body hangs off its outer
+  signature node, which the check missed, so only top-level functions worked. Tests skipped
+  past changed methods to the next one whose signature changed. Now the rule does what it
+  says, the first changed function on each path:
+  - #157's batch tests link to `mergeChanges`, the method they call, instead of
+    `_MergeWriteBatch` and `_applyMergeInsert` behind it;
+  - #166's 26 tests link to `collectPendingChanges`, which shares its signature change with
+    the `transaction` ripple of `_streamPendingChanges`;
+  - #5706's 26 tests link to `EmbeddedPostgresImpl.start`, which now names the PR's largest
+    chain (79 changes).
+- **A reached function stood for its first change, even a comment.** It now stands for its
+  first change with code in it.
+
+**Still outside:**
+- **Generator tests that check generated code as strings**, such as
+  `'CompanyInclude? company'` or `'_${testClassName}JsonInclude'`: 13 of #5630's test changes.
+- **Test edits that touch no changed code** (#5706's 19 test changes): reworded test and
+  group names, removed assertions, and setup that only uses the SDK, such as reserving a
+  free port.
+- **Imports of another workspace package's barrel file**
+  (`package:serverpod_embedded_postgres/serverpod_embedded_postgres.dart`): the rule doesn't
+  follow `export`s yet.
+
+Freezed and protobuf adapters are still checked only on the fixture
+(`prototype/make_fixture.sh`), which gives the same result as before.

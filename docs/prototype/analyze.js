@@ -40,7 +40,7 @@ const YAML = require(DEPS + '/yaml');
 // generated patterns, turn an adapter on or off, or declare a YAML-model mapping of its own.
 const PEEK_MAX_LINES = 2000;
 const { ADAPTERS } = require('./adapters.js');
-const compileMapping = (name, m) => ({ name, kind: m.kind || 'yaml', generated: [].concat(m.generated || []).map(C.globToRegExp), source: m.source ? C.globToRegExp(m.source) : null, classSuffixes: m.classSuffixes ? new RegExp('(' + m.classSuffixes + ')$') : null, fields: new Map() });
+const compileMapping = (name, m) => ({ name, kind: m.kind || 'yaml', generated: [].concat(m.generated || []).map(C.globToRegExp), source: [].concat(m.source || []).map(C.globToRegExp), classSuffixes: m.classSuffixes ? new RegExp('(' + m.classSuffixes + ')$') : null, fields: new Map() });
 
 const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
@@ -48,6 +48,8 @@ const CODE_KINDS = new Set(['id', 'ty', 'kw', 'num', 'ann', 'key']);
 const SIGNATURES = new Set(['method_signature', 'function_signature', 'getter_signature', 'setter_signature', 'constructor_signature', 'factory_constructor_signature', 'operator_signature', 'redirecting_factory_constructor_signature', 'constant_constructor_signature']);
 const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_declaration', 'enum_declaration', 'extension_type_declaration']);
 const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
+// A test file: *_test.dart, or anything under a test/, test_*/ or integration_test/ directory.
+const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/;
 
 (async () => {
   await Parser.init();
@@ -198,6 +200,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     let n = tree.rootNode.descendantForPosition(pos(line, col));
     const types = [];
     for (let a = n; a; a = a.parent) types.push(a.type);
+    if (types.some((t) => t === 'import_or_export' || t === 'library_import' || t === 'import_specification' || t === 'library_export')) return 'import';
     for (const t of types) {
       if (t === 'formal_parameter' || t === 'formal_parameter_list' || t === 'optional_formal_parameters') return 'param';
       if (t === 'local_variable_declaration' || t === 'for_loop_parts' || t === 'pattern_variable_declaration' || t === 'catch_clause') return 'local';
@@ -219,6 +222,14 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const genRules = Object.entries(ADAPTERS).filter(([k]) => adapterOn[k]).flatMap(([k, a]) => a.generated.map((g) => [C.globToRegExp(g), k + ' adapter']))
       .concat((review.generated || []).map((g) => [C.globToRegExp(g), '.review.yaml']));
     const mappingFor = (rel) => mappings.find((mp) => mp.generated.some((rx) => rx.test(rel)));
+    // The repository's own packages, by name, for package: imports. Several pubspecs can share
+    // a name (a template's copy, say): an import resolves to the one that has the imported file.
+    const packageDirs = new Map();
+    repoPaths.filter((p) => /(^|\/)pubspec\.yaml$/.test(p)).forEach((p) => {
+      try { const nm = /^name:\s*['"]?([\w]+)/m.exec(fs.readFileSync(HEAD + p, 'utf8')); if (nm) packageDirs.set(nm[1], [...(packageDirs.get(nm[1]) || []), path.dirname(p)]); } catch {}
+    });
+    const repoPathSet = new Set(repoPaths);
+    const packageFile = (pkg, rest) => (packageDirs.get(pkg) || []).map((d) => path.normalize(path.join(d, 'lib', rest))).find((x) => repoPathSet.has(x));
     const files = [], generated = [];
     for (const f0 of cmp.files) {
       const f = JSON.parse(JSON.stringify(f0));
@@ -488,7 +499,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
             break;
           }
         }
-        const isTest = /(^|\/)test\//.test(f.p) && (!b.member || b.member === 'main');
+        const isTest = TEST_FILE.test(f.p) && (!b.member || b.member === 'main');
         b.memberKey = f.p + '::' + (isTest && b.test ? 'test:' + b.test : b.member || '(top)');
       }
     }
@@ -496,11 +507,13 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const decls = new Map();
     const usesOf = new Map();
     // ---------- model fields changed in this comparison: Class.field -> blocks of the model file
-    mappings.filter((mp) => mp.kind === 'yaml').forEach((mp) => files.filter((f) => mp.source && mp.source.test(f.p)).forEach((f) => {
+    const newModels = new Map();
+    mappings.filter((mp) => mp.kind === 'yaml').forEach((mp) => files.filter((f) => mp.source.some((rx) => rx.test(f.p))).forEach((f) => {
       const modelFields = mp.fields;
       const cls = (src) => { const m = src && /^(?:class|exception):\s*(\w+)/m.exec(src); return m ? m[1] : null; };
       const name = cls(f.newSrc) || cls(f.oldSrc);
       if (!name) return;
+      if (f.s === 'A') newModels.set(name, f.p);
       const fieldOf = (text) => { const m = /^  ([A-Za-z_]\w*):/.exec(text); return m && m[1] !== 'fields' && m[1] !== 'indexes' ? m[1] : null; };
       f.blocks.forEach((b) => {
         const touched = new Map();
@@ -534,7 +547,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       return out;
     };
     const camel = (snake) => snake.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
-    mappings.filter((mp) => mp.kind === 'proto').forEach((mp) => files.filter((f) => mp.source && mp.source.test(f.p)).forEach((f) => {
+    mappings.filter((mp) => mp.kind === 'proto').forEach((mp) => files.filter((f) => mp.source.some((rx) => rx.test(f.p))).forEach((f) => {
       const nf = protoFields(f.newSrc), of = protoFields(f.oldSrc);
       f.blocks.forEach((b) => b.rows.forEach((r) => {
         const hit = r.type === '+' ? nf.get(r.n) : r.type === '-' ? of.get(r.o) : null;
@@ -661,15 +674,29 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       }
       return null;
     };
+    const isMemberName = (f, line, col) => {
+      const n = f.newTree.rootNode.descendantForPosition(pos(line, col));
+      if (!n || n.type !== 'identifier') return false;
+      for (let a = n.parent; a; a = a.parent) {
+        if (SIGNATURES.has(a.type)) { const nm = a.childForFieldName('name') || a.namedChildren.find((x) => x.type === 'identifier'); return !!nm && nm.startIndex === n.startIndex; }
+        if (a.type === 'formal_parameter_list' || a.type === 'function_body' || BODIES.has(a.type)) return false;
+      }
+      return false;
+    };
     const changedInside = (rel, line, col, signatureOnly) => {
       const f = fileByPath.get(rel);
       if (!f || !f.newTree) return null;
       const sig = memberNode(f, line, col);
       if (!sig) return null;
       let end = sig.endPosition.row + 1;
-      if (!signatureOnly && sig.nextSibling && sig.nextSibling.type === 'function_body') end = sig.nextSibling.endPosition.row + 1;
+      // A method's body follows its outer signature (method_signature > function_signature).
+      let outer = sig;
+      while (outer.parent && SIGNATURES.has(outer.parent.type)) outer = outer.parent;
+      if (!signatureOnly && outer.nextSibling && outer.nextSibling.type === 'function_body') end = outer.nextSibling.endPosition.row + 1;
       const start = sig.startPosition.row + 1;
-      const b = f.blocks.find((x) => x.atoms.length && (() => { const sp = blockNewSpan(f, x); return sp && sp[0] <= end && sp[1] >= start && (!signatureOnly || x.rows.some((r) => r.n != null && r.n >= start && r.n <= end && plusRow.has(rel + ':' + r.n))); })());
+      const hits = f.blocks.filter((x) => x.atoms.length && (() => { const sp = blockNewSpan(f, x); return sp && sp[0] <= end && sp[1] >= start && (!signatureOnly || x.rows.some((r) => r.n != null && r.n >= start && r.n <= end && plusRow.has(rel + ':' + r.n))); })());
+      // The first change with code in it, so a comment edit doesn't stand for the function.
+      const b = hits.find((x) => x.atoms.some((a) => !a.commentOnly)) || hits[0];
       return b ? { f, b } : null;
     };
     const changedParams = (f, line, col) => {
@@ -682,7 +709,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         return hit ? { line: id.startPosition.row + 1, col: id.startPosition.column, b: hit.b } : null;
       }).filter(Boolean);
     };
-    const isTestFile = (p) => /(^|\/)test\//.test(p);
+    const isTestFile = (p) => TEST_FILE.test(p);
     const reached = new Map();
     const reachChanged = (rel, line0, col) => {
       const start = `${rel}:${line0}:${col}`;
@@ -694,7 +721,8 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         level.forEach((k) => {
           const i1 = k.lastIndexOf(':'), i0 = k.lastIndexOf(':', i1 - 1);
           const r = k.slice(0, i0), l = +k.slice(i0 + 1, i1) + 1, c = +k.slice(i1 + 1);
-          const inside = changedInside(r, l, c, false);
+          const fr = fileByPath.get(r);
+          const inside = fr && fr.newTree && isMemberName(fr, l, c) && changedInside(r, l, c, false);
           if (inside) { hits.push({ key: `${r}:${l}:${c}`, rel: r, line: l, col: c, f: inside.f, b: inside.b }); return; }
           ((CALLS && CALLS.graph[k]) || []).forEach((x) => { if (!seen.has(x)) { seen.add(x); next.push(x); } });
         });
@@ -789,15 +817,6 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     // Overrides: a changed method that overrides a changed method links to it, and changed
     // overrides of the same method elsewhere (a framework's, say) join one chain. Members of
     // Object (toString, ==, hashCode) are left out: every class overrides them.
-    const isMemberName = (f, line, col) => {
-      const n = f.newTree.rootNode.descendantForPosition(pos(line, col));
-      if (!n || n.type !== 'identifier') return false;
-      for (let a = n.parent; a; a = a.parent) {
-        if (SIGNATURES.has(a.type)) { const nm = a.childForFieldName('name') || a.namedChildren.find((x) => x.type === 'identifier'); return !!nm && nm.startIndex === n.startIndex; }
-        if (a.type === 'formal_parameter_list' || a.type === 'function_body' || BODIES.has(a.type)) return false;
-      }
-      return false;
-    };
     if (SUPERS) {
       const byBase = new Map();
       for (const [key, [tpath, tl, tc]] of Object.entries(SUPERS)) {
@@ -825,6 +844,67 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         blocks.slice(1).forEach((b) => { if (!usesOf.has(b)) usesOf.set(b, new Map()); usesOf.get(b).set(dk, true); });
       });
     }
+
+    // Names in strings: a tool, route or class named in a string is invisible to the language
+    // server. A name-like string literal on a changed line (or a backticked name in a changed
+    // Markdown line) links to a changed declaration of that name, or else to the other changes
+    // that introduce the same string, when the code itself (not only tests or docs) introduces
+    // it. Name-like: no spaces, and a capital after the first
+    // letter, an underscore, a dot, a hyphen or a digit (tail_runner_logs, FullModelInclude,
+    // runner.log), so plain words like 'name' don't count. A string in more than 15 changes is
+    // too common to mean anything.
+    const nameLike = (x) => x.length >= 4 && x.length <= 80 && /^[A-Za-z_][\w$]*([.-][\w$]+)*$/.test(x) && (/[A-Z_.-]/.test(x.slice(1)) || /\d/.test(x));
+    const declsByName = new Map();
+    for (const [key, [tpath, tl, tc]] of Object.entries(defsRaw)) {
+      const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
+      const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
+      const u = plusRow.get(p + ':' + line);
+      if (!u || tpath !== HEAD + p || tl !== line - 1 || tc !== col) continue;
+      const kind = declKind(u.f.newTree, line, col);
+      const tok = u.r.toks.find((t) => t.c === col);
+      if (!tok || (kind !== 'member' && kind !== 'type')) continue;
+      if (!declsByName.has(tok.t)) declsByName.set(tok.t, []);
+      declsByName.get(tok.t).push({ rel: p, line, col, f: u.f, b: u.b });
+    }
+    const strings = new Map();
+    const addString = (x, b) => { if (!nameLike(x)) return; if (!strings.has(x)) strings.set(x, new Set()); strings.get(x).add(b); };
+    const QUOTED = /^r?('''|"""|'|")([\s\S]*)\1$/;
+    files.forEach((f) => f.blocks.forEach((b) => {
+      if (!b.atoms.length) return;
+      if (b.lang === 'md') {
+        b.rows.forEach((r) => { if (r.type === '+' && plusRow.has(f.p + ':' + r.n)) for (const m of r.text.matchAll(/`([^`\s]+?)(?:\(\))?`/g)) addString(m[1], b); });
+        return;
+      }
+      if (!f.newTree) return;
+      const seen = new Set();
+      b.rows.forEach((r) => {
+        if (r.type !== '+' || !plusRow.has(f.p + ':' + r.n)) return;
+        r.toks.forEach((tk) => {
+          if (!tk.atom || tk.k !== 'str') return;
+          let n = f.newTree.rootNode.descendantForPosition(pos(r.n, tk.c));
+          while (n && n.type !== 'string_literal') n = n.parent;
+          if (!n || seen.has(n.startIndex)) return;
+          seen.add(n.startIndex);
+          for (let a = n.parent; a; a = a.parent) if (/directive|import/.test(a.type)) return;
+          const m = QUOTED.exec(n.text);
+          if (m && !m[2].includes('$')) addString(m[2], b);
+        });
+      });
+    }));
+    const place = (b) => (b.lang === 'md' ? 2 : isTestFile(b.file.p) ? 1 : 0);
+    strings.forEach((blocks, x) => {
+      if (blocks.size > 15) return;
+      const named = (declsByName.get(x) || []).slice(0, 3);
+      if (named.length) {
+        named.forEach((d) => blocks.forEach((b) => { if (b !== d.b) addUse({ f: b.file, b, r: null }, `${d.rel}:${d.line}:${d.col}`, declAt(d.rel, d.f, d.b, d.line, d.col)); }));
+        return;
+      }
+      if (blocks.size < 2 || ![...blocks].some((b) => place(b) === 0)) return;
+      const list = [...blocks].sort((p, q) => place(p) - place(q) || (p.id < q.id ? -1 : 1));
+      const dk = 'str:' + x;
+      decls.set(dk, { key: dk, name: x, kind: 'member', block: list[0], users: new Set(list.slice(1)), member: null, line: 0, file: list[0].file.p, str: true });
+      list.slice(1).forEach((b) => { if (!usesOf.has(b)) usesOf.set(b, new Map()); usesOf.get(b).set(dk, true); });
+    });
 
     // Removed lines link the same way, through the old side's language server.
     const minusRow = new Map();
@@ -932,7 +1012,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const linkedBlocks = new Set(chains.flatMap((c) => [...c.blocks]));
     chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => { if (!linkedBlocks.has(x)) c.blocks.add(x); })); });
     chains.forEach((c) => {
-      const inside = [...decls.values()].filter((d) => c.blocks.has(d.block)).map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length })).filter((x) => x.n > 0);
+      const inside = [...decls.values()].filter((d) => c.blocks.has(d.block) && d.kind !== 'import').map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length })).filter((x) => x.n > 0);
       // In a ripple, the top parameter comes first: its callers don't pass it on from a
       // parameter of their own (the one where the change enters).
       const params = inside.filter((x) => x.d.kind === 'param').map((x) => x.d);
@@ -946,6 +1026,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const label = (d) => {
       if (!d) return '(changes)';
       if (d.overrides) return 'overrides ' + d.member;
+      if (d.str) return `“${d.name}”`;
       if (d.removed) return '− ' + label({ ...d, removed: false });
       if (d.model) return d.member;
       let m = d.member;
@@ -962,15 +1043,35 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     };
     // Chains with the same root name are one chain (a ripple and the star of its root).
     // A member's own chain and the ripple of one of its parameters are one chain too.
+    // A field and the constructor parameter that sets it (`this.field`) are one declaration: the
+    // field's chain is the constructor's chain. Fields set by the unnamed constructor go to it.
+    const fieldCtor = new Map();
+    files.forEach((f) => {
+      if (!f.newTree) return;
+      f.newTree.rootNode.descendantsOfType('constructor_param').forEach((cp) => {
+        const ids = cp.descendantsOfType('identifier');
+        let sig = cp.parent;
+        while (sig && !SIGNATURES.has(sig.type)) sig = sig.parent;
+        let owner = sig && sig.parent;
+        while (owner && !TYPES.has(owner.type)) owner = owner.parent;
+        const nm = owner && (owner.childForFieldName('name') || owner.namedChildren.find((x) => x.type === 'identifier'));
+        if (!ids.length || !sig || !nm) return;
+        const ctorName = nameOf(sig), cls = nm.text, key = cls + '.' + ids[ids.length - 1].text;
+        const ctorLabel = ctorName === cls ? cls + '()' : ctorName.includes('.') ? ctorName : cls + '.' + ctorName;
+        if (!fieldCtor.has(key) || ctorName === cls) fieldCtor.set(key, ctorLabel);
+      });
+    });
     const byName = new Map();
-    const mergeKey = (c, nm) => (c.root && c.root.kind === 'param' && c.root.member ? label({ ...c.root, kind: 'member', name: c.root.member.split('.').pop() }) : nm);
+    const mergeKey = (c, nm) => (c.root && c.root.kind === 'member' && fieldCtor.has(c.root.member) ? fieldCtor.get(c.root.member)
+      : c.root && c.root.kind === 'param' && c.root.member ? label({ ...c.root, kind: 'member', name: c.root.member.split('.').pop() }) : nm);
     chains.forEach((c) => {
       const nm = c.kind === 'group' && !c.root ? editLabel(c.group.edits[0]) : label(c.root);
       const key = mergeKey(c, nm);
-      c.name = nm;
+      c.name = c.root && c.root.kind === 'member' && fieldCtor.has(c.root.member) ? key : nm;
       if (!byName.has(key)) { byName.set(key, c); return; }
       const keep = byName.get(key);
       if (keep.root && keep.root.kind === 'param' && c.root && c.root.kind !== 'param') { keep.name = c.name; }
+      if (key === c.name || key === fieldCtor.get(keep.root && keep.root.member)) keep.name = key;
       c.blocks.forEach((b) => keep.blocks.add(b));
       [c.root, ...c.also].forEach((d) => { if (d && !keep.also.includes(d) && d !== keep.root) keep.also.push(d); });
     });
@@ -988,6 +1089,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     }));
     // A new type declared in a new file folds with that file.
     const foldKey = (c) => {
+      if (c.root && c.root.model && newModels.has(String(c.root.member).split('.')[0])) return 'model:' + String(c.root.member).split('.')[0];
       const fl = new Set([...c.blocks].map((b) => b.file));
       if (fl.size === 1 && [...fl][0].s === 'A') return 'file:' + [...fl][0].p;
       const t = c.root && (c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0]);
@@ -997,10 +1099,10 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     const folds = new Map();
     chains.forEach((c) => { const k = foldKey(c); if (k) { if (!folds.has(k)) folds.set(k, []); folds.get(k).push(c); } });
     folds.forEach((list, k) => {
-      if (list.length < 2 && !k.startsWith('file:')) return;
+      if (list.length < 2 && !k.startsWith('file:') && !k.startsWith('model:')) return;
       // Named after the type it is about, or the new type with most changes in a new file.
       const ownerType = (c) => c.root && (c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0]);
-      let typeName = k.startsWith('type:') ? k.slice(5) : null;
+      let typeName = k.startsWith('type:') || k.startsWith('model:') ? k.slice(k.indexOf(':') + 1) : null;
       if (!typeName) {
         const sizes = new Map();
         list.forEach((c) => { const t = ownerType(c); if (t && newTypes.has(t)) sizes.set(t, (sizes.get(t) || 0) + c.blocks.size); });
@@ -1033,7 +1135,9 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       const imported = [];
       b.rows.forEach((r) => {
         const m = r.type === '+' && /^\s*import\s+['"]([^'"]+)['"]/.exec(r.text);
-        if (m && !m[1].startsWith('package:') && !m[1].startsWith('dart:')) imported.push(path.normalize(path.join(path.dirname(b.file.p), m[1])));
+        const pkg = m && /^package:([^/]+)\/(.+)$/.exec(m[1]);
+        if (pkg && packageFile(pkg[1], pkg[2])) imported.push(packageFile(pkg[1], pkg[2]));
+        else if (m && !m[1].startsWith('package:') && !m[1].startsWith('dart:')) imported.push(path.normalize(path.join(path.dirname(b.file.p), m[1])));
       });
       if (!imported.length) return;
       chains.forEach((c) => {
@@ -1041,6 +1145,8 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
         if (uses) c.blocks.add(b);
       });
     });
+    // An import prefix (`as p`) starts no chain: its import joins the chains that use it.
+    decls.forEach((d) => { if (d.kind === 'import') chains.forEach((c) => { if ([...d.users].some((u) => c.blocks.has(u))) c.blocks.add(d.block); }); });
     // `part 'x.dart'` makes x.dart part of this library: chains with changes in x.dart take it.
     allBlocks.filter((b) => b.lang === 'dart').forEach((b) => {
       const parts = [];
@@ -1179,7 +1285,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       if (fam.has(c.id)) return;
       const stack = [c.id];
       fam.set(c.id, famId);
-      while (stack.length) { const x = stack.pop(); const ch = chains[x]; [...ch.uses, ...usedBy.get(x)].forEach((y) => { if (!fam.has(y)) { fam.set(y, famId); stack.push(y); } }); }
+      while (stack.length) { const x = stack.pop(); const ch = chains[x]; [...ch.uses, ...usedBy.get(x), ...ch.shares].forEach((y) => { if (!fam.has(y)) { fam.set(y, famId); stack.push(y); } }); }
       famId++;
     });
     chains.forEach((c) => { c.depth = depth.get(c.id); c.family = fam.get(c.id); });

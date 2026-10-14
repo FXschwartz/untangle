@@ -1,10 +1,10 @@
-# UX proposal v12: start from the chain map, end in the code
+# UX proposal v13: start from the chain map, end in the code
 
-> Draft v12, 2026-10-14. Replaces v11 (see "History" at the end).
+> Draft v13, 2026-10-14. Replaces v12 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 13).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 14).
 > Prototype sources: [prototype/](prototype/).
-> Test runs of these rules on #157, #166 and #162: [02-test-runs.md](02-test-runs.md).
+> Test runs of these rules on #157, #166, #162 and four Serverpod PRs: [02-test-runs.md](02-test-runs.md).
 
 ## Requirements
 
@@ -93,6 +93,8 @@ From the review of v11:
     "+N more" only when a level is still too busy.
 16. **Same change across declarations:** syntax only; the group view shows the declaration
     each place resolves to, and each can be marked on its own.
+17. **Names in strings:** a string that looks like a name links like one, beyond what the
+    language server sees.
 
 ## Rules
 
@@ -136,10 +138,16 @@ From the review of v11:
    its declaration with every change that uses it. A local variable does so only within its
    own member, and a brand-new function's parameters don't (calls link to the function).
 6. **A changed function, method, field or type starts a chain:** its declaration plus the
-   changes that use it. A member's chain and the ripple of its own parameters merge.
-7. **Tests follow their calls.** From each declaration a changed test uses, the language
-   server's outgoing calls are followed up to 3 levels inside the repository. The test links
-   to the first changed function on each path.
+   changes that use it.
+   - A member's chain and the ripple of its own parameters merge.
+   - A field and the constructor parameter that sets it (`this.field`) are one declaration:
+     the field's chain is the constructor's chain.
+7. **Tests follow their calls.** From each declaration a changed test uses, in production
+   code or in an unchanged test helper, the language server's outgoing calls are followed
+   breadth first, up to 3 levels inside the repository. The test links to the first changed
+   function on each path, whether its signature or its body changed.
+   - A test is a `*_test.dart` file, or a file under a `test*/` or `integration_test/`
+     directory.
 8. **A same-change group that names an identifier is a chain.**
 9. **Member cohesion.** A change that no other rule links joins the chains of its member.
    Changes that already belong to a chain stay out of other chains.
@@ -152,20 +160,33 @@ From the review of v11:
     - Chains that never leave a new file are one chain, named after the file's main new
       type (or the file, for tests).
     - A change of a new file that links to nothing joins that file's main chain.
+    - The field chains of a new YAML model are one chain per model, as for a new type.
 11. **Overrides.** The language server says what each changed method overrides
     (`dart/textDocument/super`).
     - Changed methods that override the same method, a framework's say, join one chain.
     - An override of a changed method links to it.
     - The members of `Object` (`toString`, `==`, `hashCode`) are left out.
 12. **Imports, parts and docs.**
-    - A new relative import joins the chains that, in the same file, use declarations from
-      the imported file.
+    - A new import of a file in the repository joins the chains that, in the same file, use
+      declarations from the imported file. A `package:` import counts when the package is in
+      the repository; with two pubspecs of the same name, it resolves to the one that has
+      the file.
+    - An import prefix (`as p`) starts no chain: its import joins the chains that use the
+      prefix.
     - A `part` directive joins the chains that have changes in its part file.
     - A Markdown change that names a chain's member or declaration in backticks joins that
       chain.
-13. **Generated code leads back to what it was generated from,** through an adapter per
+13. **Names in strings.** A string on a changed line, or a backticked span in Markdown, that
+    looks like a name: 4 to 80 characters of letters, digits, `_`, `.` or `-`, with a capital
+    after the first letter, an underscore, a dot, a dash or a digit.
+    - It links to the changed declaration with that name, when there is one.
+    - Otherwise, when two or more changes introduce it and one of them is code, they are a
+      chain named after the string (`“tail_runner_logs”`).
+    - Strings with `$` interpolation are left out, and so is a string in more than 15
+      changes.
+14. **Generated code leads back to what it was generated from,** through an adapter per
     generator. Each switches on by what the repository contains, on either side of the diff:
-    - **Serverpod** (`*.spy.yaml`): generated `Table`, `Include` and `Repository` classes map
+    - **Serverpod** (`*.spy.yaml`, `*.spy.yml`, `*.spy`): generated `Table`, `Include` and `Repository` classes map
       to the model class, a field to the model field, and a relation's `…Id` column to the
       relation. A doc-comment change in the model belongs to the field below it.
     - **Generated part files** (`*.g.dart`, `*.freezed.dart`: freezed, json_serializable,
@@ -177,19 +198,19 @@ From the review of v11:
     - **`.review.yaml`** at the repository root can add `generated:` patterns, turn an
       adapter on or off (`adapters:`), and declare YAML-model mappings of its own (`models:`,
       with `generated`, `source` and `classSuffixes`).
-14. A chain needs at least two members; same-change chains need two changes. Chains with
+15. A chain needs at least two members; same-change chains need two changes. Chains with
     exactly the same changes are one chain. Changes in no chain are listed by file.
-15. **Name:** the best declaration inside the chain: what remains before what was removed,
+16. **Name:** the best declaration inside the chain: what remains before what was removed,
     members and types before parameters and locals, public before private, then the most
     used. In a ripple, the top parameter comes first: the one whose callers don't pass it on
     from a parameter of their own.
-16. **Graph:**
+17. **Graph:**
     - one node per member;
     - nodes that are all the same change, 3 or more times, collapse into one;
     - the tests of one test file are one node;
     - arrows go from a change to what it uses;
     - layers are the distance from the root.
-17. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
+18. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
 
 ### Chain of chains
 
@@ -199,10 +220,12 @@ From the review of v11:
   core.
 - **Depth** is the longest path from a chain that nothing uses, ignoring back edges of
   cycles.
-- **Families** are chains connected by "uses".
+- **Families** are chains connected by "uses" or by shared changes.
 - **The chain map** lays a family out by depth:
   - it draws only direct dependencies (a transitive reduction);
-  - arrows that skip levels are faint.
+  - arrows that skip levels are faint;
+  - one dashed line joins each group of chains connected by "uses" to the chain it shares
+    the most changes with.
 
 ### Same change
 
@@ -284,14 +307,14 @@ From the review of v11:
 | Edits | 740 | 432 |
 | Same-change groups | 33 | 16 |
 | Changes with 2+ same-change badges (most on one) | 5 (2) | 1 (2) |
-| Chains (across files / within a file) | 56 (33 / 23) | 41 (15 / 26) |
-| Changes in a chain / not in a chain | 550 / 30 | 191 / 74 |
+| Chains (across files / within a file) | 62 (39 / 23) | 50 (24 / 26) |
+| Changes in a chain / not in a chain | 551 / 29 | 192 / 73 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
 Changes went up from 387 because each declaration and each test is now a change of its own.
 
-- **Largest chain:** `OfflineSyncDatabase.mergeChanges`, with 251 changes in 43 files
-  (+1,290 −371), drawn as 38 nodes. The 154 identical call-site edits are one node, and so
+- **Largest chain:** `OfflineSyncDatabase.mergeChanges`, with 253 changes in 45 files
+  (+1,312 −372), drawn as 40 nodes. The 154 identical call-site edits are one node, and so
   are each test file's tests.
 - **Removed declarations:** 8 chains start at one, such as
   `− OfflineSyncSpaceManager._cachedCurrentNode` with 7 changes.
@@ -320,10 +343,12 @@ Changes went up from 387 because each declaration and each test is now a change 
   `mergeChanges` calls), `hlcManagerFor → spaceIdFor` (14), `nodeUuid → .nodeUuidFor(space)`
   (14). What went away was punctuation (`(` ×9, `!` ×6, `,` ×5, `}` ×4, `'` → `"` ×4, empty
   `///` ×8) and self-repeats (one doc-comment line counted 5 times).
-- **Chain of chains:** the main family has 39 chains in 6 levels, with the model chains near
-  the bottom. Tests use `mergeChanges`, which uses `_transactionAs` and the recorder
-  wrappers. Those use the space manager and context locks, which use `_UserClock` and the
-  cache fields. Fifteen chains link to no other.
+- **Chain of chains:** the main family has 61 chains in 7 levels, 10 of them joined only by
+  shared changes, with the model chains at the bottom. Tests use `mergeChanges`, which uses
+  `transactionForUser`. That one uses the recorder's `getOrCreateUserNode` and the
+  `userId → spaceId` group, which lead through `_initializeOnce` to the space manager's
+  `getOrCreateUserNode`, and that one uses the model chains and the cache fields. One chain
+  links to no other.
 - **Member cohesion (Q1):** limiting it to changes no rule links keeps the same 550 changes in
   chains and shrinks the chains it used to inflate: `− OfflineSyncSpace.currentNode` 66 → 48,
   `_transactionAs` 54 → 38, and chain memberships 1,014 → 869.
@@ -332,12 +357,12 @@ Changes went up from 387 because each declaration and each test is now a change 
   reads them through the generated files (`User(email)`, `Account.billing_email`), and the
   third commit's `.review.yaml` turns protobuf off, so `.pb.dart` is reviewed as normal
   code.
-- **Still outside a chain (30):**
+- **Still outside a chain (29):**
 
   | Reason | Changes |
   |---|---:|
   | Comment-only edits of members in no chain | 12 |
-  | Markdown or YAML naming nothing in a chain | 9 |
+  | Markdown or YAML naming nothing in a chain | 8 |
   | One-line Dart edits using only unchanged code | 9 |
 
 ## Cost of the language servers (measured on #168)
@@ -417,8 +442,14 @@ machine's through a forwarded port.
 
 ## Open questions
 
-None right now: Q1–Q5 from v11 are decided (decisions 12–16). The next ones will come from
-building it.
+1. **Families and shared tests.** Chains that share changes are one family since v13. Most
+   shared changes are tests that reach two chains, so on a large PR almost everything is one
+   family: 61 of #168's 62 chains, and all 14 of #166's. The map shows each such join as one
+   dashed line. Keep counting shared tests, or count only shared changes outside tests? That
+   would leave #168 with 4 families, #166 with 5 and Serverpod #5471 with 10, and #5864's
+   feature would stay one family.
+   - *Suggestion:* keep them. The dashed lines say why chains are together, and every chain
+     gets a place on a map; in v12, 15 of #168's chains were on none.
 
 ## History
 
@@ -466,6 +497,10 @@ building it.
   - Decided: Q1–Q5 as proposed (cohesion only for unlinked changes, adapters per generator,
     chain order by level, tests grouped by file in graphs, same change by syntax with
     declarations shown).
+- **v12:** Q1–Q5 applied.
+  - Asked: run the rules on four Serverpod PRs, a much larger repository. They found nine
+    problems ([02-test-runs.md](02-test-runs.md)).
+  - Feedback: fix all nine as proposed.
 
 ## References
 
