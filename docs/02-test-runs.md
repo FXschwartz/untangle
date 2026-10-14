@@ -98,3 +98,49 @@ Nothing in the rules is specific to #168, but several of them only worked becaus
 The fixes above are general. Each one should be run against all four PRs with the harness
 before it's adopted, and the next PRs to add are ones with moved files and large new
 features.
+
+## After the fixes
+
+Every problem above became a rule, and all four PRs ran again with the same rules
+([UX proposal v10](01-ux-proposal.md)). Changes went up because each declaration and each
+test is now a change of its own.
+
+| PR | Changes | Chains | Changes in a chain | Outside | Identical chains | Moved declarations |
+|---|---:|---:|---:|---:|---:|---:|
+| #168 | 387 → 580 | 65 → 54 | 93% → 95% | 28 → 30 | 1 → 0 | 0 |
+| #157 | 52 → 102 | 13 → 11 | 85% → 97% | 8 → 3 | 1 → 0 | 6 |
+| #166 | 58 → 123 | 12 → 14 | 74% → 91% | 15 → 11 | 2 → 0 | 0 |
+| #162 | 64 → 104 | 5 → 10 | 83% → 92% | 11 → 8 | 0 | 0 |
+
+1. **Call sites.** A changed call links to the function it calls when that signature
+   changed: a positional argument joins the parameter in the same position, and the called
+   function is resolved even when its name sits above the hunk (35 such calls in #168). A
+   token whose definition differs between the two sides counts as changed.
+   - #166: `collectPendingChanges` is in the `_streamPendingChanges` chain with the whole
+     `transaction` ripple, through eight functions.
+   - #162: the clock fix is the chain `HlcManager(currentNode)`.
+2. **Moved code.** #157 shows `_PendingInsertAttempts` as moved: four members unchanged,
+   the header with one change, and `isEmpty` as the only removal. `_flushInsertAttempts`
+   moved into `_MergeWriteBatch` with 8 changes.
+3. **Big blocks.** Blocks split at declarations and tests. `merge_write_batch.dart` is 14
+   changes, one per declaration, and each new test file splits per `test(...)`.
+4. **Names.** #162's main chains are `_OfflineSyncDatabaseWatch`, `mergeWhereWithVisibility`
+   and `copyInclude`. #166's ripple is named after the parameter where it enters.
+5. **Duplicates.** No two chains have the same changes. A new or removed type is one chain
+   with its members (`_MergeWriteBatch`, `_ProjectionReader`).
+6. **Behavior tests.** Tests follow the language server's call hierarchy up to three calls
+   deep: #157's new tests reach `_MergeWriteBatch.apply` and `_applyMergeInsert` through
+   `mergeChanges`. Tests in a chain: #157 34/34, #166 84/89, #162 33/33, #168 417/424.
+7. **Small ones.** `part` directives link to their part file's chains. YAML edits read as
+   whole words: `0.0.10 → 0.0.11` ×5 and `'>=4.0.4 <4.1.0' → ^4.1.0-beta.3` ×21.
+
+Two rules had to be narrowed after the first try, both found by these runs:
+- Linking a call to every changed parameter of the callee merged #168 into one chain of 397
+  changes; matching the argument's position fixed it.
+- Locals in shared test setup, and parameters of brand-new helpers, tied whole test files
+  together; a local now only links inside its own member, and a new function's parameters
+  don't ripple.
+
+**Still open:** the two overrides of `Database.watch` in #162 (the real one and a test
+double) aren't linked (Q6 in the proposal). Moves are detected for whole declarations
+only, and only in Dart.

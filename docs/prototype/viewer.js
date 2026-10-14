@@ -5,7 +5,8 @@
   const C = window.ReviewCore;
   const $ = (sel, el) => (el || document).querySelector(sel);
   const MODEL = JSON.parse($('#d-model').textContent);
-  const DEFS = JSON.parse($('#d-defs').textContent);
+  const DEFS_ALL = JSON.parse($('#d-defs').textContent);
+  const defsNow = () => { if (DEFS_ALL.targets) return DEFS_ALL; const d = DEFS_ALL[state.compare]; return typeof d === 'string' ? DEFS_ALL[d] : d; };
   const REFS = JSON.parse($('#d-refs').textContent);
   const DEFS_OLD = JSON.parse($('#d-defs-old').textContent);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -24,22 +25,21 @@
   const state = {
     compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
     view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null,
-    rev: { base: new Set(), since: new Set() },
-    blockDiff: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
+    rev: {},
+    blockDiff: new Set(), moveOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
     search: { q: '', scope: 'unreviewed' },
   };
   try {
-    const saved = JSON.parse(localStorage.getItem('bcr-v7') || 'null');
+    const saved = JSON.parse(localStorage.getItem('bcr-v10') || 'null');
     if (saved) {
-      state.rev.base = new Set(saved.rev.base || []);
-      state.rev.since = new Set(saved.rev.since || []);
+      Object.entries(saved.rev || {}).forEach(([k, v]) => { state.rev[k] = new Set(v); });
       state.layout = saved.layout === 'split' ? 'split' : 'unified';
       state.showReviewedDiff = !!saved.showReviewedDiff;
     }
   } catch (e) { /* storage unavailable */ }
   function save() {
     try {
-      localStorage.setItem('bcr-v7', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
+      localStorage.setItem('bcr-v10', JSON.stringify({ rev: Object.fromEntries(Object.entries(state.rev).map(([k, v]) => [k, [...v]])), layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
     } catch (e) { /* ignore */ }
   }
 
@@ -98,7 +98,7 @@
   }
 
   // ---------- review helpers
-  const rev = () => state.rev[state.compare];
+  const rev = () => state.rev[state.compare] || (state.rev[state.compare] = new Set());
   const done = (b) => b.edits.every((id) => rev().has(id));
   function setEdits(ids, on) { ids.forEach((id) => (on ? rev().add(id) : rev().delete(id))); save(); }
   function stats(blocks) {
@@ -140,7 +140,8 @@
 
   // ---------- code rendering
   function lineDefs(path, n) {
-    const arr = n != null && DEFS.defs[path] && DEFS.defs[path][n];
+    const D = defsNow();
+    const arr = n != null && D.defs[path] && D.defs[path][n];
     return arr ? new Map(arr.map(([c, , ti]) => [c, ti])) : null;
   }
   function oldLineDefs(path, o) {
@@ -205,6 +206,43 @@
     const oldNo = meta.t === '-' ? meta.o : null;
     return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '');
   }
+  // A moved declaration. The removed copy is one line pointing at the new place. The added
+  // copy shows the diff between the two bodies: unchanged lines are moved code, and long runs
+  // of them fold.
+  function movedAwayHtml(b) {
+    const to = M().files[b.movedTo.f];
+    const what = b.movedTo.changes ? `with ${b.movedTo.changes} change${b.movedTo.changes > 1 ? 's' : ''}` : 'unchanged';
+    return `<div class="ln mv-away"><span class="g"></span><span class="no"></span><span class="no"></span><span class="sg">↦</span><span class="tx">${b.len} line${b.len > 1 ? 's' : ''} moved to <button type="button" class="linkish" data-open="${esc(to.p)}" data-line="${b.movedTo.n}">${esc(fileName(to.p))}:${b.movedTo.n}</button>, ${what}</span><span class="bdgs"></span></div>`;
+  }
+  function movedHtml(f, b, ctx) {
+    const from = M().files[b.move.f];
+    const fromBlock = M().blockById.get(b.move.b);
+    const fromLine = fromBlock ? from.hunks[fromBlock.hunk].meta[fromBlock.first].o : '';
+    const rows = b.move.rows;
+    const changed = rows.filter((r) => r[0] !== ' ').length;
+    const d = done(b);
+    const open = state.moveOpen.has(b.id);
+    const groups = new Set(b.edits.map((id) => M().edits[id].group).filter((g) => g != null));
+    let h = `<div class="ln mv-head${d && b.edits.length ? ' rvd' : ''}"><span class="g">${b.edits.length ? tickHtml(b) : ''}</span><span class="no"></span><span class="no"></span><span class="sg">↤</span><span class="tx">Moved from <button type="button" class="linkish" data-open="${esc(from.p)}">${esc(fileName(from.p))}:${fromLine}</button> · ${b.edits.length ? `${b.edits.length} change${b.edits.length > 1 ? 's' : ''}` : 'no changes'}</span><span class="bdgs">`
+      + [...groups].map((g) => { const gr = M().groupById.get(g); return `<button type="button" class="bdg grp" data-group="${g}">same change ×${gr.count}</button>`; }).join('')
+      + `<button type="button" class="dt" data-act="toggle-move" data-block="${esc(b.id)}">${open ? 'Fold moved lines' : 'Show moved lines'}</button></span></div>`;
+    // Keep each change with 3 lines of context; fold the rest unless opened.
+    const keep = new Set();
+    rows.forEach((r, i) => { if (r[0] !== ' ') for (let k = Math.max(0, i - 3); k <= Math.min(rows.length - 1, i + 3); k++) keep.add(k); });
+    const fromFile = { p: from.p, lang: f.lang };
+    let skipped = 0;
+    const flush = () => { if (skipped) h += `<div class="ln skip mv"><span class="g"></span><span class="no"></span><span class="no"></span><span class="sg"></span><span class="tx">⋯ ${skipped} moved line${skipped > 1 ? 's' : ''}, unchanged</span></div>`; skipped = 0; };
+    rows.forEach(([t, text, o, n, ranges], i) => {
+      if (!open && !keep.has(i)) { skipped++; return; }
+      flush();
+      const meta = { t: t === ' ' ? ' ' : t, o: t === '+' ? null : o, n: t === '-' ? null : n };
+      if (t === ' ') h += uRow(f, { t: ' ', o, n }, text, null, { cls: 'mv' + (d ? ' rvd' : ''), sign: '', refs: !ctx.noRefs });
+      else if (t === '-') h += uRow(fromFile, meta, text, ranges, { cls: 'del' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs });
+      else h += uRow(f, meta, text, ranges, { cls: 'add' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs });
+    });
+    flush();
+    return h;
+  }
   // Rows [start, end) of a hunk. Reviewed changes stay visible: by default their diff is
   // hidden and the new code reads as muted context.
   function rowsHtml(f, hi, start, end, ctx) {
@@ -216,6 +254,10 @@
       const meta = h.meta[ri];
       const [t, text, ranges] = h.rows[ri];
       const b = meta.block;
+      if (b && (b.move || b.movedTo)) {
+        if (!placed.has(b.id)) { placed.add(b.id); out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b); }
+        continue;
+      }
       if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs }); continue; }
       const d = done(b);
       const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
@@ -261,6 +303,11 @@
     while (ri < end) {
       const meta = h.meta[ri];
       const b = meta.block;
+      if (b && (b.move || b.movedTo)) {
+        out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b);
+        while (ri < end && h.meta[ri].block === b) ri++;
+        continue;
+      }
       if (!b || !b.edits.length) {
         const [, text] = h.rows[ri];
         out += `<div class="sl" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx' })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '');
@@ -371,7 +418,7 @@
         + `<button type="button" class="btn xs primary" data-act="peek-go">Go to it</button><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
         + `<div class="pk-code">${usageContextHtml(selHl)}</div>`;
     } else if (hasDef) {
-      const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : DEFS.targets[p.ti];
+      const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : defsNow().targets[p.ti];
       const where = (p.old ? `old side · ${M().raw.left} · ` : '') + (t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package');
       h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>
         <div class="pk-code">${t.code.map((line, i) => {
@@ -753,6 +800,8 @@
     const v = state.view;
     main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : renderFile(v.path);
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
+    const title = $('#vw-title');
+    if (title && M().raw.title) title.innerHTML = `<b>${esc(M().raw.title.split(' ')[0])}</b> ${esc(M().raw.title.split(' ').slice(1).join(' '))}`;
     viewer.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
     viewer.classList.toggle('split', state.layout === 'split');
     const rd = $('#vw-revdiff');
@@ -843,6 +892,7 @@
     if (act === 'peek-def') { state.peek.sel = null; return refreshPeek(t, '[data-act="peek-use"]'); }
     if (act === 'clear-focus') { state.focus = null; return render(); }
     if (act === 'toggle-block') { const b = m.blockById.get(d.block); toggleBlocks([b]); return render(); }
+    if (act === 'toggle-move') { state.moveOpen.has(d.block) ? state.moveOpen.delete(d.block) : state.moveOpen.add(d.block); return render(); }
     if (act === 'toggle-diff') { state.blockDiff.has(d.block) ? state.blockDiff.delete(d.block) : state.blockDiff.add(d.block); return render(); }
     if (act === 'toggle-hunk') {
       const btn = t.getAttribute('aria-expanded') === 'true';

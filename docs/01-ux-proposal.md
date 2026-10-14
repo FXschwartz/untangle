@@ -1,8 +1,8 @@
-# UX proposal v9: start from the chain map, end in the code
+# UX proposal v10: start from the chain map, end in the code
 
-> Draft v9, 2026-10-13. Replaces v8 (see "History" at the end).
+> Draft v10, 2026-10-13. Replaces v9 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 10).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 11).
 > Prototype sources: [prototype/](prototype/).
 > Test runs of these rules on #157, #166 and #162: [02-test-runs.md](02-test-runs.md).
 
@@ -56,6 +56,9 @@ From the review of v8:
   of leaving the view; clicking it again goes to it.
 - **Usage snippets are syntax highlighted.**
 
+From the review of v9 and the test runs ([02-test-runs.md](02-test-runs.md)):
+- **Fix every problem the runs on #157, #166 and #162 found.**
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
@@ -77,46 +80,85 @@ From the review of v8:
 
 ## Rules
 
+### Changes
+
+1. A change is a run of changed lines in a hunk, split where a declaration unit starts:
+   - each top-level declaration (consecutive directives count as one);
+   - each member of a class, mixin, extension or enum;
+   - each `test(...)`, `group(...)`, `setUp...` or `tearDown...` call.
+   A unit starts at its doc comments and annotations. Members written right under each
+   other, with no blank line, stay together. A block with removed and added lines keeps its
+   removed lines with the added lines they were diffed against.
+2. **Moved code.** A removed unit and an added unit with the same full name and kind, or
+   the same short name and at least half their tokens alike, are one moved declaration.
+   - Its change is the diff between the two bodies. Only the tokens that diff changed count
+     as changed, for same changes and for chains.
+   - The removed copy is shown as one line pointing at the new place, and its old usages
+     link to the moved copy.
+   - A move with no changes needs no review.
+
 ### Chains
 
 1. Each changed line's identifiers are resolved with a language server:
-   - added lines by one running on the PR head;
-   - removed lines by one running on the comparison's old side, in its own checkout.
+   - added lines on the PR head, plus the called function of every changed argument
+     list, even when its name sits above the hunk;
+   - removed lines on the comparison's old side, in its own checkout.
 2. A changed token on one change that resolves to a declaration on a changed line of
    another change links the two changes, on either side.
-   - A declaration whose name token was replaced (a rename) is one declaration, so its
-     old and new usages link to it.
+   - A renamed or moved declaration is one declaration, so its old and new usages link
+     to it.
    - Chains rooted at a removed declaration are named with "−".
-3. **Parameters and local variables pass a chain on.** Union-find runs over changes: a
-   parameter or local declared in one change joins it with every change that uses it.
-4. **A changed function, method, field or type starts a chain:** its declaration plus the
+3. **A name that now means something else counts as changed.** A token whose text stayed
+   (an argument label, say) but whose definition differs between the two sides (by file,
+   name and enclosing member) links like a changed token.
+4. **Calls follow signatures.** A call whose argument list changed, to a function whose
+   signature changed:
+   - a changed positional argument joins the parameter in the same position, when that
+     parameter changed (a named argument already resolves to its parameter);
+   - with no changed parameter, the call links to the function.
+5. **Parameters pass a chain on.** Union-find runs over changes: a changed parameter joins
+   its declaration with every change that uses it. A local variable does so only within its
+   own member, and a brand-new function's parameters don't (calls link to the function).
+6. **A changed function, method, field or type starts a chain:** its declaration plus the
    changes that use it. A member's chain and the ripple of its own parameters merge.
-5. **A same-change group that names an identifier is a chain,** so a rename like
-   `withCurrentNodeHlc → withUserClock` is tracked together.
-6. **Member cohesion.** A chain takes every change of the members it touches.
+7. **Tests follow their calls.** From each declaration a changed test uses, the language
+   server's outgoing calls are followed up to 3 levels inside the repository. The test links
+   to the first changed function on each path.
+8. **A same-change group that names an identifier is a chain.**
+9. **Member cohesion.** A chain takes every change of the members it touches.
    - In test files, the member is the enclosing `test(...)`.
-   - A comment-only change belongs to the declaration it documents.
-7. **Imports and docs.**
-   - A new relative import joins the chains that, in the same file, use declarations
-     from the imported file.
-   - A Markdown change that names a chain's member or declaration in backticks joins
-     that chain.
-8. **Generated code leads back to its model.** A usage that resolves into generated code
-   (`**/generated/**`) links to the change of the model field it was generated from
-   (`**/*.spy.yaml`), on either side.
-   - Serverpod adapter: generated `Table`, `Include` and `Repository` classes map to the
-     model class, and a relation's `…Id` column maps to the relation field.
-   - A doc-comment change in the model belongs to the field below it.
-9. A chain needs at least two members; same-change chains need two changes. Changes in
-   no chain are listed by file.
-10. **Name:** the declaration with the most usages inside the chain, or the edit itself
-   for a same-change chain.
-11. **Graph:**
+   - A comment-only change belongs to the declaration it documents, unless the block holds
+     that declaration itself.
+10. **New code stays together.**
+    - A new or removed type is one chain with its members; a new type declared in a new
+      file folds with that file.
+    - Chains that never leave a new file are one chain, named after the file's main new
+      type (or the file, for tests).
+    - A change of a new file that links to nothing joins that file's main chain.
+11. **Imports, parts and docs.**
+    - A new relative import joins the chains that, in the same file, use declarations from
+      the imported file.
+    - A `part` directive joins the chains that have changes in its part file.
+    - A Markdown change that names a chain's member or declaration in backticks joins that
+      chain.
+12. **Generated code leads back to its model.** A usage that resolves into generated code
+    (`**/generated/**`) links to the change of the model field it was generated from
+    (`**/*.spy.yaml`), on either side.
+    - Serverpod adapter: generated `Table`, `Include` and `Repository` classes map to the
+      model class, and a relation's `…Id` column maps to the relation field.
+    - A doc-comment change in the model belongs to the field below it.
+13. A chain needs at least two members; same-change chains need two changes. Chains with
+    exactly the same changes are one chain. Changes in no chain are listed by file.
+14. **Name:** the best declaration inside the chain: what remains before what was removed,
+    members and types before parameters and locals, public before private, then the most
+    used. In a ripple, the top parameter comes first: the one whose callers don't pass it on
+    from a parameter of their own.
+15. **Graph:**
     - one node per member;
     - nodes that are all the same change, 3 or more times, collapse into one;
     - arrows go from a change to what it uses;
     - layers are the distance from the root.
-12. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
+16. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
 
 ### Chain of chains
 
@@ -149,6 +191,8 @@ From the review of v8:
      description.
 5. Edits with the same description form a group. Groups that always occur in the same
    blocks merge. Punctuation alone never forms a group.
+   - In languages without a grammar (YAML, Markdown), an edit is described by its whole
+     words as written, so `0.0.10 → 0.0.11` is not "10 → 11".
 6. A group instance shows each edit's rows, extended to its whole syntax nodes, with one
    line of context. Small changes are shown whole.
 
@@ -179,6 +223,9 @@ From the review of v8:
 - **Each view has its own hunks.** A chain section shows each change with 3 lines of
   context, merged when they touch. Folding a hunk in one place never folds another.
 - **Clicking a graph node** shows only that node's code and dims unrelated nodes.
+- **Moved code:** the added copy shows "Moved from file:line" and the diff of the two
+  bodies. Unchanged moved lines are tinted and long runs of them fold. The removed copy is
+  one line, "N lines moved to file:line".
 - **Peek:** the definition on top, the changed usages below. Clicking a usage shows its
   code in the peek, with the usage line marked; clicking it again, or "Go to it", opens
   it. "Back to definition" returns. Usage snippets are highlighted like the code.
@@ -192,29 +239,29 @@ From the review of v8:
 | | vs main (e0598c1) | vs snapshot at 0540639 |
 |---|---:|---:|
 | Hand-written files with changes | 66 | 24 |
-| Change blocks | 387 | 180 |
-| Edits | 549 | 347 |
-| Same-change groups | 25 | 12 |
+| Changes | 580 | 265 |
+| Edits | 740 | 432 |
+| Same-change groups | 33 | 16 |
 | Changes with 2+ same-change badges (most on one) | 5 (2) | 1 (2) |
-| Chains (across files / within a file) | 65 (36 / 29) | 41 (13 / 28) |
-| Changes in a chain / not in a chain | 359 / 28 | 133 / 47 |
+| Chains (across files / within a file) | 54 (31 / 23) | 40 (15 / 25) |
+| Changes in a chain / not in a chain | 550 / 30 | 191 / 74 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
-- **Largest chain:** `OfflineSyncDatabase.mergeChanges(userId)`, with 184 changes in 38
-  files (+2,130 −191), drawn as 11 nodes. The 154 identical call-site edits are one node.
-- **`OfflineSyncDatabase.recordSyncCheckpoint(spaceId)`,** the `userId → spaceId`
-  rename, has 16 changes in 6 files.
-- **Removed declarations:** 10 chains start at one, such as
-  `− OfflineSyncSpaceManager._getOrCreate(transaction)` with 12 changes.
+Changes went up from 387 because each declaration and each test is now a change of its own.
+
+- **Largest chain:** `OfflineSyncDatabase.mergeChanges`, with 254 changes in 43 files
+  (+1,307 −371), drawn as 52 nodes. The 154 identical call-site edits are one node.
+- **Removed declarations:** 8 chains start at one, such as
+  `− OfflineSyncSpaceManager._cachedCurrentNode` with 12 changes.
 - **Old-side language server:** it resolved 1,795 of 1,846 removed-line identifiers
   (main) and 1,223 of 1,246 (snapshot).
 - **Model chains:**
 
   | Chain | Changes | Files |
   |---|---:|---:|
-  | `− OfflineSyncSpace.currentNode` | 64 | 18 |
-  | `CrdtNode.localUserUuid` | 27 | 11 |
-  | `OfflineSyncSpace.lastHlc` | 6 | 6 |
+  | `− OfflineSyncSpace.currentNode` | 66 | 18 |
+  | `CrdtNode.localUserUuid` | 31 | 11 |
+  | `OfflineSyncSpace.lastHlc` | 11 | 6 |
 
 - **Same change, v6 → v7:**
 
@@ -231,17 +278,17 @@ From the review of v8:
   `mergeChanges` calls), `hlcManagerFor → spaceIdFor` (14), `nodeUuid → .nodeUuidFor(space)`
   (14). What went away was punctuation (`(` ×9, `!` ×6, `,` ×5, `}` ×4, `'` → `"` ×4, empty
   `///` ×8) and self-repeats (one doc-comment line counted 5 times).
-- **Chain of chains:** the main family has 57 chains in 9 levels, with the model chains at
-  the bottom. Tests use
-  `mergeChanges(userId)`, which uses `_transactionAs` and the recorder wrappers. Those use
-  the space manager and context locks, which use `_UserClock` and the cache fields.
-- **Still outside a chain (28):**
+- **Chain of chains:** the main family has 37 chains in 6 levels, with the model chains near
+  the bottom. Tests use `mergeChanges`, which uses `_transactionAs` and the recorder
+  wrappers. Those use the space manager and context locks, which use `_UserClock` and the
+  cache fields. Ten chains link to no other.
+- **Still outside a chain (30):**
 
   | Reason | Changes |
   |---|---:|
   | Comment-only edits of members in no chain | 12 |
   | Markdown or YAML naming nothing in a chain | 9 |
-  | Dart edits using only unchanged code (test names, package imports) | 7 |
+  | One-line Dart edits using only unchanged code | 9 |
 
 ## Cost of the language servers (measured on #168)
 
@@ -321,7 +368,7 @@ machine's through a forwarded port.
 ## Open questions
 
 - **Q1.** Member cohesion makes chains complete but larger
-  (`− OfflineSyncSpace.currentNode` reaches 64 changes). Should it stay?
+  (`− OfflineSyncSpace.currentNode` reaches 66 changes). Should it stay?
 - **Q2.** Model adapters: should each generator ship one (Serverpod, freezed,
   json_serializable, protobuf), or should the mapping be declared in `.review.yaml`?
 - **Q3.** How should chains inside a family be ordered: by level, or by what is left to
@@ -333,6 +380,9 @@ machine's through a forwarded port.
   resolve each instance to the same declaration would split it into six, but it would
   also split a class rename from its constructor calls and an interface method from its
   override.
+- **Q6.** Overrides: in #162 a test double overrides the same new `watch` method as the
+  real database, and nothing links the two. Should changes that override the same method
+  join one chain?
 
 ## History
 
@@ -370,6 +420,10 @@ machine's through a forwarded port.
   - Decided: one language server with both checkouts, and TypeScript for the server.
   - Feedback: preview a changed usage inside the peek, highlighted, and go to it on a
     second click.
+- **v9:** usage previews in the peek.
+  - Asked: how hard-coded is it to #168? The rules ran unchanged on #157, #166 and #162 and
+    found seven problems ([02-test-runs.md](02-test-runs.md)).
+  - Feedback: fix all of them.
 
 ## References
 

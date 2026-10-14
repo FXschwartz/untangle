@@ -19,7 +19,11 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const [REPO, HEADDIR, DIFF, DEFS, OUT, ...OLD_ARGS] = process.argv.slice(2);
+const [REPO, HEADDIR, DIFF, DEFS, OUT, ...REST] = process.argv.slice(2);
+// calls=<calls.json>: outgoing calls reachable from what changed tests call (lsp_calls.py).
+const CALLS_ARG = REST.find((a) => a.startsWith('calls='));
+const CALLS = CALLS_ARG ? JSON.parse(fs.readFileSync(CALLS_ARG.slice(6), 'utf8')) : null;
+const OLD_ARGS = REST.filter((a) => a !== CALLS_ARG);
 // The old side of each comparison has its own checkout and language-server answers.
 const OLD = Object.fromEntries(OLD_ARGS.map((a) => { const [name, dir, defs] = a.split(':'); return [name, { dir: path.resolve(dir) + '/', raw: JSON.parse(fs.readFileSync(defs, 'utf8')).raw }]; }));
 const HEAD = path.resolve(HEADDIR) + '/';
@@ -40,6 +44,7 @@ const norm = (s) => s.replace(/\s+/g, ' ').trim();
 const CODE_KINDS = new Set(['id', 'ty', 'kw', 'num', 'ann', 'key']);
 const SIGNATURES = new Set(['method_signature', 'function_signature', 'getter_signature', 'setter_signature', 'constructor_signature', 'factory_constructor_signature', 'operator_signature', 'redirecting_factory_constructor_signature', 'constant_constructor_signature']);
 const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_declaration', 'enum_declaration', 'extension_type_declaration']);
+const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
 
 (async () => {
   await Parser.init();
@@ -81,6 +86,62 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     }
     return null;
   }
+  // Declaration units: each top-level declaration (consecutive directives count as one), each
+  // member of a class, mixin, extension or enum, and each test(...)/group(...) call. A unit
+  // starts at its doc comments and annotations. Change blocks are split where a unit starts.
+  const TEST_CALLS = /^(test|group|setUp|setUpAll|tearDown|tearDownAll|testWidgets)\s*\(/;
+  const isLead = (n) => n.type === 'comment' || n.type === 'documentation_comment' || n.type === 'annotation' || n.type === 'marker_annotation';
+  const isDirective = (n) => /directive|import_or_export|library_name/.test(n.type);
+  function unitStart(n) {
+    let start = n.startPosition.row;
+    for (let p = n.previousSibling; p && isLead(p) && p.endPosition.row >= start - 1; p = p.previousSibling) start = p.startPosition.row;
+    return start + 1;
+  }
+  function unitStarts(tree) {
+    const out = new Set();
+    if (!tree) return out;
+    const visit = (n) => {
+      const container = n.type === 'program' || n.type === 'class_body' || n.type === 'extension_body' || n.type === 'enum_body' || n.type === 'block';
+      let prevDirective = false, prevEnd = -2;
+      for (let i = 0; i < n.childCount; i++) {
+        const c = n.child(i);
+        let unit = false;
+        if (n.type === 'program') {
+          if (isDirective(c)) { unit = !prevDirective; prevDirective = true; }
+          else if (!isLead(c) && c.type !== ';' && c.type !== 'function_body') { unit = true; prevDirective = false; }
+        } else if (n.type === 'class_body' || n.type === 'extension_body' || n.type === 'enum_body') {
+          unit = c.type === 'declaration' || SIGNATURES.has(c.type) || c.type === 'enum_constant';
+        } else if (n.type === 'block') {
+          unit = c.type === 'expression_statement' && TEST_CALLS.test(c.text);
+        }
+        if (unit) {
+          // A member written right under the previous one, with no blank line, doc comment or
+          // annotation between them, stays in the same unit (a run of fields, say).
+          const start = unitStart(c);
+          const lead = start !== c.startPosition.row + 1;
+          if (lead || c.startPosition.row > prevEnd + 1 || n.type === 'program' && isDirective(c)) out.add(start);
+        }
+        if (container && !isLead(c) && c.type !== '{' && c.type !== '}') prevEnd = c.endPosition.row;
+        if (c.childCount && c.type !== 'string_literal') visit(c);
+      }
+    };
+    visit(tree.rootNode);
+    return out;
+  }
+  // Where a change block splits. Pure additions split where a new-side unit starts, pure
+  // deletions where an old-side unit starts. A mixed block keeps its removed lines with the
+  // added lines they were diffed against, and only splits the added lines after them.
+  function splitPoints(b, newStarts, oldStarts) {
+    const cuts = [];
+    if (!b.dels && newStarts) b.rows.forEach((r, i) => { if (i && newStarts.has(r.n)) cuts.push(i); });
+    else if (!b.adds && oldStarts) b.rows.forEach((r, i) => { if (i && oldStarts.has(r.o)) cuts.push(i); });
+    else if (newStarts) {
+      let last = -1;
+      b.rows.forEach((r, i) => { if (r.type === '-' || (r.toks && r.toks.some((tk) => tk.peer))) last = i; });
+      b.rows.forEach((r, i) => { if (i > last && r.type === '+' && newStarts.has(r.n)) cuts.push(i); });
+    }
+    return cuts;
+  }
   function nameOf(sig) {
     const byField = sig.childForFieldName && sig.childForFieldName('name');
     if (byField) return byField.text;
@@ -103,8 +164,10 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         if (s && SIGNATURES.has(s.type)) member = nameOf(s);
       }
       if (!member && SIGNATURES.has(a.type)) member = nameOf(a);
-      if (!member && (a.type === 'declaration' || a.type === 'static_final_declaration' || a.type === 'initialized_identifier') && a.parent && (a.parent.type === 'class_body' || a.parent.type === 'program' || a.parent.type === 'static_final_declaration_list' || a.parent.type === 'initialized_identifier_list')) {
-        const id = a.descendantsOfType ? a.descendantsOfType('identifier')[0] : null;
+      if (!member && (a.type === 'declaration' || a.type === 'static_final_declaration' || a.type === 'initialized_identifier') && a.parent && (BODIES.has(a.parent.type) || a.parent.type === 'program' || a.parent.type === 'static_final_declaration_list' || a.parent.type === 'initialized_identifier_list')) {
+        // The declared name, not the first identifier of its type annotation.
+        const ii = a.descendantsOfType('initialized_identifier')[0] || a.descendantsOfType('identifier_list')[0];
+        const id = ii && ii.child(0) && ii.child(0).type === 'identifier' ? ii.child(0) : a.descendantsOfType('identifier')[0];
         if (id) member = id.text;
       }
       if (!test && a.type === 'expression_statement') {
@@ -134,9 +197,9 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     for (const t of types) {
       if (t === 'formal_parameter' || t === 'formal_parameter_list' || t === 'optional_formal_parameters') return 'param';
       if (t === 'local_variable_declaration' || t === 'for_loop_parts' || t === 'pattern_variable_declaration' || t === 'catch_clause') return 'local';
-      if (t === 'function_body' || t === 'class_body' || t === 'program') break;
+      if (t === 'function_body' || BODIES.has(t) || t === 'program') break;
     }
-    if (types.some((t) => TYPES.has(t)) && !types.includes('class_body')) return 'type';
+    if (types.some((t) => TYPES.has(t)) && !types.some((t) => BODIES.has(t))) return 'type';
     return 'member';
   }
 
@@ -160,11 +223,92 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         generated.push(f);
         continue;
       }
-      C.analyzeFile(f);
       f.oldSrc = f.s !== 'A' ? gitShow(meta.left, f.p) : null;
       f.newSrc = f.s !== 'D' ? gitShow(meta.right, f.p) : null;
-      if (f.lang === 'dart') { f.oldTree = parse(f.oldSrc); f.newTree = parse(f.newSrc); }
+      if (C.langOf(f.p) === 'dart') { f.oldTree = parse(f.oldSrc); f.newTree = parse(f.newSrc); }
+      const newStarts = f.newTree ? unitStarts(f.newTree) : null, oldStarts = f.oldTree ? unitStarts(f.oldTree) : null;
+      C.analyzeFile(f, { split: (b) => splitPoints(b, newStarts, oldStarts) });
       files.push(f);
+    }
+
+    // ---------- moved declarations
+    // A removed declaration unit and an added one with the same full name and kind, or the same
+    // short name with at least half their tokens alike, are one moved declaration. Its review is the diff between the two
+    // bodies, carried by the added copy; the removed copy points at it.
+    const MOVE_SIMILARITY = 0.5;
+    const codeLine = (r) => { const t = r.text.trim(); return t && !/^(\/\/|\/\*|\*|@)/.test(t); };
+    function unitOf(f, b, side) {
+      const tree = side === 'n' ? f.newTree : f.oldTree;
+      const r = tree && b.rows.find(codeLine);
+      if (!r) return null;
+      const line = side === 'n' ? r.n : r.o;
+      for (let n = tree.rootNode.descendantForPosition(pos(line, r.text.search(/\S/))); n && n.type !== 'program'; n = n.parent) {
+        if (n.startPosition.row !== line - 1) continue;
+        if (TYPES.has(n.type)) { const nm = n.childForFieldName('name'); return nm ? { name: nm.text, short: nm.text, kind: 'type' } : null; }
+        if (SIGNATURES.has(n.type) || (n.type === 'declaration' && n.parent && BODIES.has(n.parent.type))) {
+          const at = memberAt(tree, line, r.text);
+          return at && at.member ? { name: at.member, short: at.member.split('.').pop(), kind: 'member' } : null;
+        }
+        if (n.type === 'expression_statement' && TEST_CALLS.test(n.text)) {
+          const m = /^\w+\s*\(\s*(['"])((?:\\.|(?!\1).)*)\1/.exec(n.text);
+          return m ? { name: 'test:' + m[2], short: 'test:' + m[2], kind: 'test' } : null;
+        }
+      }
+      return null;
+    }
+    const tokCache = new Map();
+    const blockToks = (b) => {
+      if (!tokCache.has(b)) tokCache.set(b, b.rows.flatMap((r) => r.toks.filter((tk) => tk.k !== 'ws').map((tk) => (tk.k === 'com' || tk.k === 'str' ? tk.k + ':' + tk.t : tk.t))));
+      return tokCache.get(b);
+    };
+    const removedUnits = [], addedUnits = [];
+    files.forEach((f) => f.blocks.forEach((b) => {
+      if (!b.atoms.length) return;
+      if (!b.adds && b.dels) { const u = unitOf(f, b, 'o'); if (u) removedUnits.push({ f, b, u }); }
+      else if (!b.dels && b.adds) { const u = unitOf(f, b, 'n'); if (u) addedUnits.push({ f, b, u }); }
+    }));
+    const movePairs = [];
+    removedUnits.forEach((R) => addedUnits.forEach((A) => {
+      if (R.u.kind !== A.u.kind || R.u.short !== A.u.short) return;
+      const x = blockToks(R.b), y = blockToks(A.b);
+      const ops = C.lcsOps(x, y);
+      if (!ops) return;
+      const sim = (2 * ops.filter((o) => o === 'e').length) / (x.length + y.length);
+      // The same full name and kind is the same declaration, whatever happened to its body.
+      if (R.u.name === A.u.name || sim >= MOVE_SIMILARITY) movePairs.push({ R, A, rank: sim + (R.u.name === A.u.name ? 1 : 0) });
+    }));
+    movePairs.sort((p, q) => q.rank - p.rank || (p.A.b.id < q.A.b.id ? -1 : p.A.b.id > q.A.b.id ? 1 : 0));
+    const movedR = new Set(), movedA = new Set();
+    for (const { R, A } of movePairs) {
+      if (movedR.has(R.b) || movedA.has(A.b)) continue;
+      movedR.add(R.b); movedA.add(A.b);
+      const a = A.b, r = R.b;
+      const oldLines = r.rows.map((x) => x.text), newLines = a.rows.map((x) => x.text);
+      const ops = C.lcsOps(oldLines.map((t) => t.trim()), newLines.map((t) => t.trim())) || [...oldLines.map(() => 'd'), ...newLines.map(() => 'i')];
+      const l = [];
+      let x = 0, y = 0;
+      ops.forEach((op) => { if (op === 'e') { l.push(' ' + newLines[y]); x++; y++; } else if (op === 'd') l.push('-' + oldLines[x++]); else l.push('+' + newLines[y++]); });
+      const syn = C.analyzeFile({ p: A.f.p, hunks: [{ o: r.rows[0].o, n: a.rows[0].n, l }] });
+      const rows = syn.hunks[0].rows;
+      // Only the tokens the body diff changed count as changed on the real rows.
+      [a, r].forEach((blk) => blk.rows.forEach((row) => row.toks.forEach((tk) => { delete tk.atom; delete tk.peer; })));
+      const byN = new Map(a.rows.map((row) => [row.n, row])), byO = new Map(r.rows.map((row) => [row.o, row]));
+      a.changedNew = new Set(); r.changedOld = new Set();
+      rows.forEach((sr) => {
+        if (!sr.toks) return;
+        const real = sr.type === '-' ? byO.get(sr.o) : byN.get(sr.n);
+        if (!real) return;
+        (sr.type === '-' ? r.changedOld : a.changedNew).add(sr.type === '-' ? sr.o : sr.n);
+        sr.toks.forEach((tk) => { if (tk.atom) { const rt = real.toks.find((t) => t.c === tk.c); if (rt) rt.atom = tk.atom; } });
+      });
+      a.atoms = syn.blocks.flatMap((sb) => sb.atoms);
+      a.atoms.forEach((at) => { at.block = a; });
+      a.adds = rows.filter((x2) => x2.type === '+').length;
+      a.dels = rows.filter((x2) => x2.type === '-').length;
+      a.oldFile = R.f;
+      a.move = { from: r, file: R.f, rows };
+      r.atoms = []; r.adds = 0; r.dels = 0;
+      r.movedTo = { block: a, file: A.f };
     }
 
     // ---------- edits and their tree-sitter identity
@@ -175,17 +319,29 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     const wordy = (d) => CODE_KINDS.has(d.tk.k) || ((d.tk.k === 'str' || d.tk.k === 'com') && /\w/.test(d.tk.t));
     const sameStatement = (x, y) => (x.stmt.n && x.stmt.n === y.stmt.n) || (x.stmt.o && x.stmt.o === y.stmt.o);
     const spanUnion = (list) => { const xs = list.filter(Boolean); return xs.length ? [Math.min(...xs.map((x) => x[0])), Math.max(...xs.map((x) => x[1]))] : null; };
-    const regionUnion = (f, list, side) => {
+    const regionUnion = (f, of, list, side) => {
       const rs = list.map((r) => r[side + 'R']).filter(Boolean);
       if (!rs.length) return null;
       let a = rs[0].start, z = rs[0].end;
       rs.forEach((r) => { if (cmpPos(r.start, a) < 0) a = r.start; if (cmpPos(r.end, z) > 0) z = r.end; });
-      return side === 'new' ? completeRegion(f.newTree, f.newSrc, a, z) : completeRegion(f.oldTree, f.oldSrc, a, z);
+      return side === 'new' ? completeRegion(f.newTree, f.newSrc, a, z) : completeRegion(of.oldTree, of.oldSrc, a, z);
+    };
+    // The text of a token run as written: per row, from its first to its last token, optionally
+    // widened to whole words (up to whitespace) for languages without a grammar.
+    const runText = (list, words) => {
+      const byRow = new Map();
+      list.forEach((d) => { if (!byRow.has(d.row)) byRow.set(d.row, []); byRow.get(d.row).push(d.tk); });
+      return [...byRow].map(([row, tks]) => {
+        let a = tks[0].c, z = tks[tks.length - 1].c + tks[tks.length - 1].t.length;
+        if (words) { while (a > 0 && !/\s/.test(row.text[a - 1])) a--; while (z < row.text.length && !/\s/.test(row.text[z])) z++; }
+        return row.text.slice(a, z);
+      }).join(' ');
     };
     const edits = [];
     const editOfAtom = new Map();
     for (const f of files) {
       for (const b of f.blocks) {
+        const of = b.oldFile || f;
         const runs = [];
         for (const a of b.atoms) {
           const e = { atom: a, commentOnly: a.commentOnly };
@@ -195,7 +351,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           let oldR = null, newR = null;
           if (f.lang === 'dart') {
             if (ins.length && f.newTree) newR = completeRegion(f.newTree, f.newSrc, first(ins, 'n'), last(ins, 'n'));
-            if (del.length && f.oldTree) oldR = completeRegion(f.oldTree, f.oldSrc, first(del, 'o'), last(del, 'o'));
+            if (del.length && of.oldTree) oldR = completeRegion(of.oldTree, of.oldSrc, first(del, 'o'), last(del, 'o'));
           }
           const oneToken = del.length === 1 && ins.length === 1 && CODE_KINDS.has(del[0].tk.k) && CODE_KINDS.has(ins[0].tk.k);
           if (f.lang === 'dart' && oneToken && newR) {
@@ -211,8 +367,8 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           } else {
             e.op = !del.length ? 'insert' : !ins.length ? 'delete' : 'replace';
             e.where = 'tokens';
-            e.from = a.text.del.join(' '); e.to = a.text.ins.join(' ');
-            e.key = `${f.lang}|tokens|${a.keyText.del.join(' ')}→${a.keyText.ins.join(' ')}`;
+            e.from = runText(del, true); e.to = runText(ins, true);
+            e.key = `${f.lang}|tokens|${e.from}→${e.to}`;
           }
           // Lines the edit covers, extended to the whole syntax nodes when known.
           const lines = (list, side) => list.map((d) => (side === 'n' ? d.row.n : d.row.o));
@@ -221,7 +377,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           e.oldSpan = oldR ? [oldR.start.row + 1, oldR.end.row + 1] : ol.length ? [Math.min(...ol), Math.max(...ol)] : null;
           e.newR = newR; e.oldR = oldR;
           e.punct = !del.concat(ins).some(wordy);
-          e.stmt = { n: statementOf(f.newTree, newR), o: statementOf(f.oldTree, oldR) };
+          e.stmt = { n: statementOf(f.newTree, newR), o: statementOf(of.oldTree, oldR) };
           runs.push(e);
         }
         const up = runs.map((_, i) => i);
@@ -242,7 +398,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           if (main.length === 1) e = { ...main[0] };
           else {
             const keys = [...new Set(main.map((r) => r.key))];
-            const nr = regionUnion(f, main, 'new'), or = regionUnion(f, main, 'old');
+            const nr = regionUnion(f, of, main, 'new'), or = regionUnion(f, of, main, 'old');
             e = { atom: main[0].atom, key: keys.join(' ⊕ '), where: (nr || or).type, from: or ? norm(or.text) : '', to: nr ? norm(nr.text) : '' };
             e.op = main.every((r) => r.op === 'insert') ? 'insert' : main.every((r) => r.op === 'delete') ? 'delete' : 'replace';
           }
@@ -300,7 +456,9 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         tally.forEach((n, k) => { if (n > bestN) { best = k; bestN = n; } });
         b.member = best;
         b.test = firstTest;
-        const commentOnly = b.atoms.length && b.atoms.every((a) => a.commentOnly);
+        // A comment-only change documents the declaration below it, unless the block holds
+        // that declaration itself (a class whose doc comment changed).
+        const commentOnly = b.atoms.length && b.atoms.every((a) => a.commentOnly) && !b.rows.some((r) => r.type !== ' ' && codeRow(r) && !/^\s*@/.test(r.text));
         if (commentOnly && tree) {
           const src = tree === f.newTree ? f.newSrc : f.oldSrc;
           const lines = src.split('\n');
@@ -371,33 +529,188 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     };
 
     // ---------- usage links from the language server
+    const old = OLD[name];
     const plusRow = new Map();
-    files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '+') plusRow.set(f.p + ':' + r.n, { f, b, r }); })));
+    // A moved declaration's unchanged lines are not changed lines.
+    files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '+' && (!b.changedNew || b.changedNew.has(r.n))) plusRow.set(f.p + ':' + r.n, { f, b, r }); })));
     const changedCol = (r, col) => r.toks.some((tk) => tk.atom && (tk.c === col || tk.c + 1 === col));
+    const fileByPath = new Map(files.map((f) => [f.p, f]));
+    const diskTrees = new Map();
+    const diskTree = (abs) => {
+      if (!diskTrees.has(abs)) { let src = null; try { src = fs.readFileSync(abs, 'utf8'); } catch {} diskTrees.set(abs, src && { tree: parser.parse(src), lines: src.split('\n') }); }
+      return diskTrees.get(abs);
+    };
+    // What a definition target is, independent of line shifts: file, name, enclosing member.
+    const targetSig = (abs, root, line0, col) => {
+      const t = diskTree(abs);
+      if (!t) return null;
+      const id = /^@?[A-Za-z_$][\w$]*/.exec((t.lines[line0] || '').slice(col));
+      const at = memberAt(t.tree, line0 + 1, ' '.repeat(col) + 'x');
+      return abs.slice(root.length) + '|' + (id ? id[0] : '?') + '|' + ((at && at.member) || '');
+    };
+    // A token whose text didn't change can still point somewhere else now: the same argument
+    // label bound to another function's parameter. Such a token counts as changed.
+    const rebound = (u, col) => {
+      if (!old || u.b.move) return false;
+      const tk = u.r.toks.find((t) => t.c === col || t.c + 1 === col);
+      if (!tk || !tk.peer) return false;
+      const ot = old.raw[`${u.f.p}:${tk.peer.row.o}:${tk.peer.tk.c + (col - tk.c)}`], nt = defsRaw[`${u.f.p}:${u.r.n}:${col}`];
+      if (!ot || !nt || !ot[0].startsWith(old.dir) || !nt[0].startsWith(HEAD)) return false;
+      return targetSig(ot[0], old.dir, ot[1], ot[2]) !== targetSig(nt[0], HEAD, nt[1], nt[2]);
+    };
+    const addUse = (u, dk, make) => {
+      if (!decls.has(dk)) decls.set(dk, make());
+      const d = decls.get(dk);
+      if (d.block === u.b) return;
+      d.users.add(u.b);
+      if (!usesOf.has(u.b)) usesOf.set(u.b, new Map());
+      usesOf.get(u.b).set(dk, true);
+    };
+    const declAt = (rel, f, b, line, col, extra) => () => {
+      const row = b.rows.find((r) => r.n === line);
+      const tok = row && (row.toks.find((t) => t.c === col) || row.toks.find((t) => t.c + 1 === col));
+      const word = !tok && /^[A-Za-z_$][\w$]*/.exec(((f.newSrc || '').split('\n')[line - 1] || '').slice(col));
+      const at = memberAt(f.newTree, line, ' '.repeat(col) + 'x');
+      return { key: `${rel}:${line}:${col}`, name: tok ? tok.t.replace(/^@/, '') : word ? word[0] : '?', kind: declKind(f.newTree, line, col), block: b, users: new Set(), member: at && at.member, test: at && at.test, line, file: rel, ...extra };
+    };
+    // The changed lines inside a function, method or constructor (its signature and body).
+    const blockNewSpan = (f, b) => {
+      const ns = b.rows.filter((r) => r.n != null).map((r) => r.n);
+      if (ns.length) return [Math.min(...ns), Math.max(...ns)];
+      const h = f.hunks[b.hunk], next = h.rows[b.first + b.len], prev = h.rows[b.first - 1];
+      const at = next && next.n != null ? next.n : prev && prev.n != null ? prev.n + 1 : null;
+      return at == null ? null : [at, at];
+    };
+    const memberNode = (f, line, col) => {
+      for (let n = f.newTree.rootNode.descendantForPosition(pos(line, col)); n; n = n.parent) {
+        if (SIGNATURES.has(n.type)) return n;
+        if (TYPES.has(n.type) || BODIES.has(n.type) || n.type === 'function_body') return null;
+      }
+      return null;
+    };
+    const changedInside = (rel, line, col, signatureOnly) => {
+      const f = fileByPath.get(rel);
+      if (!f || !f.newTree) return null;
+      const sig = memberNode(f, line, col);
+      if (!sig) return null;
+      let end = sig.endPosition.row + 1;
+      if (!signatureOnly && sig.nextSibling && sig.nextSibling.type === 'function_body') end = sig.nextSibling.endPosition.row + 1;
+      const start = sig.startPosition.row + 1;
+      const b = f.blocks.find((x) => x.atoms.length && (() => { const sp = blockNewSpan(f, x); return sp && sp[0] <= end && sp[1] >= start && (!signatureOnly || x.rows.some((r) => r.n != null && r.n >= start && r.n <= end && plusRow.has(rel + ':' + r.n))); })());
+      return b ? { f, b } : null;
+    };
+    const changedParams = (f, line, col) => {
+      const sig = memberNode(f, line, col);
+      if (!sig) return [];
+      return sig.descendantsOfType('formal_parameter').map((fp) => {
+        const ids = fp.descendantsOfType('identifier');
+        const id = ids[ids.length - 1];
+        const hit = id && plusRow.get(f.p + ':' + (id.startPosition.row + 1));
+        return hit ? { line: id.startPosition.row + 1, col: id.startPosition.column, b: hit.b } : null;
+      }).filter(Boolean);
+    };
+    const isTestFile = (p) => /(^|\/)test\//.test(p);
+    const reached = new Map();
+    const reachChanged = (rel, line0, col) => {
+      const start = `${rel}:${line0}:${col}`;
+      if (reached.has(start)) return reached.get(start);
+      const hits = [], seen = new Set([start]);
+      let level = [start];
+      for (let depth = 0; level.length && depth <= (CALLS ? CALLS.depth : 0); depth++) {
+        const next = [];
+        level.forEach((k) => {
+          const i1 = k.lastIndexOf(':'), i0 = k.lastIndexOf(':', i1 - 1);
+          const r = k.slice(0, i0), l = +k.slice(i0 + 1, i1) + 1, c = +k.slice(i1 + 1);
+          const inside = changedInside(r, l, c, false);
+          if (inside) { hits.push({ key: `${r}:${l}:${c}`, rel: r, line: l, col: c, f: inside.f, b: inside.b }); return; }
+          ((CALLS && CALLS.graph[k]) || []).forEach((x) => { if (!seen.has(x)) { seen.add(x); next.push(x); } });
+        });
+        level = next;
+      }
+      reached.set(start, hits);
+      return hits;
+    };
     for (const [key, [tpath, tl, tc]] of Object.entries(defsRaw)) {
       const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
       const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
       const u = plusRow.get(p + ':' + line);
-      if (!u || !tpath.startsWith(HEAD) || !changedCol(u.r, col)) continue;
+      if (!u || !tpath.startsWith(HEAD) || !(changedCol(u.r, col) || rebound(u, col))) continue;
       const rel = tpath.slice(HEAD.length);
       if (MODEL_GEN.test(rel)) { const mf = genTarget(tpath, tl + 1, tc); if (mf) linkModel(u, mf, false); continue; }
       const d = plusRow.get(rel + ':' + (tl + 1));
-      if (!d || d.b === u.b) continue;
-      const dk = `${rel}:${tl + 1}:${tc}`;
-      if (!decls.has(dk)) {
-        const tok = d.r.toks.find((t) => t.c === tc) || d.r.toks.find((t) => t.c + 1 === tc);
-        const at = memberAt(d.f.newTree, tl + 1, ' '.repeat(tc) + 'x');
-        decls.set(dk, { key: dk, name: tok ? tok.t.replace(/^@/, '') : '?', kind: declKind(d.f.newTree, tl + 1, tc), block: d.b, users: new Set(), member: at && at.member, test: at && at.test, line: tl + 1, file: rel });
-      }
-      decls.get(dk).users.add(u.b);
-      if (!usesOf.has(u.b)) usesOf.set(u.b, new Map());
-      usesOf.get(u.b).set(dk, true);
+      if (d) { if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc)); continue; }
+      // A test links to the changed code it reaches: the first changed function on each path
+      // of calls from what it calls, up to the call graph's depth.
+      if (isTestFile(u.f.p)) reachChanged(rel, tl, tc).forEach((h) => { if (h.b !== u.b) addUse(u, h.key, declAt(h.rel, h.f, h.b, h.line, h.col, { kind: 'member' })); });
     }
+    // A call whose argument list changed uses the called function's signature. A changed
+    // positional argument joins the ripple of the parameter in the same position when that
+    // parameter changed (a named argument already resolves to its parameter through its label).
+    // A changed signature without a changed parameter links the call to the function itself.
+    const calleeOf = (args) => {
+      const p = args.parent;
+      if (p && p.type === 'argument_part' && p.parent && p.parent.type === 'selector') {
+        const prev = p.parent.previousNamedSibling;
+        if (!prev) return null;
+        if (prev.type === 'identifier') return prev;
+        const ids = prev.descendantsOfType('identifier');
+        return ids.length ? ids[ids.length - 1] : null;
+      }
+      if (p && (p.type === 'new_expression' || p.type === 'const_object_expression')) {
+        const ids = p.children.filter((c) => c.type === 'identifier' || c.type === 'type_identifier');
+        return ids.length ? ids[ids.length - 1] : null;
+      }
+      return null;
+    };
+    const positionalParams = (sig) => {
+      const list = sig.descendantsOfType('formal_parameter_list')[0];
+      const out = [];
+      if (list) list.namedChildren.forEach((c) => {
+        if (c.type === 'formal_parameter') out.push(c);
+        else if (c.type === 'optional_formal_parameters' && c.text.trim().startsWith('[')) c.namedChildren.forEach((x) => { if (x.type === 'formal_parameter') out.push(x); });
+      });
+      return out;
+    };
+    const paramDecl = (f, fp) => {
+      const ids = fp.descendantsOfType('identifier');
+      const id = ids[ids.length - 1];
+      const hit = id && plusRow.get(f.p + ':' + (id.startPosition.row + 1));
+      return hit ? { line: id.startPosition.row + 1, col: id.startPosition.column, b: hit.b } : null;
+    };
+    files.forEach((f) => {
+      if (!f.newTree) return;
+      f.blocks.forEach((b) => {
+        if (!b.atoms.length) return;
+        const seen = new Set();
+        b.rows.forEach((r) => {
+          if (r.type !== '+' || !plusRow.has(f.p + ':' + r.n)) return;
+          r.toks.forEach((tk) => {
+            if (!tk.atom) return;
+            let n = f.newTree.rootNode.descendantForPosition(pos(r.n, tk.c)), arg = null;
+            while (n && n.type !== 'arguments') { if (n.parent && n.parent.type === 'arguments') arg = n; n = STATEMENTS.has(n.type) ? null : n.parent; }
+            const callee = n && calleeOf(n);
+            if (!callee || !arg || arg.type === 'named_argument') return;
+            const k = n.namedChildren.filter((c) => c.type === 'argument').findIndex((c) => c.startIndex === arg.startIndex);
+            if (k < 0 || seen.has(callee.startIndex + ':' + k)) return;
+            seen.add(callee.startIndex + ':' + k);
+            const t = defsRaw[`${f.p}:${callee.startPosition.row + 1}:${callee.startPosition.column}`];
+            if (!t || !t[0].startsWith(HEAD)) return;
+            const rel = t[0].slice(HEAD.length);
+            const sig = changedInside(rel, t[1] + 1, t[2], true);
+            if (!sig) return;
+            const sigNode = memberNode(sig.f, t[1] + 1, t[2]);
+            const params = positionalParams(sigNode);
+            const q = params[k] && paramDecl(sig.f, params[k]);
+            if (q) { if (q.b !== b) addUse({ f, b, r }, `${rel}:${q.line}:${q.col}`, declAt(rel, sig.f, q.b, q.line, q.col)); }
+            else if (!changedParams(sig.f, t[1] + 1, t[2]).length && sig.b !== b) addUse({ f, b, r }, `${rel}:${t[1] + 1}:${t[2]}`, declAt(rel, sig.f, sig.b, t[1] + 1, t[2], { kind: 'member' }));
+          });
+        });
+      });
+    });
 
     // Removed lines link the same way, through the old side's language server.
-    const old = OLD[name];
     const minusRow = new Map();
-    files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '-') minusRow.set(f.p + ':' + r.o, { f, b, r }); })));
+    files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '-' && (!b.changedOld || b.changedOld.has(r.o))) minusRow.set(f.p + ':' + r.o, { f, b, r }); })));
     if (old) {
       for (const [key, [tpath, tl, tc]] of Object.entries(old.raw)) {
         const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
@@ -412,8 +725,11 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         if (!decls.has(dk)) {
           const tok = d.r.toks.find((t) => t.c === tc) || d.r.toks.find((t) => t.c + 1 === tc);
           const at = memberAt(d.f.oldTree, tl + 1, ' '.repeat(tc) + 'x');
-          decls.set(dk, { key: dk, name: tok ? tok.t.replace(/^@/, '') : '?', kind: declKind(d.f.oldTree, tl + 1, tc), block: d.b, users: new Set(), member: at && at.member, test: at && at.test, line: tl + 1, file: rel, removed: true });
+          // A moved declaration isn't removed: its old usages belong to the moved copy.
+          const mv = d.b.movedTo && d.b.movedTo.block;
+          decls.set(dk, { key: dk, name: tok ? tok.t.replace(/^@/, '') : '?', kind: declKind(d.f.oldTree, tl + 1, tc), block: mv || d.b, users: new Set(), member: mv ? mv.member : at && at.member, test: at && at.test, line: tl + 1, file: rel, removed: !mv });
         }
+        if (decls.get(dk).block === u.b) continue;
         decls.get(dk).users.add(u.b);
         if (!usesOf.has(u.b)) usesOf.set(u.b, new Map());
         usesOf.get(u.b).set(dk, true);
@@ -445,14 +761,28 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     const parent = new Map(allBlocks.map((b) => [b, b]));
     const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
     const union = (x, y) => { x = find(x); y = find(y); if (x !== y) parent.set(x, y); };
-    decls.forEach((d) => { if (d.kind === 'param' || d.kind === 'local') d.users.forEach((u) => union(d.block, u)); });
+    // A ripple is a parameter or variable whose change spreads: a local only within its own
+    // member (a test's fixture variable doesn't tie the tests together), and a parameter only
+    // when its function already existed (calls to a new function link to the function).
+    const newFunction = (d) => {
+      const f = fileByPath.get(d.file);
+      const sig = f && f.newTree && memberNode(f, d.line, Math.max(0, ((f.newSrc || '').split('\n')[d.line - 1] || '').indexOf(d.name)));
+      const nm = sig && (sig.childForFieldName && sig.childForFieldName('name') || sig.descendantsOfType('identifier')[0]);
+      const hit = nm && plusRow.get(d.file + ':' + (nm.startPosition.row + 1));
+      return !!(hit && !hit.b.dels);
+    };
+    decls.forEach((d) => {
+      if (d.removed) { if (d.kind === 'param' || d.kind === 'local') d.users.forEach((u) => union(d.block, u)); return; }
+      if (d.kind === 'local') d.users.forEach((u) => { if (u.memberKey === d.block.memberKey) union(d.block, u); });
+      else if (d.kind === 'param' && !newFunction(d)) d.users.forEach((u) => union(d.block, u));
+    });
     const comps = new Map();
     allBlocks.forEach((b) => { const r = find(b); if (!comps.has(r)) comps.set(r, new Set()); comps.get(r).add(b); });
     let chains = [...comps.values()].filter((s) => s.size > 1).map((blocks) => ({ blocks, kind: 'ripple' }));
     const chainOf = new Map();
     chains.forEach((c) => c.blocks.forEach((b) => chainOf.set(b, c)));
     decls.forEach((d) => {
-      if ((d.kind !== 'member' && d.kind !== 'type') || !d.users.size) return;
+      if ((d.kind !== 'member' && d.kind !== 'type') || !d.users.size || !d.block.atoms.length) return;
       const blocks = new Set([d.block, ...d.users]);
       const owners = new Set([...blocks].map((b) => chainOf.get(b)));
       if (owners.size === 1 && [...owners][0]) return; // already inside one ripple chain
@@ -469,6 +799,11 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       chains.push({ blocks, kind: 'group', group: g });
     });
     const memberCount = (c) => new Set([...c.blocks].map((b) => b.memberKey)).size;
+    // A chain is named after its best declaration: what remains before what was removed,
+    // functions, methods, fields and types before parameters and locals, public before private,
+    // then the most used.
+    const isPublic = (d) => ![d.name, ...String(d.member || '').split('.')].some((x) => String(x).startsWith('_'));
+    const rootRank = (d) => (d.removed ? 100 : 0) + (d.kind === 'member' || d.kind === 'type' ? 0 : d.kind === 'param' ? 20 : 40) + (isPublic(d) ? 0 : 10);
     chains = chains.filter((c) => (c.kind === 'group' ? c.blocks.size > 1 : memberCount(c) > 1));
     // Member cohesion: a chain takes every change of the members it touches (a test counts as
     // a member in test files; top-level code doesn't).
@@ -477,7 +812,13 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => c.blocks.add(x))); });
     chains.forEach((c) => {
       const inside = [...decls.values()].filter((d) => c.blocks.has(d.block)).map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length })).filter((x) => x.n > 0);
-      inside.sort((x, y) => y.n - x.n || (x.d.key < y.d.key ? -1 : 1));
+      // In a ripple, the top parameter comes first: its callers don't pass it on from a
+      // parameter of their own (the one where the change enters).
+      const params = inside.filter((x) => x.d.kind === 'param').map((x) => x.d);
+      const withParam = new Set(params.map((d) => d.member));
+      const below = new Set(params.filter((d) => [...d.users].some((u) => c.blocks.has(u) && u.member !== d.member && withParam.has(u.member))));
+      const rank = (d) => rootRank(d) + (below.has(d) ? 50 : 0);
+      inside.sort((x, y) => rank(x.d) - rank(y.d) || y.n - x.n || (x.d.key < y.d.key ? -1 : 1));
       if (!c.root) c.root = inside.length ? inside[0].d : null;
       c.also = inside.filter((x) => x.d !== c.root && x.n >= 2 && x.d.kind !== 'local').slice(0, 3).map((x) => x.d);
     });
@@ -512,6 +853,48 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       [c.root, ...c.also].forEach((d) => { if (d && !keep.also.includes(d) && d !== keep.root) keep.also.push(d); });
     });
     chains = [...byName.values()];
+    // A new or removed type is one chain with its members. Chains that never leave a new file
+    // are one chain: the file.
+    const newTypes = new Map(), removedTypes = new Map();
+    files.forEach((f) => [[f.newTree, plusRow, newTypes, 'dels'], [f.oldTree, minusRow, removedTypes, 'adds']].forEach(([tree, rows, map, other]) => {
+      if (!tree) return;
+      for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
+        const n = tree.rootNode.namedChild(i), nm = TYPES.has(n.type) && (n.childForFieldName('name') || n.namedChildren.find((x) => x.type === 'identifier'));
+        const hit = nm && rows.get(f.p + ':' + (nm.startPosition.row + 1));
+        if (hit && !hit.b[other]) map.set(nm.text, f);
+      }
+    }));
+    // A new type declared in a new file folds with that file.
+    const foldKey = (c) => {
+      const fl = new Set([...c.blocks].map((b) => b.file));
+      if (fl.size === 1 && [...fl][0].s === 'A') return 'file:' + [...fl][0].p;
+      const t = c.root && (c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0]);
+      if (t && newTypes.has(t)) return newTypes.get(t).s === 'A' ? 'file:' + newTypes.get(t).p : 'type:' + t;
+      return t && removedTypes.has(t) ? 'type:' + t : null;
+    };
+    const folds = new Map();
+    chains.forEach((c) => { const k = foldKey(c); if (k) { if (!folds.has(k)) folds.set(k, []); folds.get(k).push(c); } });
+    folds.forEach((list, k) => {
+      if (list.length < 2 && !k.startsWith('file:')) return;
+      // Named after the type it is about, or the new type with most changes in a new file.
+      const ownerType = (c) => c.root && (c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0]);
+      let typeName = k.startsWith('type:') ? k.slice(5) : null;
+      if (!typeName) {
+        const sizes = new Map();
+        list.forEach((c) => { const t = ownerType(c); if (t && newTypes.has(t)) sizes.set(t, (sizes.get(t) || 0) + c.blocks.size); });
+        typeName = [...sizes].sort((x, y) => y[1] - x[1])[0]?.[0] || null;
+      }
+      const keep = list.find((c) => c.root && c.root.kind === 'type' && c.root.name === typeName) || list.slice().sort((x, y) => y.blocks.size - x.blocks.size)[0];
+      list.forEach((c) => {
+        if (c === keep) return;
+        c.blocks.forEach((b) => keep.blocks.add(b));
+        [c.root, ...c.also].forEach((d) => { if (d && d !== keep.root && !keep.also.includes(d)) keep.also.push(d); });
+        c.folded = true;
+      });
+      const testFile = k.startsWith('file:') && isTestFile(k.slice(5));
+      keep.name = typeName && !testFile ? (removedTypes.has(typeName) && !newTypes.has(typeName) ? '− ' : '') + typeName : path.basename(k.slice(5));
+    });
+    chains = chains.filter((c) => !c.folded);
     const namesOf = (c) => {
       const out = new Set();
       c.blocks.forEach((b) => { if (b.member && b.member !== 'main') out.add(b.member.split('.').pop()); });
@@ -535,6 +918,30 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
         const uses = [...c.blocks].some((x) => x.file === b.file && [...(usesOf.get(x) || new Map()).keys()].some((dk) => imported.includes(decls.get(dk).file)));
         if (uses) c.blocks.add(b);
       });
+    });
+    // `part 'x.dart'` makes x.dart part of this library: chains with changes in x.dart take it.
+    allBlocks.filter((b) => b.lang === 'dart').forEach((b) => {
+      const parts = [];
+      b.rows.forEach((r) => { const m = r.type !== ' ' && /^\s*part\s+['"]([^'"]+)['"]/.exec(r.text); if (m) parts.push(path.normalize(path.join(path.dirname(b.file.p), m[1]))); });
+      if (parts.length) chains.forEach((c) => { if ([...c.blocks].some((x) => parts.includes(x.file.p))) c.blocks.add(b); });
+    });
+    // A new file is written as a whole: a change of it that links to nothing joins the chain
+    // holding most of that file's changes.
+    const inAny = new Set(chains.flatMap((c) => [...c.blocks]));
+    allBlocks.filter((b) => b.file.s === 'A' && !inAny.has(b)).forEach((b) => {
+      let best = null, bestN = 0;
+      chains.forEach((c) => { const n = [...c.blocks].filter((x) => x.file === b.file).length; if (n > bestN) { best = c; bestN = n; } });
+      if (best) best.blocks.add(b);
+    });
+    // Chains with exactly the same changes are one chain, named after the better root.
+    const bySet = new Map();
+    chains = chains.filter((c) => {
+      const k = [...c.blocks].map((b) => b.id).sort().join('|');
+      const keep = bySet.get(k);
+      if (!keep) { bySet.set(k, c); return true; }
+      if (c.root && (!keep.root || rootRank(c.root) < rootRank(keep.root))) { [keep.root, c.root] = [c.root, keep.root]; [keep.name, c.name] = [c.name, keep.name]; }
+      [c.root, ...c.also].forEach((d) => { if (d && d !== keep.root && !keep.also.includes(d)) keep.also.push(d); });
+      return false;
     });
     chains.sort((x, y) => y.blocks.size - x.blocks.size || (x.name < y.name ? -1 : 1));
     chains.forEach((c, i) => { c.id = i; c.files = new Set([...c.blocks].map((b) => b.file.p)).size; });
@@ -654,6 +1061,12 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
 
     // ---------- serialize
     const fileIndex = new Map(files.map((f, i) => [f, i]));
+    // A moved declaration's body diff: [type, text, old line, new line, changed ranges].
+    const rowOut = (r) => {
+      const ranges = [];
+      (r.toks || []).forEach((tk) => { if (tk.atom) ranges.push([tk.c, tk.c + tk.t.length, editOfAtom.get(tk.atom).id]); });
+      return ranges.length ? [r.type, r.text, r.o, r.n, ranges] : [r.type, r.text, r.o, r.n];
+    };
     const ser = {
       label: meta.label, left: meta.left.slice(0, 7), right: meta.right.slice(0, 7),
       files: files.map((f) => ({
@@ -667,7 +1080,9 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           }
           return row;
         }) })),
-        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, documents: b.documents || undefined, edits: b.edits.map((e) => e.id) })),
+        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
+          move: b.move ? { f: fileIndex.get(b.move.file), b: b.move.from.id, rows: b.move.rows.map(rowOut) } : undefined,
+          movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: b.movedTo.block.rows[0].n, changes: b.movedTo.block.edits.length } : undefined })),
       })),
       edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan })),
       groups: groups.map((g) => ({ id: g.id, count: g.count, files: g.files, parts: g.parts.map((p) => p.edits[0].id), edits: g.edits.map((e) => e.id) })),

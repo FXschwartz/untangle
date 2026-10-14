@@ -133,9 +133,11 @@
   // A file's hunks become change blocks (runs of -/+ lines between context lines).
   // Each block is tokenized; whitespace is dropped for matching; an LCS over the
   // remaining tokens yields atoms: maximal runs of removed/added tokens.
-  function analyzeFile(file) {
+  // opts.split(block) may return row indexes (inside the block) where a new block starts;
+  // the pieces are diffed again on their own.
+  function analyzeFile(file, opts) {
     const lang = langOf(file.p);
-    const blocks = [];
+    let blocks = [];
     (file.hunks || []).forEach((h, hi) => {
       let o = h.o, nn = h.n;
       const rows = h.l.map((raw) => {
@@ -154,53 +156,76 @@
       });
       h.rows = rows;
     });
+    blocks.forEach((b) => diffBlock(b, lang));
+    if (opts && opts.split) {
+      const out = [];
+      blocks.forEach((b) => {
+        const cuts = (opts.split(b) || []).filter((c) => c > 0 && c < b.rows.length).sort((x, y) => x - y);
+        if (!cuts.length) { out.push(b); return; }
+        let start = 0;
+        [...new Set(cuts), b.rows.length].forEach((end) => {
+          const piece = { hunk: b.hunk, rows: b.rows.slice(start, end), first: b.first + start };
+          diffBlock(piece, lang);
+          out.push(piece);
+          start = end;
+        });
+      });
+      blocks = out;
+    }
     blocks.forEach((b, bi) => {
       b.id = file.p + '#' + bi;
-      b.lang = lang;
       b.file = file;
-      const del = [], ins = [];
-      b.rows.forEach((row) => {
-        const toks = tokenize(row.text, lang);
-        row.toks = toks;
-        toks.forEach((tk) => { if (tk.k !== 'ws') (row.type === '-' ? del : ins).push({ tk, row }); });
-      });
-      b.dels = b.rows.filter((r) => r.type === '-').length;
-      b.adds = b.rows.filter((r) => r.type === '+').length;
-      const ops = lcsOps(matchKeys(del), matchKeys(ins));
-      b.atoms = [];
-      if (ops === null) {
-        b.atoms.push({ del, ins, prev: '', next: '' });
-      } else {
-        let x = 0, y = 0, cur = null, lastEq = '';
-        ops.forEach((op) => {
-          if (op === 'e') {
-            if (cur) { cur.next = del[x].tk.t; b.atoms.push(cur); cur = null; }
-            lastEq = del[x].tk.t;
-            x++; y++;
-            return;
-          }
-          if (!cur) cur = { del: [], ins: [], prev: lastEq, next: '' };
-          if (op === 'd') cur.del.push(del[x++]); else cur.ins.push(ins[y++]);
-        });
-        if (cur) b.atoms.push(cur);
-      }
-      // A bracket can "change" only because its depth did; same text on both sides
-      // is not an edit.
-      b.atoms = b.atoms.filter((a) => a.del.map((d) => d.tk.t).join(' ') !== a.ins.map((d) => d.tk.t).join(' '));
-      b.atoms.forEach((a, ai) => {
-        a.id = b.id + '.' + ai;
-        a.block = b;
-        a.text = { del: a.del.map((d) => d.tk.t), ins: a.ins.map((d) => d.tk.t) };
-        a.keyText = { del: a.del.map(keyOf), ins: a.ins.map(keyOf) };
-        a.commentOnly = a.del.concat(a.ins).every((d) => d.tk.k === 'com');
-        a.punctOnly = a.del.concat(a.ins).every((d) => d.tk.k === 'op');
-        a.del.concat(a.ins).forEach((d) => { d.tk.atom = a; });
-      });
-      b.layoutOnly = b.atoms.length === 0;
+      b.atoms.forEach((a, ai) => { a.id = b.id + '.' + ai; });
     });
     file.blocks = blocks;
     file.lang = lang;
     return file;
+  }
+
+  // Tokens of one block, its LCS, and its atoms. Matched tokens keep a pointer to their
+  // counterpart (tk.peer) so a later pass can compare what each side refers to.
+  function diffBlock(b, lang) {
+    b.lang = lang;
+    const del = [], ins = [];
+    b.rows.forEach((row) => {
+      const toks = tokenize(row.text, lang);
+      row.toks = toks;
+      toks.forEach((tk) => { if (tk.k !== 'ws') (row.type === '-' ? del : ins).push({ tk, row }); });
+    });
+    b.dels = b.rows.filter((r) => r.type === '-').length;
+    b.adds = b.rows.filter((r) => r.type === '+').length;
+    const ops = lcsOps(matchKeys(del), matchKeys(ins));
+    b.atoms = [];
+    if (ops === null) {
+      b.atoms.push({ del, ins, prev: '', next: '' });
+    } else {
+      let x = 0, y = 0, cur = null, lastEq = '';
+      ops.forEach((op) => {
+        if (op === 'e') {
+          if (cur) { cur.next = del[x].tk.t; b.atoms.push(cur); cur = null; }
+          lastEq = del[x].tk.t;
+          ins[y].tk.peer = del[x];
+          x++; y++;
+          return;
+        }
+        if (!cur) cur = { del: [], ins: [], prev: lastEq, next: '' };
+        if (op === 'd') cur.del.push(del[x++]); else cur.ins.push(ins[y++]);
+      });
+      if (cur) b.atoms.push(cur);
+    }
+    // A bracket can "change" only because its depth did; same text on both sides
+    // is not an edit.
+    b.atoms = b.atoms.filter((a) => a.del.map((d) => d.tk.t).join(' ') !== a.ins.map((d) => d.tk.t).join(' '));
+    b.atoms.forEach((a) => {
+      a.block = b;
+      a.text = { del: a.del.map((d) => d.tk.t), ins: a.ins.map((d) => d.tk.t) };
+      a.keyText = { del: a.del.map(keyOf), ins: a.ins.map(keyOf) };
+      a.commentOnly = a.del.concat(a.ins).every((d) => d.tk.k === 'com');
+      a.punctOnly = a.del.concat(a.ins).every((d) => d.tk.k === 'op');
+      a.del.concat(a.ins).forEach((d) => { d.tk.atom = a; });
+    });
+    b.layoutOnly = b.atoms.length === 0;
+    return b;
   }
 
   function keyOf(d) { return d.tk.k === 'com' || d.tk.k === 'str' ? d.tk.k + ':' + d.tk.t : d.tk.t; }
@@ -249,5 +274,5 @@
     return new RegExp('^' + rx + '$');
   }
 
-  root.ReviewCore = { tokenize, langOf, lcsOps, analyzeFile, groupAtoms, atomKey, globToRegExp };
+  root.ReviewCore = { tokenize, langOf, lcsOps, analyzeFile, diffBlock, groupAtoms, atomKey, globToRegExp };
 })(typeof window !== 'undefined' ? window : globalThis);
