@@ -74,7 +74,7 @@ async function main(): Promise<number> {
     url = await server.listen();
     say.serving(url);
     if (opts.quiet) process.stdout.write(url + '\n');
-    if (opts.open && !openBrowser(url)) say.note('no browser to open: open the link above');
+    if (opts.open) void openBrowser(url).then((where) => { if (!where) say.note('no browser to open: open the link above'); else say.verbose(where === 'orca' ? 'opened in Orca’s browser' : 'opened in the browser'); });
   }
 
   let live: LiveSession | null = null;

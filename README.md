@@ -17,8 +17,9 @@ untangle [flags] <pr-url>
 - **A pull request URL** (`https://github.com/<owner>/<repo>/pull/<number>`) is cloned first. The
   clone is kept in the cache, so the next pull request of the same repository only fetches.
 
-untangle serves the review on `127.0.0.1` and opens your browser. The link carries a token, as
-Jupyter's does. An open page keeps working after untangle stops, but marks are only saved while
+untangle serves the review on `127.0.0.1` and opens it: in Orca's browser when it runs in one
+of Orca's terminals (a tab in that terminal's worktree), else in your default browser; `BROWSER`
+overrides both. The link carries a token, as Jupyter's does. An open page keeps working after untangle stops, but marks are only saved while
 it runs.
 
 ## Install
@@ -61,6 +62,10 @@ same review again is immediate.
   the SDK) open the same way from a definition.
 - **Search** the changed lines, or the whole repository at the head or the base (`git grep`).
 - **Highlighting** with [Shiki](https://shiki.style): VS Code's grammars and its Dark+ theme.
+  Names a grammar leaves plain (variables, properties, parameters) are colored as VS Code's
+  semantic highlighting does.
+- **Status bar:** whether the language server is up, and untangle's and the language server's
+  memory and CPU (hover for the details), as px0 shows them.
 - **Open in editor** from file headers and peeks: a `vscode://` link by default (through WSL
   when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
   or a URL template such as `cursor://file{file}:{line}:{col}`.

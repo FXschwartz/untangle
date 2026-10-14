@@ -8,6 +8,7 @@ import path from 'node:path';
 import { prepareCheckouts, type Checkouts, type Progress } from './build.js';
 import { git, gitMaybe, run } from './exec.js';
 import { DartServer, type Location } from './lsp/dart.js';
+import type { LspState } from './metrics.js';
 import type { Target } from './target.js';
 import { VERSION } from './version.js';
 
@@ -35,6 +36,7 @@ const SEARCH_MAX = 500;
 export class LiveSession {
   private server: DartServer | null = null;
   private starting: Promise<DartServer> | null = null;
+  private failure: string | null = null;
   private dirs: { headDir: string; baseDir: string } | null = null;
   // Files outside the repository that a definition led to: only these can be read by id.
   private readonly external: string[] = [];
@@ -70,9 +72,17 @@ export class LiveSession {
       return this.server;
     })().catch((e) => {
       this.starting = null;
+      this.failure = (e as Error).message;
       throw e;
     });
     return this.starting;
+  }
+
+  /** Whether the language server is up, for the page's status bar. */
+  state(): LspState {
+    if (this.server && this.server.pid) return { state: 'ready', pid: this.server.pid };
+    if (this.starting) return { state: 'starting', pid: null };
+    return this.failure ? { state: 'failed', pid: null, error: this.failure } : { state: 'off', pid: null };
   }
 
   async stop() {

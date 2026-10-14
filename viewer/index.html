@@ -299,10 +299,28 @@ a.btn { text-decoration: none; display: inline-block; }
 .code.src .ln.add .sg, .code.src .ln.del .sg { font-weight: 700; }
 .inst-file .linkish { font: inherit; }
 
+/* The status bar: the language server and the process's metrics. */
+.vw-status { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 3px 12px; border-top: 1px solid var(--line); background: var(--surface-2); font: 500 11.5px/1.5 var(--font-mono); color: var(--ink-3); }
+.vw-status[hidden] { display: none; }
+.st-item { display: inline-flex; align-items: center; gap: 6px; position: relative; white-space: nowrap; }
+.st-metrics { border: 1px solid var(--line-2); border-radius: 6px; padding: 0 8px; color: var(--ink-2); cursor: default; }
+.st-metrics:focus-visible { outline-offset: 1px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--ink-3); flex: none; }
+.dot.ready { background: var(--add-ink); }
+.dot.starting { background: var(--mark-ink); animation: pulse 1.2s ease-in-out infinite; }
+.dot.failed { background: var(--del-ink); }
+@keyframes pulse { 50% { opacity: .3; } }
+.st-pop { display: none; position: absolute; right: -1px; bottom: calc(100% + 9px); width: 270px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 9px; box-shadow: var(--shadow); padding: 10px 12px 11px; z-index: 30; white-space: normal; }
+.st-metrics:hover .st-pop, .st-metrics:focus .st-pop { display: grid; gap: 7px; }
+.st-pop-h { display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; letter-spacing: .07em; font-size: 10.5px; color: var(--ink-2); margin-bottom: 3px; }
+.st-badge { border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 6px; font-size: 10px; color: var(--ink-3); }
+.st-row { display: flex; justify-content: space-between; gap: 12px; }
+.st-row b { color: var(--ink); font-weight: 600; }
+
 /* The app: the viewer fills the window. */
 html, body { height: 100%; margin: 0; }
 body { overflow: hidden; }
-.vw { height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+.vw { height: 100vh; border: 0; border-radius: 0; box-shadow: none; grid-template-rows: auto minmax(0, 1fr) auto; }
 .vw-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
 .vw-title a { color: var(--ink); text-decoration: none; }
 .vw-title a:hover { text-decoration: underline; }
@@ -329,6 +347,19 @@ body { overflow: hidden; }
   <div class="vw-body">
     <nav class="vw-side" id="vw-side" aria-label="Chains and files"></nav>
     <div class="vw-main" id="vw-main"><div class="empty">Loading the review…</div></div>
+  </div>
+  <div class="vw-status" id="vw-status" hidden>
+    <span class="st-item" id="st-lsp" title="Dart analysis server"><i class="dot off"></i>LSP</span>
+    <span class="st-item st-metrics" tabindex="0" aria-describedby="st-pop"><span data-m="summary">…</span>
+      <span class="st-pop" id="st-pop" role="tooltip">
+        <span class="st-pop-h"><b>Process metrics</b><span class="st-badge">untangle</span></span>
+        <span class="st-row"><span>Resident RAM (RSS)</span><b data-m="rss">…</b></span>
+        <span class="st-row"><span>CPU usage</span><b data-m="cpu">…</b></span>
+        <span class="st-row"><span>Active resources</span><b data-m="resources">…</b></span>
+        <span class="st-row"><span>Language server (RSS)</span><b data-m="lspRss">…</b></span>
+        <span class="st-row"><span>Language server CPU</span><b data-m="lspCpu">…</b></span>
+      </span>
+    </span>
   </div>
 </div>
 <!--HIGHLIGHT-->

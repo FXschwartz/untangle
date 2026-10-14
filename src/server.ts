@@ -93,7 +93,8 @@ export class ReviewServer {
       return this.send(res, 404, 'text/plain', 'Not found');
     }
     const route = url.pathname.slice(base.length);
-    this.log(`${req.method} /${route}${url.search ? ' ?' + [...url.searchParams.keys()].join('&') : ''}`);
+    // The page polls its metrics every few seconds: not worth a line each.
+    if (route !== 'api/metrics') this.log(`${req.method} /${route}${url.search ? ' ?' + [...url.searchParams.keys()].join('&') : ''}`);
     if (route === 'favicon.ico') return this.send(res, 204, 'text/plain', '');
 
     // The token from the printed URL becomes a cookie, and the address bar loses it.

@@ -1346,6 +1346,44 @@
     }, 150);
   });
 
+  // ---------- status bar: whether the language server is up, and the process's metrics (like
+  // px0's). Values change in place, so the popover stays open under the pointer.
+  const statusEl = $('#vw-status');
+  const bytes = (n) => (n == null ? '—' : n < 1048576 ? Math.round(n / 1024) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB');
+  const percent = (x) => (x == null ? '—' : x.toFixed(1) + '%');
+  let metricsMisses = 0, metricsTimer = null;
+  function showMetrics(m) {
+    const set = (k, v) => { const el = statusEl.querySelector(`[data-m="${k}"]`); if (el) el.textContent = v; };
+    const dot = statusEl.querySelector('#st-lsp');
+    if (!m) {
+      dot.innerHTML = '<i class="dot off"></i>untangle stopped';
+      dot.title = 'untangle isn’t answering: run it again to keep reviewing';
+      return;
+    }
+    const lsp = m.lsp;
+    dot.innerHTML = `<i class="dot ${esc(lsp.state)}"></i>LSP`;
+    dot.title = { ready: `Dart analysis server, running (pid ${lsp.pid})`, starting: 'Dart analysis server, starting', off: 'Dart analysis server, not running', failed: `Dart analysis server, failed: ${lsp.error || ''}` }[lsp.state] || '';
+    set('summary', `${percent(m.cpu)} · ${bytes(m.rss)} · ${bytes(lsp.rss)}`);
+    set('rss', bytes(m.rss));
+    set('cpu', percent(m.cpu));
+    set('resources', String(m.resources));
+    set('lspRss', lsp.state === 'ready' ? bytes(lsp.rss) : lsp.state);
+    set('lspCpu', lsp.state === 'ready' ? percent(lsp.cpu) : '—');
+  }
+  function pollMetrics() {
+    clearTimeout(metricsTimer);
+    if (document.visibilityState === 'hidden') return;
+    fetch('api/metrics', { cache: 'no-store' })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((m) => { metricsMisses = 0; showMetrics(m); metricsTimer = setTimeout(pollMetrics, 2000); })
+      .catch(() => { if (++metricsMisses >= 3) return showMetrics(null); metricsTimer = setTimeout(pollMetrics, 2000); });
+  }
+  if (CONFIG.served && statusEl) {
+    statusEl.hidden = false;
+    pollMetrics();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollMetrics(); });
+  }
+
   render({ top: true });
   if (SHIKI) SHIKI.load().then(() => { if (typeof SHIKI.fg === 'function') shikiFg = SHIKI.fg(); shikiOn = true; render(); }).catch(() => {});
 })();

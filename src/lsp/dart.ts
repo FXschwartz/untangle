@@ -112,6 +112,11 @@ export class DartServer {
     ]).finally(() => clearTimeout(timer));
   }
 
+  /** The server's process (the language server's own memory and CPU show in the page). */
+  get pid(): number | null {
+    return this.exited ? null : this.child.pid ?? null;
+  }
+
   /** Where the identifier at a position is defined. */
   async definition(file: string, line: number, col: number): Promise<Location | null> {
     this.open(file);
