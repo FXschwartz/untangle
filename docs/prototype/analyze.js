@@ -3,10 +3,12 @@
 //
 //   node analyze.js <repo> <head-worktree> <diff.json> <defs.json> <out.json> [<compare>:<old-worktree>:<old-defs.json> ...]
 //
-// 1. Edits: tokens of each change block are diffed (core.js); each run of changed tokens
-//    is an edit. For Dart, tree-sitter names the edit: one token replaced by another
-//    ("spaceId → userId in label"), or whole syntax nodes inserted, removed or replaced.
-// 2. Same change: edits with the same tree-sitter description form a group.
+// 1. Edits: tokens of each change block are diffed (core.js). For Dart, tree-sitter names
+//    each run of changed tokens: one token replaced by another ("spaceId → userId in
+//    label"), or whole syntax nodes inserted, removed or replaced. Runs whose syntax nodes
+//    overlap are one edit; a run of punctuation only joins an edit of its statement.
+// 2. Same change: edits with the same tree-sitter description form a group. Punctuation
+//    alone never does.
 // 3. Chains: changes linked by the language server (a changed line uses something declared
 //    on another changed line). Parameters and locals carry a chain across changes;
 //    functions, methods, fields and types start their own chain.
@@ -71,6 +73,17 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     }
     if (!kids.length) return { parentType: lca.parent ? lca.parent.type : 'program', type: lca.type, start: lca.startPosition, end: lca.endPosition, text: src.slice(lca.startIndex, lca.endIndex) };
     return { parentType: lca.type, type: kids.map((k) => k.type).join('+'), start: kids[0].startPosition, end: kids[kids.length - 1].endPosition, text: src.slice(kids[0].startIndex, kids[kids.length - 1].endIndex) };
+  }
+  // The innermost statement or declaration around a region, or null outside of one.
+  const STATEMENTS = new Set(['expression_statement', 'assert_statement', 'switch_statement_case', 'switch_statement_default', 'do_statement', 'break_statement', 'continue_statement', 'yield_statement', 'yield_each_statement', 'return_statement', 'try_statement', 'if_statement', 'while_statement', 'for_statement', 'local_variable_declaration', 'pattern_variable_declaration', 'local_function_declaration', 'import_or_export', 'part_directive', 'part_of_directive', 'annotation', 'declaration', 'static_final_declaration', 'initializer_list_entry', 'enum_constant', 'comment', 'documentation_comment', ...SIGNATURES]);
+  const STATEMENT_STOP = new Set(['function_body', 'class_body', 'block', 'program', 'enum_body', 'extension_body']);
+  function statementOf(tree, r) {
+    if (!tree || !r) return null;
+    for (let n = tree.rootNode.descendantForPosition(r.start, r.end); n; n = n.parent) {
+      if (STATEMENTS.has(n.type)) return n.startIndex + '-' + n.endIndex;
+      if (STATEMENT_STOP.has(n.type)) return null;
+    }
+    return null;
   }
   function nameOf(sig) {
     const byField = sig.childForFieldName && sig.childForFieldName('name');
@@ -159,12 +172,27 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     }
 
     // ---------- edits and their tree-sitter identity
+    // Each run of changed tokens is named by tree-sitter. Runs whose syntax regions overlap are
+    // one edit, and a run of punctuation only (a bracket, a comma, a quote, an empty `///`) joins
+    // an edit of its statement without changing what that edit is.
+    const overlaps = (p, q) => p && q && cmpPos(p.start, q.end) < 0 && cmpPos(q.start, p.end) < 0;
+    const wordy = (d) => CODE_KINDS.has(d.tk.k) || ((d.tk.k === 'str' || d.tk.k === 'com') && /\w/.test(d.tk.t));
+    const sameStatement = (x, y) => (x.stmt.n && x.stmt.n === y.stmt.n) || (x.stmt.o && x.stmt.o === y.stmt.o);
+    const spanUnion = (list) => { const xs = list.filter(Boolean); return xs.length ? [Math.min(...xs.map((x) => x[0])), Math.max(...xs.map((x) => x[1]))] : null; };
+    const regionUnion = (f, list, side) => {
+      const rs = list.map((r) => r[side + 'R']).filter(Boolean);
+      if (!rs.length) return null;
+      let a = rs[0].start, z = rs[0].end;
+      rs.forEach((r) => { if (cmpPos(r.start, a) < 0) a = r.start; if (cmpPos(r.end, z) > 0) z = r.end; });
+      return side === 'new' ? completeRegion(f.newTree, f.newSrc, a, z) : completeRegion(f.oldTree, f.oldSrc, a, z);
+    };
     const edits = [];
+    const editOfAtom = new Map();
     for (const f of files) {
       for (const b of f.blocks) {
-        b.edits = [];
+        const runs = [];
         for (const a of b.atoms) {
-          const e = { id: edits.length, block: b, atom: a, commentOnly: a.commentOnly };
+          const e = { atom: a, commentOnly: a.commentOnly };
           const del = a.del, ins = a.ins;
           const first = (list, side) => pos(side === 'n' ? list[0].row.n : list[0].row.o, list[0].tk.c);
           const last = (list, side) => { const x = list[list.length - 1]; return pos(side === 'n' ? x.row.n : x.row.o, x.tk.c + x.tk.t.length); };
@@ -195,16 +223,51 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           const nl = lines(ins, 'n'), ol = lines(del, 'o');
           e.newSpan = newR ? [newR.start.row + 1, newR.end.row + 1] : nl.length ? [Math.min(...nl), Math.max(...nl)] : null;
           e.oldSpan = oldR ? [oldR.start.row + 1, oldR.end.row + 1] : ol.length ? [Math.min(...ol), Math.max(...ol)] : null;
+          e.newR = newR; e.oldR = oldR;
+          e.punct = !del.concat(ins).some(wordy);
+          e.stmt = { n: statementOf(f.newTree, newR), o: statementOf(f.oldTree, oldR) };
+          runs.push(e);
+        }
+        const up = runs.map((_, i) => i);
+        const top = (i) => (up[i] === i ? i : (up[i] = top(up[i])));
+        for (let i = 0; i < runs.length; i++) {
+          for (let j = i + 1; j < runs.length; j++) {
+            const x = runs[i], y = runs[j];
+            if (overlaps(x.newR, y.newR) || overlaps(x.oldR, y.oldR) || ((x.punct || y.punct) && sameStatement(x, y))) up[top(i)] = top(j);
+          }
+        }
+        const clusters = new Map();
+        runs.forEach((r, i) => { const k = top(i); if (!clusters.has(k)) clusters.set(k, []); clusters.get(k).push(r); });
+        b.edits = [];
+        clusters.forEach((list) => {
+          const named = list.filter((r) => !r.punct);
+          const main = named.length ? named : list;
+          let e;
+          if (main.length === 1) e = { ...main[0] };
+          else {
+            const keys = [...new Set(main.map((r) => r.key))];
+            const nr = regionUnion(f, main, 'new'), or = regionUnion(f, main, 'old');
+            e = { atom: main[0].atom, key: keys.join(' ⊕ '), where: (nr || or).type, from: or ? norm(or.text) : '', to: nr ? norm(nr.text) : '' };
+            e.op = main.every((r) => r.op === 'insert') ? 'insert' : main.every((r) => r.op === 'delete') ? 'delete' : 'replace';
+          }
+          e.id = edits.length; e.block = b;
+          e.atoms = list.map((r) => r.atom);
+          e.runs = list;
+          e.punct = !named.length;
+          e.commentOnly = list.every((r) => r.commentOnly);
+          e.newSpan = spanUnion(list.map((r) => r.newSpan));
+          e.oldSpan = spanUnion(list.map((r) => r.oldSpan));
+          e.atoms.forEach((a) => editOfAtom.set(a, e));
           b.edits.push(e);
           edits.push(e);
-        }
+        });
       }
     }
 
     // ---------- same change: same key, at least two edits; edits that always occur in the
-    // same blocks merge into one group.
+    // same blocks merge into one group. Punctuation alone is never a same change.
     const byKey = new Map();
-    edits.forEach((e) => { if (!byKey.has(e.key)) byKey.set(e.key, []); byKey.get(e.key).push(e); });
+    edits.forEach((e) => { if (e.punct) return; if (!byKey.has(e.key)) byKey.set(e.key, []); byKey.get(e.key).push(e); });
     const bySig = new Map();
     byKey.forEach((list, key) => {
       if (list.length < 2) return;
@@ -361,7 +424,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
       }
       // A declaration whose name token was replaced is one declaration: its old usages
       // join the new name.
-      edits.forEach((e) => {
+      edits.flatMap((e) => e.runs.map((r) => ({ ...r, block: e.block }))).forEach((e) => {
         if (e.op !== 'token' || e.where !== 'declaration') return;
         const od = e.atom.del[0], nd = e.atom.ins[0];
         const ot = old.raw[`${e.block.file.p}:${od.row.o}:${od.tk.c}`];
@@ -401,7 +464,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
     });
     const identToken = (d) => d.tk.k === 'id' || d.tk.k === 'ty' || d.tk.k === 'ann';
     groups.forEach((g) => {
-      const named = g.edits.some((e) => !e.commentOnly && e.atom.del.concat(e.atom.ins).some(identToken));
+      const named = g.edits.some((e) => !e.commentOnly && e.atoms.some((a) => a.del.concat(a.ins).some(identToken)));
       if (!named) return;
       const blocks = new Set(g.edits.map((e) => e.block));
       if (blocks.size < 2) return;
@@ -603,7 +666,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
           const row = [r.type, r.text];
           if (r.toks) {
             const ranges = [];
-            r.toks.forEach((tk) => { if (tk.atom) ranges.push([tk.c, tk.c + tk.t.length, tk.atom.block.edits[tk.atom.block.atoms.indexOf(tk.atom)].id]); });
+            r.toks.forEach((tk) => { if (tk.atom) ranges.push([tk.c, tk.c + tk.t.length, editOfAtom.get(tk.atom).id]); });
             if (ranges.length) row.push(ranges);
           }
           return row;

@@ -345,11 +345,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v6 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v7 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
     <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v5: code that uses generated declarations now links to the model change it was generated from, so <code>− OfflineSyncSpace.currentNode</code> is a chain of 64 changes rooted in <code>space.spy.yaml</code>. A new section gives the measured cost of the second language server.</p>
+    <p class="changed">Changed since v6: a same change now has to be a real edit. Words changed in one comment line are one edit, not “the same change ×5”, and a lone bracket, comma, <code>!</code> or quote is never a same change. In #168 that leaves 25 groups instead of 53, and no change carries more than two “same change” badges, down from five.</p>
   </header>
 
   <section class="section" id="try">
@@ -410,7 +410,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>Imports and docs follow.</b> A new import joins the chains that use what it imports in that file. A Markdown change that names a chain’s member in backticks joins that chain.</li>
             <li><b>Generated code leads back to its model.</b> A usage that the language server resolves into generated code links to the <code>.spy.yaml</code> field it was generated from. Generated <code>Table</code>, <code>Include</code> and <code>Repository</code> classes map to the model class, and a relation’s generated <code>…Id</code> column maps to the relation field.</li>
           </ul>
-          <p class="num">In #168, 359 of the 387 changes fall into 66 chains, 36 of them across files. <code>mergeChanges(userId)</code> is the largest, with 184 changes in 38 files. The model changes form three chains: <code>− OfflineSyncSpace.currentNode</code> (64 changes in 18 files), <code>CrdtNode.localUserUuid</code> (27 in 11) and <code>OfflineSyncSpace.lastHlc</code> (6 in 6). Ten chains start at a removed declaration, such as <code>− OfflineSyncSpaceManager._getOrCreate(transaction)</code>.</p>
+          <p class="num">In #168, 359 of the 387 changes fall into 65 chains, 36 of them across files. <code>mergeChanges(userId)</code> is the largest, with 184 changes in 38 files. The model changes form three chains: <code>− OfflineSyncSpace.currentNode</code> (64 changes in 18 files), <code>CrdtNode.localUserUuid</code> (27 in 11) and <code>OfflineSyncSpace.lastHlc</code> (6 in 6). Ten chains start at a removed declaration, such as <code>− OfflineSyncSpaceManager._getOrCreate(transaction)</code>.</p>
         </div>
         <div class="rule-text">
           <span class="rule-k">Why 28 changes stay outside</span>
@@ -428,18 +428,23 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
           <span class="rule-k">Chain of chains</span>
           <p class="pain"><b>Pain:</b> a big change is several chains that build on each other.</p>
           <p>Each chain has a core: the changes of its root’s member. Chain A uses chain B when A’s core uses a function, method, field or type in B’s core. That gives a hierarchy. Chains that nothing uses come first, and each level depends on the next.</p>
-          <p class="num">In #168 the main family has 58 chains in 9 levels, with the three model chains at the bottom. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Ten chains link to no other.</p>
+          <p class="num">In #168 the main family has 57 chains in 9 levels, with the three model chains at the bottom. Tests use <code>mergeChanges(userId)</code>, which uses <code>_transactionAs</code> and the recorder wrappers. Those use the space manager and the context locks, which use <code>_UserClock</code> and the cache fields. Eight chains link to no other.</p>
         </div>
         <div class="rule-text">
           <span class="rule-k">Same change</span>
           <p class="pain"><b>Pain:</b> the same edit repeated across many call sites.</p>
-          <p>The tokens of each change are diffed. Each run of changed tokens is an edit, and tree-sitter describes it as one of two things:</p>
+          <p>The tokens of each change are diffed, and tree-sitter describes each run of changed tokens as one of two things:</p>
           <ul>
             <li><b>A token replaced by another</b>, in a role: a reference, a declaration name, a named argument or a type.</li>
             <li><b>Complete syntax nodes</b> inserted, removed or replaced.</li>
           </ul>
+          <p>An edit is a piece of syntax, not a token run:</p>
+          <ul>
+            <li><b>Runs whose syntax nodes overlap are one edit.</b> Five changed words in one doc comment line are one edit.</li>
+            <li><b>Punctuation alone is not an edit.</b> A run of only brackets, commas, <code>!</code>, quotes or an empty <code>///</code> joins the edit of its statement, without changing what that edit is. On its own, it is never a same change.</li>
+          </ul>
           <p>Edits with the same description are the same change.</p>
-          <p class="num">In #168: <code>spaceId → userId</code> as a named argument, 156 times. <code>hlcManagerFor → spaceIdFor</code> with <code>.normalizedSpaceId</code> removed, 14 times. 53 groups in all.</p>
+          <p class="num">In #168: <code>spaceId → userId</code> as a named argument, 156 times, all at <code>mergeChanges</code> calls. <code>hlcManagerFor → spaceIdFor</code> with <code>.normalizedSpaceId</code> removed, 14 times. 25 groups in all, down from 53.</p>
         </div>
       </div>
 
@@ -465,10 +470,10 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 to v5 reviews</h2>
+      <h2>Answers from the v2 to v6 reviews</h2>
     </header>
     <ol class="decide">
-      <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another.</span></li>
+      <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another. Overlapping runs are one edit, and punctuation alone never counts.</span></li>
       <li><span class="q">Rebase</span><span>Conflicts go back to unreviewed, after a syntax-aware merge such as mergiraf.</span></li>
       <li><span class="q">Storage</span><span>Snapshots live locally first.</span></li>
       <li><span class="q">Chains</span><span>A whole chain can be marked reviewed at once. Chains are the main navigation, each with a graph, its total diff and a place in the chain map.</span></li>
@@ -533,6 +538,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Q3</span><span><b>Model adapters:</b> the generated-to-model mapping is Serverpod-specific. Should each generator ship a small adapter (Serverpod, freezed, json_serializable, protobuf), or should the mapping be declared in <code>.review.yaml</code>?</span></li>
       <li><span class="q">Q4</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
       <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
+      <li><span class="q">Q6</span><span><b>Same change across symbols:</b> <code>userId → spaceId</code> as a declaration is one group of six different parameters. Requiring the language server to resolve each instance to the same declaration would split it into six. It would also split a class rename from its constructor calls, and an interface method from its override. Keep the syntax-only rule, or require the same symbol?</span></li>
     </ol>
   </section>
 

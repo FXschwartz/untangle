@@ -29,7 +29,7 @@
     search: { q: '', scope: 'unreviewed' },
   };
   try {
-    const saved = JSON.parse(localStorage.getItem('bcr-v5') || 'null');
+    const saved = JSON.parse(localStorage.getItem('bcr-v7') || 'null');
     if (saved) {
       state.rev.base = new Set(saved.rev.base || []);
       state.rev.since = new Set(saved.rev.since || []);
@@ -39,7 +39,7 @@
   } catch (e) { /* storage unavailable */ }
   function save() {
     try {
-      localStorage.setItem('bcr-v5', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
+      localStorage.setItem('bcr-v7', JSON.stringify({ rev: { base: [...state.rev.base], since: [...state.rev.since] }, layout: state.layout, showReviewedDiff: state.showReviewedDiff }));
     } catch (e) { /* ignore */ }
   }
 

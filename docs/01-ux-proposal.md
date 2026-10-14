@@ -1,8 +1,8 @@
-# UX proposal v6: start from the chain map, end in the code
+# UX proposal v7: start from the chain map, end in the code
 
-> Draft v6, 2026-10-13. Replaces v5 (see "History" at the end).
+> Draft v7, 2026-10-13. Replaces v6 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 7).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 8).
 > Prototype sources: [prototype/](prototype/).
 
 ## Requirements
@@ -42,10 +42,14 @@ From the review of v5:
 - **Generated code links back to its model** (`.spy.yaml`).
 - **Measure the cost** of the second language server.
 
+From the review of v6:
+- **"Same change" triggers too much.** One doc-comment edit showed as "the same change
+  ×5", a lone `(` or `!` was a same change, and one rewrite carried up to five badges.
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
-   another.
+   another. Since v7, overlapping runs are one edit and punctuation alone never counts.
 2. **Rebase conflicts** go back to unreviewed. A syntax-aware merge such as
    [mergiraf](https://mergiraf.org) runs first to resolve the simple ones.
 3. **Snapshots live locally first.**
@@ -117,14 +121,20 @@ From the review of v5:
 1. Change blocks are the runs of `-`/`+` lines in a hunk.
 2. Their tokens are diffed with an LCS. Brackets match by nesting depth, and words inside
    comments and strings never match code.
-3. Each run of changed tokens is an edit. For Dart, tree-sitter describes it:
+3. For Dart, tree-sitter describes each run of changed tokens:
    - **one token replaced by another,** with its role: a reference, a declaration name
      (the language server resolves it to itself), a named argument, a type or a keyword;
-   - **otherwise, the smallest run of complete sibling nodes** that covers the edit:
+   - **otherwise, the smallest run of complete sibling nodes** that covers the run:
      inserted, removed or replaced, keyed by node types and normalized text.
-4. Edits with the same description form a group. Groups that always occur in the same
-   blocks merge.
-5. A group instance shows each edit's rows, extended to its whole syntax nodes, with one
+4. An edit is a piece of syntax, not a token run:
+   - **runs whose syntax nodes overlap are one edit,** so five changed words in one doc
+     comment line are one edit;
+   - **a run of punctuation only** (brackets, commas, `!`, quotes, an empty `///`) joins
+     an edit of its innermost statement or declaration, and doesn't change that edit's
+     description.
+5. Edits with the same description form a group. Groups that always occur in the same
+   blocks merge. Punctuation alone never forms a group.
+6. A group instance shows each edit's rows, extended to its whole syntax nodes, with one
    line of context. Small changes are shown whole.
 
 ### Reviewed snapshot
@@ -165,9 +175,10 @@ From the review of v5:
 |---|---:|---:|
 | Hand-written files with changes | 66 | 24 |
 | Change blocks | 387 | 180 |
-| Edits | 822 | 581 |
-| Same-change groups | 53 | 36 |
-| Chains (across files / within a file) | 66 (36 / 30) | 41 (13 / 28) |
+| Edits | 549 | 347 |
+| Same-change groups | 25 | 12 |
+| Changes with 2+ same-change badges (most on one) | 5 (2) | 1 (2) |
+| Chains (across files / within a file) | 65 (36 / 29) | 41 (13 / 28) |
 | Changes in a chain / not in a chain | 359 / 28 | 133 / 47 |
 | Generated files (lines) | 21 (25,731) | 3 (42) |
 
@@ -176,7 +187,7 @@ From the review of v5:
 - **`OfflineSyncDatabase.recordSyncCheckpoint(spaceId)`,** the `userId → spaceId`
   rename, has 16 changes in 6 files.
 - **Removed declarations:** 10 chains start at one, such as
-  `− OfflineSyncSpaceManager._getOrCreate(transaction)` with 14 changes.
+  `− OfflineSyncSpaceManager._getOrCreate(transaction)` with 12 changes.
 - **Old-side language server:** it resolved 1,795 of 1,846 removed-line identifiers
   (main) and 1,223 of 1,246 (snapshot).
 - **Model chains:**
@@ -187,7 +198,22 @@ From the review of v5:
   | `CrdtNode.localUserUuid` | 27 | 11 |
   | `OfflineSyncSpace.lastHlc` | 6 | 6 |
 
-- **Chain of chains:** the main family has 58 chains in 9 levels, with the model chains at
+- **Same change, v6 → v7:**
+
+  | | v6 | v7 |
+  |---|---:|---:|
+  | Edits (vs main) | 822 | 549 |
+  | Same-change groups | 53 | 25 |
+  | Edits in a group | 395 | 258 |
+  | Changes with 2+ badges | 25 | 5 |
+  | Most badges on one change | 5 | 2 |
+  | Badges in `sync_cached_clock_receive_test.dart` | 38 | 11 |
+
+  Every group with an identifier survived whole: `spaceId → userId` (156, all at
+  `mergeChanges` calls), `hlcManagerFor → spaceIdFor` (14), `nodeUuid → .nodeUuidFor(space)`
+  (14). What went away was punctuation (`(` ×9, `!` ×6, `,` ×5, `}` ×4, `'` → `"` ×4, empty
+  `///` ×8) and self-repeats (one doc-comment line counted 5 times).
+- **Chain of chains:** the main family has 57 chains in 9 levels, with the model chains at
   the bottom. Tests use
   `mergeChanges(userId)`, which uses `_transactionAs` and the recorder wrappers. Those use
   the space manager and context locks, which use `_UserClock` and the cache fields.
@@ -250,6 +276,11 @@ From the review of v5:
   review?
 - **Q5.** For large graphs, should busy levels collapse into "+N more", or should nodes be
   grouped by file?
+- **Q6.** Should a same change also need the same symbol? `userId → spaceId` as a
+  declaration is one group of six different parameters. Requiring the language server to
+  resolve each instance to the same declaration would split it into six, but it would
+  also split a class rename from its constructor calls and an interface method from its
+  override.
 
 ## History
 
@@ -278,6 +309,8 @@ From the review of v5:
 - **v5:** old-side language server, map first.
   - Feedback: link generated code to its YAML model, and measure the cost of the second
     server.
+- **v6:** model links, measured cost of the second server.
+  - Feedback: "same change" triggers too much.
 
 ## References
 
