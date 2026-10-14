@@ -152,3 +152,86 @@ protobuf are checked on a fixture (`prototype/make_fixture.sh`), since none of t
 those generators.
 
 **Still open:** moves are detected for whole declarations only, and only in Dart.
+
+## Round 2: four Serverpod PRs
+
+> 2026-10-14. The v12 rules, unchanged, on a different and much larger repository: Serverpod,
+> a pub workspace of 165 packages. Each PR was fetched by commit only; its diff starts at the
+> merge base GitHub reports.
+
+| PR | Files (reviewed / generated) | Changes | Chains | In a chain | Tests in chains | Run time |
+|---|---:|---:|---:|---:|---:|---:|
+| #5864 MCP `tail_runner_logs` tool (normal) | 8 / 0 | 29 | 5 | 38% | 0 / 8 | 21 s |
+| #5706 Embedded Postgres over TCP and socket (dense) | 29 / 1 | 261 | 56 | 81% | 89 / 112 | 66 s |
+| #5471 Custom class column types (normal, bigger) | 17 / 1 | 146 | 23 | 99% | 85 / 86 | 58 s |
+| #5630 Model projections (generated-heavy) | 37 / 476 | 264 | 78 | 80% | 28 / 49 | 132 s |
+
+"Tests" here counts `*_test.dart` files and files under `test*/` directories; the current
+rule only knows `test/`.
+
+### Pipeline fixes needed to run them
+
+- **Generated files were read from the wrong place.** `git check-attr` read `.gitattributes`
+  from whatever was checked out, not from the PR head. In a fetch-only repository nothing
+  is checked out, so Serverpod's own markers (`**/generated/**`, `**/protocol/**`) were
+  ignored, and #5630's 331,588 generated lines would have gone through the language server.
+  Fixed with `check-attr --source <head>`, and the adapters' generated patterns now reach
+  the export step too (`adapters.js`, `generated_globs.js`).
+- **References were too slow.** In a 165-package workspace each references request took
+  about 2 seconds. The changed-usage badges now come from inverting the definitions
+  (`refs_from_defs.py`): the same output with no request, and it also finds usages the
+  references request missed (locals used in another block of the same function).
+- **Workspaces with Flutter packages** fall back to `flutter pub get`; monorepos without a
+  workspace get one `pub get` per package that holds a changed Dart file.
+
+### What held up
+
+- **Scale:** 21 to 132 seconds per PR, with definitions taking 8 to 78 seconds even in this
+  workspace.
+- **Generated code:** #5630's 476 generated files are set aside and 443 stay peekable.
+- **New code stays together:** #5471's new `CustomClassAnalyzer` is one chain of 66 changes
+  with its new file, and #5471 has 99% of its changes in chains.
+
+### What broke, most damaging first
+
+1. **Names in strings link nothing.** The language server can't see a name used as a string:
+   - #5864's feature is an MCP tool called by name. Its tests (`callTool(name:
+     'tail_runner_logs')`), the error message and three docs only share that string, so 18
+     of its 29 changes stay outside.
+   - #5630's generator tests assert generated class names as strings (`'FullModelInclude'`),
+     which are names of changed declarations.
+   - *Proposed rule (needs a decision; it goes beyond the language server):* an
+     identifier-like string literal on a changed line links to a changed declaration with
+     that name, or to the other changes that introduce the same literal; a backticked span
+     in Markdown counts the same way.
+2. **Test detection is too narrow.** Only `test/` directories count. Serverpod's
+   integration tests live in `test_integration/`, so #5630's integration tests got no
+   per-test changes and no call-graph links.
+   - *Fix:* a test is a `*_test.dart` file, or a file under a `test*/` or
+     `integration_test/` directory.
+3. **Calls through unchanged test helpers aren't followed.** The call graph only starts
+   from production declarations. #5864's tests build the server through `_makeBridgePair`, a
+   helper whose call reaches the changed `BridgeMcpServer` constructor; #5630's go through
+   `CompilationUnitHelpers`. Both runs had no starting point at all.
+   - *Fix:* start the call graph from test helpers too.
+4. **Import prefixes become chains.** `import 'package:path/path.dart' as p` makes a chain
+   named `p` of every change that calls `p.join`: 34 changes in #5471 (its third-largest
+   chain), 11 in #5706, and `pg` and `path` besides.
+   - *Fix:* an import prefix starts no chain; its import joins the chains that use it.
+5. **A field and the parameter that sets it are two declarations.** An existing class with
+   new fields becomes a chain per field: `EmbeddedPostgresOptions` is six chains in #5706,
+   `TypeDefinition` five in #5471.
+   - *Fix:* a field and its `this.field` constructor parameter are one declaration.
+6. **Each field of a new model is a chain.** #5630's six largest chains are single fields
+   of four new test models (`ProjectedAddress.street`, `ProjectedUser.name`…).
+   - *Fix:* fold a new model's field chains into one chain per model, as for new types.
+7. **Serverpod model files ending in `.spy` or `.spy.yml` are missed**; only `.spy.yaml`
+   is known. #5630's `projected_json_field.spy` got no model links.
+8. **Families ignore shared changes,** although the rule says chains that share changes
+   are one family. #5864's feature is two chains that share two changes, in two families.
+9. **Imports from the same package don't link.** `import 'package:serverpod_cli/…'` inside
+   `serverpod_cli` isn't treated like a relative import.
+   - *Fix:* resolve `package:` imports of workspace packages through the package config.
+
+**Still untested:** none of these PRs renames a file, and none touches freezed or protobuf
+generated code.

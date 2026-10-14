@@ -12,11 +12,11 @@ Prerequisites:
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `python3 export_diff.py <repo> diff.json base=<base>..<head>=<label> [since=<snapshot>..<head>=<label>]` | Exports `git diff -U3` hunks per file for each comparison. Generated files get stats only. |
+| 1 | `python3 export_diff.py <repo> diff.json [--generated=$(node generated_globs.js <repo> <head>)] base=<base>..<head>=<label> [since=<snapshot>..<head>=<label>]` | Exports `git diff -U3` hunks per file for each comparison. Generated files (the head's `.gitattributes`, plus the adapters' and `.review.yaml`'s patterns) get stats only. |
 | 2 | `node positions.js diff.json positions.json <head>` | Identifier positions on the head side of the diff, plus the called function of every changed argument list, even above the hunk. |
 | 3 | `python3 lsp_index.py <head> positions.json defs.json` | Asks `dart language-server` for every identifier's definition. |
 | 4 | `python3 slim_defs.py defs.json defs_slim.json` | Keeps only what the page embeds for go to definition. |
-| 5 | `python3 lsp_refs.py <head> diff.json defs.json refs.json` | References of declarations on added lines that fall on added lines elsewhere (the "changed usages" badges). |
+| 5 | `python3 refs_from_defs.py <head> diff.json defs.json refs.json` | Changed usages of declarations on added lines (the "changed usages" badges), by inverting the definitions; no language-server request. |
 | 5a | `python3 lsp_calls.py <head> diff.json defs.json calls.json` | Outgoing calls (call hierarchy), up to 3 levels, from what changed tests call. Tests link to the first changed function on each path. |
 | 5b | `python3 lsp_supers.py <head> diff.json defs.json supers.json` | What each declaration on an added line overrides (`dart/textDocument/super`). Changed overrides of the same method join one chain. |
 | 5b | `node positions_old.js base diff.json positions_old_base.json`, then `python3 lsp_index.py <base-worktree> positions_old_base.json defs_old_base.json` | The same for removed lines, on the old side's checkout. Repeat per comparison. |

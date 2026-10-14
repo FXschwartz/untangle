@@ -39,27 +39,7 @@ const YAML = require(DEPS + '/yaml');
 // adapter that switches on by what the repository contains; .review.yaml at the root can add
 // generated patterns, turn an adapter on or off, or declare a YAML-model mapping of its own.
 const PEEK_MAX_LINES = 2000;
-const ADAPTERS = {
-  // Serverpod: a generated class maps to its model class (minus the suffix), a field to the
-  // model field of the same name, and a relation's …Id column to the relation.
-  serverpod: {
-    detect: /\.spy\.yaml$/, generated: ['**/generated/**', '**/migrations/**'],
-    model: { kind: 'yaml', generated: ['**/generated/**'], source: '**/*.spy.yaml', classSuffixes: 'Table|Include|IncludeList|Repository|AttachRepository|AttachRowRepository|DetachRepository|DetachRowRepository' },
-  },
-  // Generated part files (build_runner: freezed, json_serializable, built_value, riverpod...):
-  // a generated declaration maps to the one it was generated for, in the library that owns
-  // the part. _$User, $UserCopyWith and _User map to User, and their members to User's.
-  build_runner: {
-    detect: /\.(g|freezed)\.dart$/, generated: ['**/*.g.dart', '**/*.freezed.dart', '**/*.gr.dart', '**/*.config.dart', '**/*.mocks.dart'],
-    model: { kind: 'part', generated: ['**/*.g.dart', '**/*.freezed.dart'] },
-  },
-  // Protobuf: a generated message class maps to its .proto message, and a getter (or its
-  // has/clear/ensure accessor) to the field of the same name in snake_case.
-  protobuf: {
-    detect: /\.proto$/, generated: ['**/*.pb.dart', '**/*.pbenum.dart', '**/*.pbjson.dart', '**/*.pbserver.dart', '**/*.pbgrpc.dart'],
-    model: { kind: 'proto', generated: ['**/*.pb.dart'], source: '**/*.proto' },
-  },
-};
+const { ADAPTERS } = require('./adapters.js');
 const compileMapping = (name, m) => ({ name, kind: m.kind || 'yaml', generated: [].concat(m.generated || []).map(C.globToRegExp), source: m.source ? C.globToRegExp(m.source) : null, classSuffixes: m.classSuffixes ? new RegExp('(' + m.classSuffixes + ')$') : null, fields: new Map() });
 
 const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };

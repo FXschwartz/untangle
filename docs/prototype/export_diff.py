@@ -1,20 +1,24 @@
 """Exports the raw git diff of a PR as JSON, with no analysis.
 
-For every changed file: path, status, +/- counts and whether .gitattributes marks it
-linguist-generated. Files matching the review config's generated patterns get stats
-only; every other file gets its unified-diff hunks (-U3), exactly as git produced them.
+For every changed file: path, status, +/- counts and whether the right side's .gitattributes
+marks it linguist-generated. Generated files (that, or a --generated pattern: the adapters'
+and .review.yaml's, from generated_globs.js) get stats only; every other file gets its
+unified-diff hunks (-U3), exactly as git produced them.
 """
 import json, re, subprocess, sys
 
-# python3 export_diff.py <repo> <out.json> <name>=<left>..<right>[=<label>] ...
+# python3 export_diff.py <repo> <out.json> [--generated=<json globs>] <name>=<left>..<right>[=<label>] ...
 repo, out = sys.argv[1], sys.argv[2]
 COMPARES = {}  # name -> (left, right, label)
+CONFIG_GENERATED = []
 for arg in sys.argv[3:]:
+    if arg.startswith('--generated='):
+        CONFIG_GENERATED = json.loads(arg[len('--generated='):])
+        continue
     name, rng, *label = arg.split('=', 2)
     left, right = rng.split('..')
     COMPARES[name] = (left, right, label[0] if label else f'{name} · {left[:7]}')
 assert COMPARES, 'give at least one <name>=<left>..<right>'
-CONFIG_GENERATED = ['**/migrations/**']  # same patterns the page shows as the review config
 
 def git(*args):
     return subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True, check=True).stdout
@@ -57,7 +61,7 @@ for name, (left, right, label) in COMPARES.items():
         numstat[path] = (int(a) if a != '-' else 0, int(d) if d != '-' else 0)
     attrs = {}
     paths = sorted(status)
-    attr_out = subprocess.run(['git', '-C', repo, 'check-attr', '--stdin', 'linguist-generated'],
+    attr_out = subprocess.run(['git', '-C', repo, 'check-attr', '--source', right, '--stdin', 'linguist-generated'],
                               input='\n'.join(paths), capture_output=True, text=True, check=True).stdout
     for row in attr_out.splitlines():
         p, _, v = row.rsplit(': ', 2)
