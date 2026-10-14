@@ -9,7 +9,7 @@ import type { Status } from './narrate.js';
 export interface Api {
   /** The review page, once it's built. */
   page(): string | null;
-  /** Static files the page loads (the highlighter), by name. */
+  /** Static files the page loads (the highlighter, the fonts), by name. */
   asset(name: string): { type: string; body: Buffer } | null;
   /**
    * The page's API: api/<route>, with the query and the body (JSON) of the request, and the head

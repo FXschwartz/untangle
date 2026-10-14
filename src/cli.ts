@@ -11,7 +11,7 @@ import { gitMaybe } from './exec.js';
 import { LiveSession } from './live.js';
 import { Narrator, type Status } from './narrate.js';
 import { openBrowser } from './open.js';
-import { highlighter, progressPage, reviewPage, type PageConfig } from './page.js';
+import { fonts, highlighter, progressPage, reviewPage, type PageConfig } from './page.js';
 import { ReviewServer } from './server.js';
 import { editorFrom, ReviewSession } from './session.js';
 import { isPrUrl, latestHead, resolveDirectory, resolveUrl, type Target } from './target.js';
@@ -64,9 +64,8 @@ async function main(): Promise<number> {
       {
         page: () => (render && session ? render(session.config()) : null),
         asset: (name) => {
-          if (name !== 'highlight.js') return null;
-          const body = highlighter();
-          return body && { type: 'text/javascript; charset=utf-8', body };
+          const body = name === 'highlight.js' ? highlighter() : name === 'fonts.css' ? fonts() : null;
+          return body && { type: name.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', body };
         },
         call: (route, method, query, body, head) => {
           if (route === 'refresh') return method === 'POST' ? refresh() : check(query.has('check'));

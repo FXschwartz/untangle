@@ -129,6 +129,18 @@ export class DartServer {
     return { path: uriPath(uri), line: range.start.line, col: range.start.character };
   }
 
+  /** Declarations whose name matches a query, in the packages analyzed so far (workspace/symbol). */
+  async symbols(query: string): Promise<Array<{ name: string; kind: number; container: string | null; location: Location }>> {
+    type Info = { name: string; kind: number; containerName?: string; location: { uri: string; range?: LspRange } };
+    const res = (await this.request<Info[] | null>('workspace/symbol', { query })) || [];
+    return res.filter((x) => x.location && x.location.uri.startsWith('file:')).map((x) => ({
+      name: x.name,
+      kind: x.kind,
+      container: x.containerName || null,
+      location: { path: uriPath(x.location.uri), line: x.location.range ? x.location.range.start.line : 0, col: x.location.range ? x.location.range.start.character : 0 },
+    }));
+  }
+
   /** The declaration that the one at a position overrides (dart/textDocument/super). */
   async superOf(file: string, line: number, col: number): Promise<Location | null> {
     this.open(file);

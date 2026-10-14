@@ -32,6 +32,7 @@ export interface LiveTarget {
 
 const MAX_FILE = 4 << 20;
 const SEARCH_MAX = 500;
+const SYMBOLS_MAX = 200;
 
 export class LiveSession {
   private server: DartServer | null = null;
@@ -137,6 +138,26 @@ export class LiveSession {
     return { side: null, p, ext: this.externalId(loc.path), abs: loc.path, w, ...snippet };
   }
 
+  /**
+   * Declarations at the head whose name matches a query, from the language server. It knows the
+   * packages of the files it has open, so the review's files are opened first.
+   */
+  async symbols(q: string, files: string[]): Promise<Array<{ name: string; kind: number; container: string | null; p: string; l: number; c: number }>> {
+    const server = await this.ensure();
+    const { headDir } = await this.checkouts();
+    server.openAll(files.filter((p) => p.endsWith('.dart')).map((p) => path.join(headDir, p)).filter((f) => fs.existsSync(f)));
+    let found = await server.symbols(q);
+    // Asked while the server rebuilds its contexts, it answers nothing: once more, a moment later.
+    if (!found.length) found = await new Promise((r) => setTimeout(r, 400)).then(() => server.symbols(q));
+    const out: Array<{ name: string; kind: number; container: string | null; p: string; l: number; c: number }> = [];
+    for (const x of found) {
+      if (!x.location.path.startsWith(headDir + '/')) continue;
+      out.push({ name: x.name, kind: x.kind, container: x.container, p: x.location.path.slice(headDir.length + 1), l: x.location.line + 1, c: x.location.col });
+      if (out.length >= SYMBOLS_MAX) break;
+    }
+    return out;
+  }
+
   /** A whole file: at a side's commit (from git, so a checkout that moved on doesn't matter), or one outside the repository. */
   async file(where: { side?: string; p?: string; ext?: number }): Promise<{ text: string; abs: string | null } | { error: string }> {
     if (where.ext != null) {
@@ -218,6 +239,26 @@ export class LiveSession {
     const file = await this.resolve(where);
     return file && fs.existsSync(file) ? file : null;
   }
+}
+
+/**
+ * The lines at `to` that changed since `from`, by file: [first, last] ranges, for the page to show
+ * after it moves to newer commits. Empty when `from` isn't in the repository.
+ */
+export function changedSince(repo: string, from: string, to: string): Record<string, Array<[number, number]>> {
+  const out: Record<string, Array<[number, number]>> = {};
+  const diff = gitMaybe(repo, 'diff', '--unified=0', '--no-color', '--no-ext-diff', '--no-renames', from, to, '--');
+  if (!diff) return out;
+  let file: string | null = null;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ')) file = line.startsWith('+++ b/') ? line.slice(6) : null;
+    else if (file && line.startsWith('@@')) {
+      const m = /\+(\d+)(?:,(\d+))?/.exec(line);
+      const start = m ? Number(m[1]) : 0, count = m && m[2] != null ? Number(m[2]) : 1;
+      if (count) (out[file] ??= []).push([start, start + count - 1]);
+    }
+  }
+  return out;
 }
 
 /** Opens a location with the editor command: {file}, {line} and {col} are replaced in its words. */

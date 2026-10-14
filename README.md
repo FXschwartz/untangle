@@ -32,7 +32,7 @@ comments.
 
 ```
 npm install
-npm run build   # the TypeScript, and the highlighter bundle (dist/highlight.js)
+npm run build   # the TypeScript, the highlighter (dist/highlight.js) and the fonts (dist/fonts.css)
 npm link        # puts `untangle` on PATH
 ```
 
@@ -56,48 +56,81 @@ same review again is immediate.
 
 ## In the page
 
+The page is dark and quiet: the code sits on a sheet over a darker ground, amber marks what's
+left to review, a check what's done, blue what comes from GitHub, and red and green stay in the
+diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both bundled.
+
+- **Getting around.**
+  - **The review pill** under the code says where you are among the view's changes to review
+    ("3 of 14"), with the previous and next one, and **Mark and go to the next** (Space).
+  - **Jump to** (Ctrl K, or the box in the top bar) finds a chain, a file, a thread, or a
+    declaration anywhere in the repository (from the language server), by a few letters of its
+    name; Tab narrows it to one kind. It also searches the changed lines, or the whole
+    repository at the head or the base (`git grep`).
+  - **Keys:** j and k for the next and previous change to review, Space to mark it and go on,
+    Shift+Space for its hunk (its member, in a chain), n and p for the next and previous chain
+    with changes to review, c to comment on the line, Ctrl B for the sidebar, Esc to close; `?`
+    lists them.
+  - **A view's header** is one row: where you are (Map / chain, or Files / folder / file), what
+    it holds, ↑ and ↓ for every change, a ⋯ menu, and the view's one action (Mark chain
+    reviewed). The menu holds open in the editor, the whole file, side by side, the diffs of
+    reviewed code, the minimap, a comment on the file, the chain map and the chains a chain
+    uses or is used by. A file's "In 3 chains" lists its chains.
+  - **A chain** shows its members as a row of pills, by level, each with what's left in it;
+    Graph draws them as before, and a member's counts and "Mark reviewed" show on hover.
+- **The code** has one gutter: the review mark (muted until the pointer is on its line), one
+  line number (the old one, in red, for a removed line) and the sign. Same changes elsewhere and
+  changed usages are grey notes at the line's end.
 - **Go to definition anywhere.** Names on changed lines answer at once (computed ahead). Any
   other name, in a whole file, inside a peek or on a removed line, asks the language server;
   in a peek, clicking a name moves the peek there and Back returns.
-- **More of the file.** The band above each hunk stands for the lines hidden above it: click it
-  for 20 more (up from the hunk, or down from the one before), or all of them when 20 or fewer
-  are left, as on GitHub. The band after the last hunk shows the rest of the file. Chain views
-  grow the same way. An exported page grows only within hunks.
-- **Whole files.** A file's map icon shows the whole file around its diff, and back to the
-  changed chunks. "Open file" in a peek or a search result opens a changed file that way, at
+- **More of the file.** The divider above each hunk (its first line and context, in grey)
+  stands for the lines hidden above it: click it for 20 more (up from the hunk, or down from the
+  one before), or all of them when 20 or fewer are left, as on GitHub. Its buttons, and "Mark
+  hunk reviewed", show under the pointer. The divider after the last hunk shows the rest of the
+  file. Chain views grow the same way. An exported page grows only within hunks.
+- **Whole files.** "Show the whole file" in a file's ⋯ menu shows it around its diff, and back
+  to the changed chunks. "Open file" in a peek or a search result opens a changed file that way, at
   the line; any other file, at either side or outside the repository (a package, the SDK),
   opens on its own with the lines the review changes marked. Names in them go to definition.
-- **Tools** in each view's header, with VS Code's icons: open in the editor, previous and next
-  change, the whole file or only its changed chunks, and inline or side by side.
 - **The Files tab** is a folder tree, folders first; a folder holding only one folder shows with
   it (`lib/src/mcp`), as VS Code compacts them.
-- **Search** the changed lines, or the whole repository at the head or the base (`git grep`).
+- **Panels:** drag the sidebar's edge to resize it (double-click it, or Ctrl B, to hide it). A
+  **minimap** at the right of the code shows the view small, with the diff's colors, amber for
+  what's left to review and blue for threads; click or drag it to move. Both are kept in the
+  browser.
+- **Motion:** marking a hunk reviewed fills its check, settles its diff and folds it into its
+  divider while the code below glides up; lines shown from a divider open downward from it; a
+  peek grows from its line; going to a change scrolls to it and pulses it. After a refresh, the
+  lines the new commits changed glow once. With "reduce motion" set in the system, none of it.
 - **Highlighting** with [Shiki](https://shiki.style): VS Code's grammars and its Dark+ theme.
   Names a grammar leaves plain (variables, properties, parameters) are colored as VS Code's
   semantic highlighting does.
-- **Status bar:** whether the language server is up, and untangle's and the language server's
-  memory and CPU (hover for the details), as px0 shows them.
-- **Open in editor** from a view's tools and from peeks: a `vscode://` link by default (through WSL
+- **The language server's dot** in the top bar: green when it's up; hover for untangle's and the
+  language server's memory and CPU, as px0 shows them.
+- **Open in editor** from a view's ⋯ menu and from peeks: a `vscode://` link by default (through WSL
   when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
   or a URL template such as `cursor://file{file}:{line}:{col}`.
 - **The pull request's comments, as on GitHub** (through `gh`): threads under the lines they're
-  on, with replies, reactions and suggestions; the Comments tab lists the open and resolved ones,
-  and the conversation (the description, comments and reviews).
+  on, with replies, reactions and suggestions; the Threads tab lists the open and resolved ones,
+  and the conversation (the description, comments and reviews). A thread is one quiet block with
+  GitHub's blue on its edge: the author once per run of comments, tools under the pointer, and
+  Reply and Resolve on one row.
   - **Writing:** the **+** over a line's number starts a comment; drag it over more lines of the
     hunk (or shift-click another line's) for a range. "Add single comment" posts it now; "Start a review" keeps it, and
     the comments after it, in your pending review. Write and Preview, Ctrl+Enter, and
-    "Suggest a change" for lines on the new side. Comment on a whole file from its tools.
+    "Suggest a change" for lines on the new side. Comment on a whole file from its ⋯ menu.
     Typing `@` suggests people and teams to mention, `#` issues and pull requests to link
     (↑/↓, Enter or Tab, Esc), as on GitHub.
   - **Threads:** reply, resolve and unresolve, edit and delete your comments, react. A reviewed
     hunk stays open while a conversation in it is.
-  - **Finishing:** "Finish your review" in the top bar submits it as a comment, an approval or a
-    request for changes, or discards it.
+  - **Finishing:** Review in the top bar ("Finish review" while comments are pending) submits it
+    as a comment, an approval or a request for changes, or discards it.
   - What you type is kept in the browser until it's sent. The page checks GitHub every minute.
     When the pull request has newer commits than the review, comments on lines wait for a
     refresh; replies, file comments and reviews don't.
 - **Refreshing without a restart.** When the pull request (or the branch) gets new commits, a
-  banner offers to refresh, as GitHub does; the button next to the title looks for them anytime.
+  banner offers to refresh, as GitHub does; the button next to the commit looks for them anytime.
   untangle builds the new review while the page keeps working on the current one, then the page
   reloads on the same view, with marks carried over and unsent comments kept. A page left on the
   old review, in another tab, is told to reload instead of saving marks onto the new one.
@@ -108,7 +141,8 @@ same review again is immediate.
   When the base moves (a rebase), the branch is replayed onto the new base with a 3-way merge,
   [mergiraf](https://mergiraf.org) first when it's installed; what still conflicts goes back to
   unreviewed. For a URL, the branch lives in the cached clone; for a directory, in your
-  repository. Marks on part of a change stay next to the analysis.
+  repository. Marks on part of a change stay next to the analysis. The sidebar's ··· menu says
+  where they are, and resets them.
 
 `-export review.html` writes the same page as one HTML file, for sharing a review read-only:
 everything computed ahead, marks kept in the reader's browser, and the generated diffs that fit
@@ -149,7 +183,10 @@ in 1 MB.
 |---|---|
 | `src/` | The CLI, the server and the pipeline, in TypeScript |
 | `analysis/` | The analysis rules (`analyze.js`) and the generated-code adapters, shared with the prototype |
-| `viewer/` | The page: `index.html`, `viewer.js`, `highlight.js` (Shiki, bundled by the build), and `core.js` (the tokenizer and diff, used by both sides) |
+| `viewer/` | The page: `index.html`, `viewer.js`, `highlight.js` (Shiki, bundled by the build), `fonts.css` (the two faces, bundled by the build), and `core.js` (the tokenizer and diff, used by both sides) |
+| `docs/` | The UX proposal, the test runs, and the prototype pipeline that produced them |
 
 The page's icons are VS Code's [Codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0).
-| `docs/` | The UX proposal, the test runs, and the prototype pipeline that produced them |
+Its faces are [Schibsted Grotesk](https://github.com/schibsted/schibsted-grotesk) and
+[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both under the SIL Open Font
+License 1.1, from [Fontsource](https://fontsource.org).

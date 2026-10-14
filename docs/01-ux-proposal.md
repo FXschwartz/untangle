@@ -2,7 +2,8 @@
 
 > Draft v13, 2026-10-14. Replaces v12 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 14).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 15,
+> with the "Calmer by default" proposal that `untangle`'s page now follows).
 > Prototype sources: [prototype/](prototype/).
 > Test runs of these rules on #157, #166, #162 and four Serverpod PRs: [02-test-runs.md](02-test-runs.md).
 
@@ -280,17 +281,39 @@ From the review of v11:
   to the chain.
 - **Each view has its own hunks.** A chain section shows each change with 3 lines of
   context, merged when they touch. Folding a hunk in one place never folds another.
-- **More of the file, as on GitHub.** The band above a hunk is its header and stands for the
-  lines hidden above it. Clicking it shows 20 more, up from the hunk or down from the one
-  before, or all of them when 20 or fewer are left; a band after the last hunk shows the rest.
-  A chain section grows the same way, across hunks and the lines between them. The map icon
-  shows the whole file around the diff, read-only, with go to definition on every name.
-- **A view's tools** are icons, as VS Code's diff editor has them: open in the editor,
-  previous and next change, the whole file or only its changed chunks, inline or side by side.
+- **More of the file, as on GitHub.** The divider above a hunk (its first line and context, in
+  grey) stands for the lines hidden above it. Clicking it shows 20 more, up from the hunk or down
+  from the one before, or all of them when 20 or fewer are left; a divider after the last hunk
+  shows the rest. A chain section grows the same way, across hunks and the lines between them.
+  "Show the whole file" shows the whole file around the diff, read-only, with go to definition
+  on every name.
+- **Calmer by default.** Three surfaces (the ground, the sheet the code sits on, what floats over
+  it) instead of borders; one accent, amber, for what's left to review; a check for what's done;
+  blue for GitHub; Schibsted Grotesk for the interface and JetBrains Mono for code and names.
+  Each view shows one action and a way to the next change; the rest waits on hover, in a menu,
+  or on a key.
+- **A view's header is one row:** a breadcrumb (Map / chain, Files / folder / file), what it
+  holds, ↑ and ↓ for every change, a ⋯ menu (open in the editor, the whole file, side by side,
+  the diffs of reviewed code, the minimap, a comment on the file, the chain map, uses and used
+  by), and the view's one action. A file's chains are one control, "In 3 chains".
+- **One gutter:** the review mark, muted until the pointer is on its line; one line number
+  (the old one, in red, for a removed line); the sign. Same changes elsewhere and changed usages
+  are grey notes at the line's end. A hunk's divider shows "Mark hunk reviewed" on hover.
+- **Getting around:** the review pill (where you are among the view's changes to review, and
+  "Mark and go to the next", Space), Jump to (Ctrl K: chains, files, threads, and declarations
+  from the language server's workspace symbols), and keys (j, k, Space, Shift+Space, n, p, c,
+  Esc; `?` lists them).
+- **Motion:** what changes moves from where it was to where it goes, in 120 to 280 ms, easing
+  out. A reviewed hunk's check fills, its diff settles and it folds into its divider while the
+  code below glides up; lines shown from a divider open downward from it; a peek grows from its
+  line; going to a change scrolls to it and pulses it; another view fades in. With "reduce
+  motion", all of it is instant.
+- **Panels:** the sidebar resizes from its edge and hides (Ctrl B); a minimap at the right of the
+  code shows the view small, with what's left to review in amber and threads in blue.
 - **The Files tab is a folder tree,** folders first, with a folder that holds only one folder
   shown with it (`lib/src/mcp`), as VS Code compacts them.
 - **The pull request's comments, as on GitHub.** Threads show under their lines (a resolved one
-  folds), with replies, reactions and suggestions. A Comments tab lists them, open ones first,
+  folds), with replies, reactions and suggestions. A Threads tab lists them, open ones first,
   with the conversation (description, comments, reviews). The **+** over a line starts a comment
   (drag it, or shift-click, for a range in the hunk): a single comment, or one kept in the pending review that
   "Finish your review" submits as a comment, an approval or a request for changes. A reviewed
@@ -298,9 +321,11 @@ From the review of v11:
 - **Refresh in place.** New commits on the pull request show as a banner with Refresh, as on
   GitHub. untangle builds the new review in the background, and the page reloads on the same
   view when it's ready.
-- **Clicking a graph node** shows only that node's code and dims unrelated nodes.
+- **A chain's members** show as a row of pills by level, each with what's left in it; clicking
+  one scrolls to its code. Graph draws them, and clicking a graph node shows only that node's
+  code and dims unrelated nodes.
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
-  stay in place, muted. "Next unreviewed" (key `n`) walks the same order.
+  stay in place, muted. Keys `n` and `p` walk the same order.
 - **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
   of one test file lists its tests by `group(...)` instead of drawing a graph.
 - **The rest of a member:** a chain section folds the member's other changes, which belong to
@@ -315,7 +340,7 @@ From the review of v11:
   it. "Back to definition" returns. Usage snippets are highlighted like the code.
 - **Dark palette** with VS Code Dark+-style syntax colors. Function names are told apart
   from other identifiers.
-- **Unified by default, split on demand** from a view's tools. Split pairs removed and added
+- **Unified by default, split on demand** from a view's ⋯ menu. Split pairs removed and added
   lines per change and wraps long lines.
 
 ## Numbers on #168 (computed by the prototype)
@@ -425,6 +450,7 @@ untangle [flags] <pr-url>      # cloned into the cache first
 | Go to definition | Answered ahead of time for the identifiers in the diff (about 8,500 on the new side). A definition outside the diff opens as a snippet of up to 10 lines. | Asked live on click, anywhere: whole files, inside a peek, removed lines. |
 | Files | Diff hunks only (a chain section grows within its hunk) | The whole file around its diff, and any file at either revision |
 | Search | Changed lines | Changed lines, plus the repository at either revision (`git grep`) |
+| Jump to (Ctrl K) | Chains, files | Chains, files, threads, and declarations from the language server |
 | Highlighting | A regex tokenizer, with real rules for Dart and YAML only | [Shiki](https://shiki.style): VS Code's TextMate grammars and its Dark+ theme |
 | Review marks | Browser storage | Commits on the reviewed-snapshot branch |
 | GitHub comments | None | Read and written through `gh`, as the user: threads, replies, pending reviews, reviews |
@@ -556,6 +582,10 @@ through the page.
     Done.
   - Asked: suggestions for `@` (people, teams) and `#` (issues, pull requests) in comments. Done;
     image uploads aren't possible through GitHub's API.
+  - Asked: a cleaner interface (colors, borders, spacing, fonts, placement, navigation) and
+    motion that makes it smoother, drawn first in the prototype page ("Calmer by default").
+    Then: build all of it, with resizable panels, a minimap, and a review mark muted until
+    hovered. Done.
 
 ## References
 

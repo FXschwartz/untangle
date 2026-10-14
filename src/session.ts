@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Progress, ReviewData } from './build.js';
 import { reviewDir } from './cache.js';
-import { LiveSession, openInEditor, type Side } from './live.js';
+import { changedSince, LiveSession, openInEditor, type Side } from './live.js';
 import { Metrics } from './metrics.js';
 import type { PageConfig } from './page.js';
 import { ghReady, GitHubError, PullRequestConversation, type Action } from './github.js';
@@ -158,6 +158,18 @@ export class ReviewSession {
       if (term.trim().length < 2) return { data: { results: [], truncated: false } };
       const out = this.live.search(side, term);
       return { data: { ...out, results: out.results.map((r) => ({ ...r, generated: this.generatedRx.some((rx) => rx.test(r.p)) })) } };
+    }
+    if (route === 'symbols' && method === 'GET') {
+      const term = (q.get('q') || '').trim();
+      if (term.length < 2) return { data: { symbols: [] } };
+      const files = this.data.model.compares.base.files.filter((f: { s: string }) => f.s !== 'D').map((f: { p: string }) => f.p);
+      return { data: { symbols: await this.live.symbols(term, files) } };
+    }
+    if (route === 'changed' && method === 'GET') {
+      // After a refresh: the lines at the head that changed since the commit the page showed.
+      const from = q.get('from') || '';
+      if (!/^[0-9a-f]{7,40}$/.test(from)) return { status: 400, data: { error: 'which commit?' } };
+      return { data: { files: changedSince(this.target.repo, from, this.target.headSha) } };
     }
     if (route === 'open' && method === 'POST') {
       if (this.editor.mode !== 'command') return { status: 400, data: { error: 'no editor command: start untangle with -editor' } };

@@ -34,14 +34,20 @@ const read = (f: string) => fs.readFileSync(path.join(ROOT, 'viewer', f), 'utf8'
 const inline = (data: unknown) => JSON.stringify(data).replace(/</g, '\\u003c');
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-/** The highlighter bundle (dist/highlight.js), built by `npm run build`. */
-export const highlighter = () => {
+const built = (name: string) => {
   try {
-    return fs.readFileSync(path.join(ROOT, 'dist', 'highlight.js'));
+    return fs.readFileSync(path.join(ROOT, 'dist', name));
   } catch {
     return null;
   }
 };
+/** The highlighter bundle (dist/highlight.js), built by `npm run build`. */
+export const highlighter = () => built('highlight.js');
+/** The page's fonts, with their files inlined (dist/fonts.css), built by `npm run build`. */
+export const fonts = () => built('fonts.css');
+const hash = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex').slice(0, 12);
+// Served, an asset's URL carries its content's hash: a browser never keeps an old one.
+const fontsLink = (css: Buffer | null) => (css ? `<link rel="stylesheet" href="assets/fonts.css?v=${hash(css)}">` : '');
 
 // Generated diffs kept in an exported page, smallest files first: the rest are listed without.
 const EXPORT_GENERATED_BUDGET = 1_000_000;
@@ -53,8 +59,9 @@ const EXPORT_GENERATED_BUDGET = 1_000_000;
  */
 export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'export'): (config: PageConfig) => string {
   const template = read('index.html'), core = read('core.js'), viewer = read('viewer.js');
-  const shiki = highlighter();
+  const shiki = highlighter(), faces = fonts();
   for (const [name, src] of [['core.js', core], ['viewer.js', viewer], ['highlight.js', shiki ? shiki.toString('utf8') : '']]) if (/<\/script/i.test(src)) throw new Error(`${name} contains </script`);
+  if (faces && /<\/style/i.test(faces.toString('utf8'))) throw new Error('fonts.css contains </style');
   type Generated = { p: string; hunks: unknown };
   // Exported, the smallest generated diffs stay within the budget; served, none: the page asks.
   const generated = (list: Generated[]): Generated[] => {
@@ -66,11 +73,10 @@ export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'ex
     return list.map((g) => ({ ...g, hunks: kept.has(g) ? g.hunks : null }));
   };
   const model = { compares: Object.fromEntries(Object.entries(data.model.compares).map(([k, c]) => [k, { ...c, generated: generated(c.generated) }])) };
-  // Served, the highlighter's URL carries its content's hash: a browser never keeps an old one.
-  const version = shiki ? crypto.createHash('sha256').update(shiki).digest('hex').slice(0, 12) : '';
-  const highlight = !shiki ? '' : mode === 'served' ? `<script src="assets/highlight.js?v=${version}"></script>` : `<script>${shiki.toString('utf8')}</script>`;
+  const highlight = !shiki ? '' : mode === 'served' ? `<script src="assets/highlight.js?v=${hash(shiki)}"></script>` : `<script>${shiki.toString('utf8')}</script>`;
   const parts: Array<[string, string]> = [
     ['/*TITLE*/', escapeHtml(title + ' · untangle')],
+    ['<!--FONTS-->', !faces ? '' : mode === 'served' ? fontsLink(faces) : `<style>${faces.toString('utf8')}</style>`],
     ['<!--HIGHLIGHT-->', highlight],
     ['/*CORE*/', core],
     ['/*CONFIG*/', '\0'],
@@ -99,5 +105,5 @@ export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'ex
 
 /** The page shown while the review is being built: it follows the steps and reloads when done. */
 export function progressPage(): string {
-  return read('progress.html');
+  return read('progress.html').replace('<!--FONTS-->', fontsLink(fonts()));
 }
