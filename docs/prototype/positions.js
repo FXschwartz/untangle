@@ -1,7 +1,9 @@
 // Identifier positions on the head side (context and added lines) of Dart files.
 require('./core.js');
 const C = globalThis.ReviewCore;
-const data = require('./diff.json');
+// node positions.js <diff.json> <positions.json>
+const [IN, OUT] = process.argv.slice(2);
+const data = JSON.parse(require('fs').readFileSync(IN, 'utf8'));
 const out = {};
 let count = 0;
 for (const cmp of Object.values(data.compares)) {
@@ -22,5 +24,5 @@ for (const cmp of Object.values(data.compares)) {
     }
   }
 }
-require('fs').writeFileSync('positions.json', JSON.stringify(out));
+require('fs').writeFileSync(OUT, JSON.stringify(out));
 console.log('files', Object.keys(out).length, 'identifier positions', count);

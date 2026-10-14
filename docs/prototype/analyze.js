@@ -25,10 +25,6 @@ const OLD = Object.fromEntries(OLD_ARGS.map((a) => { const [name, dir, defs] = a
 const HEAD = path.resolve(HEADDIR) + '/';
 const DEPS = process.env.BCR_DEPS || path.join(__dirname, 'node_modules');
 const { Parser, Language } = require(DEPS + '/web-tree-sitter/tree-sitter.cjs');
-const COMPARES = {
-  base: { left: 'e0598c1577db2d55c9af7d0d165be6332256910d', right: 'a45f9aee30bcb170b863373840e63a0e42a0092b', label: 'main · e0598c1' },
-  since: { left: '0540639', right: 'a45f9aee30bcb170b863373840e63a0e42a0092b', label: 'Reviewed at 0540639' },
-};
 const CONFIG = {
   generated: ['**/migrations/**'],
   peekMaxLines: 2000,
@@ -145,7 +141,7 @@ const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_decla
   }
 
   for (const [name, cmp] of Object.entries(diff.compares)) {
-    const meta = COMPARES[name];
+    const meta = { left: cmp.left, right: cmp.right, label: cmp.label };
     const files = [], generated = [];
     for (const f0 of cmp.files) {
       const f = JSON.parse(JSON.stringify(f0));

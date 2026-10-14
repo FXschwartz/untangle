@@ -1,8 +1,9 @@
 // Identifier positions on removed lines, keyed by old line number, for one comparison.
 require('./core.js');
 const C = globalThis.ReviewCore;
-const name = process.argv[2];
-const data = require('./diff.json');
+// node positions_old.js <name> <diff.json> <out.json>
+const [name, IN, OUT] = process.argv.slice(2);
+const data = JSON.parse(require('fs').readFileSync(IN, 'utf8'));
 const out = {};
 let count = 0;
 for (const f of data.compares[name].files) {
@@ -20,5 +21,5 @@ for (const f of data.compares[name].files) {
     }
   }
 }
-require('fs').writeFileSync(`positions_old_${name}.json`, JSON.stringify(out));
+require('fs').writeFileSync(OUT, JSON.stringify(out));
 console.log(name, 'removed-line identifier positions', count);

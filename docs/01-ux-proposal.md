@@ -4,6 +4,7 @@
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
 > Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 10).
 > Prototype sources: [prototype/](prototype/).
+> Test runs of these rules on #157, #166 and #162: [02-test-runs.md](02-test-runs.md).
 
 ## Requirements
 

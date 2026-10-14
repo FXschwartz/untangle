@@ -6,11 +6,14 @@ only; every other file gets its unified-diff hunks (-U3), exactly as git produce
 """
 import json, re, subprocess, sys
 
+# python3 export_diff.py <repo> <out.json> <name>=<left>..<right>[=<label>] ...
 repo, out = sys.argv[1], sys.argv[2]
-COMPARES = {  # name -> (left, right)
-    'base': ('e0598c1577db2d55c9af7d0d165be6332256910d', 'a45f9aee30bcb170b863373840e63a0e42a0092b'),
-    'since': ('0540639', 'a45f9aee30bcb170b863373840e63a0e42a0092b'),
-}
+COMPARES = {}  # name -> (left, right, label)
+for arg in sys.argv[3:]:
+    name, rng, *label = arg.split('=', 2)
+    left, right = rng.split('..')
+    COMPARES[name] = (left, right, label[0] if label else f'{name} · {left[:7]}')
+assert COMPARES, 'give at least one <name>=<left>..<right>'
 CONFIG_GENERATED = ['**/migrations/**']  # same patterns the page shows as the review config
 
 def git(*args):
@@ -42,7 +45,7 @@ def parse_hunks(text):
     return hunks
 
 result = {'compares': {}}
-for name, (left, right) in COMPARES.items():
+for name, (left, right, label) in COMPARES.items():
     files = []
     status = {}
     for row in git('diff', '--no-renames', '--name-status', left, right).splitlines():
@@ -66,7 +69,7 @@ for name, (left, right) in COMPARES.items():
         if attrs.get(path) != 'true' and not by_config:
             f['hunks'] = parse_hunks(git('diff', '--no-renames', '-U3', left, right, '--', path))
         files.append(f)
-    result['compares'][name] = {'left': left[:7], 'right': right[:7], 'files': files}
+    result['compares'][name] = {'left': left, 'right': right, 'label': label, 'files': files}
 
 json.dump(result, open(out, 'w'), separators=(',', ':'))
 for name, c in result['compares'].items():

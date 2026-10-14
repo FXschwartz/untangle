@@ -1,8 +1,10 @@
 // Why is each change outside every chain?
 const fs = require('fs'), path = require('path');
-const HEAD = path.resolve(__dirname, '../head') + '/';
-const m = require('./model.json').compares.base;
-const defs = JSON.parse(fs.readFileSync(__dirname + '/defs.json', 'utf8')).raw;
+// node diag_standalone.js <head-worktree> <model.json> <defs.json> [<compare>]
+const [HEADDIR, MODEL, DEFS, NAME = 'base'] = process.argv.slice(2);
+const HEAD = path.resolve(HEADDIR) + '/';
+const m = JSON.parse(fs.readFileSync(MODEL, 'utf8')).compares[NAME];
+const defs = JSON.parse(fs.readFileSync(DEFS, 'utf8')).raw;
 const blocks = new Map(); const plus = new Map();
 m.files.forEach((f) => { f.blocks.forEach((b) => { b.f = f; blocks.set(b.id, b); }); f.hunks.forEach((h, hi) => { let n = h.n; h.rows.forEach(([t, text, ranges], ri) => { if (t !== '-') { if (t === '+') plus.set(f.p + ':' + n, { f, hi, ri, ranges, text }); n++; } }); }); });
 const blockAt = (f, hi, ri) => f.blocks.find((b) => b.hunk === hi && ri >= b.first && ri < b.first + b.len);
