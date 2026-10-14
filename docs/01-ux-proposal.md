@@ -321,9 +321,9 @@ From the review of v11:
 - **Refresh in place.** New commits on the pull request show as a banner with Refresh, as on
   GitHub. untangle builds the new review in the background, and the page reloads on the same
   view when it's ready.
-- **A chain's members** show as a row of pills by level, each with what's left in it; clicking
-  one scrolls to its code. Graph draws them, and clicking a graph node shows only that node's
-  code and dims unrelated nodes.
+- **A chain's members** show as a row of pills by level, each with what's left in it, pinned
+  under the header with the member being read marked; clicking one scrolls to its code. Graph
+  draws them, and clicking a graph node shows only that node's code and dims unrelated nodes.
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. Keys `n` and `p` walk the same order.
 - **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
@@ -337,7 +337,9 @@ From the review of v11:
   one line, "N lines moved to file:line".
 - **Peek:** the definition on top, the changed usages below. Clicking a usage shows its
   code in the peek, with the usage line marked; clicking it again, or "Go to it", opens
-  it. "Back to definition" returns. Usage snippets are highlighted like the code.
+  it. "Back to definition" returns. Usage snippets are highlighted like the code. A name
+  clicked inside a peek changes it in place (it stays when the name leads to what it already
+  shows), and a click outside closes it.
 - **Dark palette** with VS Code Dark+-style syntax colors. Function names are told apart
   from other identifiers.
 - **Unified by default, split on demand** from a view's ⋯ menu. Split pairs removed and added
@@ -586,6 +588,9 @@ through the page.
     motion that makes it smoother, drawn first in the prototype page ("Calmer by default").
     Then: build all of it, with resizable panels, a minimap, and a review mark muted until
     hovered. Done.
+  - Asked: more room in the sidebar and the top bar, guides that close on their last row, the
+    marks' panel as a note with a Reset button, the chain's members pinned, a peek that closes on
+    a click outside and changes in place from inside. Done.
 
 ## References
 

@@ -1050,14 +1050,14 @@
     }
     return items;
   }
-  // The sidebar's ···: where the marks are kept, and starting over.
+  // The sidebar's ···: a panel saying where the marks are kept, with a way to start over.
   function sideMenuItems() {
     const items = [];
     const sn = CONFIG.snapshot;
-    if (!CONFIG.served) items.push({ note: 'Marks are kept in this browser.' });
-    else if (sn) items.push({ note: `Marks are kept on the branch <code>${esc(sn.branch)}</code>${sn.commit ? ` at <code>${esc(sn.commit.slice(0, 7))}</code>` : ''}: <code>git diff ${esc(sn.branch)} ${esc((CONFIG.head || '').slice(0, 7))}</code> shows what’s left.${sn.note ? ` ${esc(sn.note)}` : ''}` });
-    items.push({ label: 'Keyboard shortcuts', icon: '', key: '?', data: { act: 'keys' } });
-    items.push({ sep: true }, { label: 'Reset all marks…', data: { act: 'reset' } });
+    if (!CONFIG.served) items.push({ note: 'Your marks are kept in this browser.' });
+    else if (sn) items.push({ note: `Your marks are kept on the branch <code>${esc(sn.branch)}</code>${sn.commit ? `, at <code>${esc(sn.commit.slice(0, 7))}</code>` : ''}. <code>git diff ${esc(sn.branch)} ${esc((CONFIG.head || '').slice(0, 7))}</code> shows what’s left.${sn.note ? ` ${esc(sn.note)}` : ''}` });
+    else items.push({ note: 'Your marks are saved as you go.' });
+    items.push({ button: 'Reset all marks…', title: 'Mark every change unreviewed again', data: { act: 'reset' } });
     return items;
   }
   function chainsMenuItems() {
@@ -1071,6 +1071,7 @@
       if (it.sep) return '<div class="mi-sep" role="separator"></div>';
       if (it.head) return `<div class="mi-h">${esc(it.head)}</div>`;
       if (it.note) return `<div class="mi-note">${it.note}</div>`;
+      if (it.button) return `<div class="mi-foot"><button type="button" class="btn sm"${it.title ? ` title="${esc(it.title)}"` : ''}${dataAttrs(it.data)}>${esc(it.button)}</button></div>`;
       const role = it.checked != null ? 'menuitemcheckbox' : 'menuitem';
       const inner = `<span class="ic">${it.checked != null ? (it.checked ? ICON.check : '') : it.icon || ''}</span><span${it.mono ? ' class="nm"' : ''}>${it.own ? `<span class="own">${esc(it.own)}</span>` : ''}${esc(it.label)}</span><span class="k">${esc(it.key || '')}</span>`;
       if (it.href) return `<a class="mi" role="${role}" href="${esc(it.href)}"${/^https?:/.test(it.href) ? ' target="_blank" rel="noopener noreferrer"' : ''}${it.title ? ` title="${esc(it.title)}"` : ''}>${inner}</a>`;
@@ -1080,8 +1081,12 @@
   // Draws the open menu under its button (found again after each render), or closes it when the
   // button is gone.
   function renderMenu() {
-    if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.setAttribute('role', 'menu'); MENU.el.hidden = true; viewer.appendChild(MENU.el); }
+    if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); }
     const el = MENU.el;
+    // The marks' panel says something and has one button: a dialog, not a menu.
+    el.setAttribute('role', MENU.open === 'side' ? 'dialog' : 'menu');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'chains' ? 'Chains' : 'More');
+    el.classList.toggle('panel', MENU.open === 'side');
     const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
     const items = !anchor ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : chainsMenuItems();
     if (!items.length) { MENU.open = null; el.hidden = true; viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false')); return; }
@@ -1096,6 +1101,7 @@
   function toggleMenu(kind) {
     MENU.open = MENU.open === kind ? null : kind;
     renderMenu();
+    // A menu's first item takes the focus; the marks' panel takes none (its one button resets).
     const first = MENU.open && MENU.el.querySelector('.mi');
     if (first) first.focus({ preventScroll: true });
   }
@@ -1172,28 +1178,56 @@
   // A name clicked anywhere without an answer computed ahead: ask the server. The peek opens
   // under the line; clicked inside a peek, the peek moves to the new definition (Back returns).
   const anchorOf = (p) => ({ path: p.path, n: p.n, old: p.old, o: p.o, col: p.col, src: p.src });
-  function liveLookup(el) {
-    const d = el.dataset;
-    const q = { side: d.ls || null, p: d.lp || null, ext: d.lx !== '' && d.lx != null ? Number(d.lx) : null, l: Number(d.ll), c: Number(d.lc) };
-    const sameQ = (x) => x && x.side === q.side && x.p === q.p && x.ext === q.ext && x.l === q.l && x.c === q.c;
-    let peek;
-    if (el.closest('.peek') && state.peek) peek = { ...anchorOf(state.peek), live: { q, status: 'loading' }, back: [...(state.peek.back || []), state.peek] };
-    else {
-      if (state.peek && state.peek.live && sameQ(state.peek.live.q) && !(state.peek.back || []).length) { state.peek = null; return render(); }
-      if (state.view.kind === 'source') peek = { src: { key: srcKey(state.view), line: q.l }, live: { q, status: 'loading' } };
-      else if (q.side === 'base') peek = { old: true, path: q.p, o: q.l, col: q.c, live: { q, status: 'loading' } };
-      else peek = { path: q.p, n: q.l, col: q.c, live: { q, status: 'loading' } };
-    }
-    state.peek = peek;
-    render();
+  // Where a name is defined, asked of the language server: { q, status: 'ok', target }, or
+  // status 'none' or 'error'.
+  function askDefinition(q) {
     const params = new URLSearchParams({ l: String(q.l), c: String(q.c) });
     if (q.side) params.set('side', q.side);
     if (q.p) params.set('p', q.p);
     if (q.ext != null) params.set('ext', String(q.ext));
-    api('definition?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
-      .then((j) => { peek.live = j.target ? { q, status: 'ok', target: j.target } : { q, status: 'none' }; })
-      .catch((e) => { peek.live = { q, status: 'error', error: e.message }; })
-      .then(() => { if (state.peek === peek) render(); });
+    return api('definition?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => (j.target ? { q, status: 'ok', target: j.target } : { q, status: 'none' }))
+      .catch((e) => ({ q, status: 'error', error: e.message }));
+  }
+  // The definition a peek shows, to tell whether a name in it leads back there.
+  function shownTarget(p) {
+    if (p.live) return p.live.status === 'ok' ? p.live.target : null;
+    if (p.ti == null || Number.isNaN(p.ti) || p.sel != null) return null;
+    const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : defsNow().targets[p.ti];
+    return t ? { p: t.p, l: t.l, side: t.w === 'repo' ? (p.old ? 'base' : 'head') : null } : null;
+  }
+  const sameTarget = (a, b) => !!a && !!b && a.p === b.p && a.l === b.l && (a.side || null) === (b.side || null);
+  function liveLookup(el) {
+    const d = el.dataset;
+    const q = { side: d.ls || null, p: d.lp || null, ext: d.lx !== '' && d.lx != null ? Number(d.lx) : null, l: Number(d.ll), c: Number(d.lc) };
+    const sameQ = (x) => x && x.side === q.side && x.p === q.p && x.ext === q.ext && x.l === q.l && x.c === q.c;
+    if (el.closest('.peek') && state.peek) {
+      // Asked from inside the peek: it stays as it is while the language server answers, then shows
+      // the new definition in its place (Back returns), or stays when it already shows that one.
+      const cur = state.peek;
+      el.classList.add('asking');
+      askDefinition(q).then((live) => {
+        el.classList.remove('asking');
+        if (state.peek !== cur) return;
+        if (live.status !== 'ok') return toast(live.status === 'none' ? 'The language server knows no definition for this name.' : live.error);
+        if (sameTarget(shownTarget(cur), live.target)) {
+          const hit = main.querySelector('.peek .pk-ln.hit');
+          if (hit) { hit.classList.remove('flash'); void hit.offsetWidth; hit.classList.add('flash'); }
+          return;
+        }
+        state.peek = { ...anchorOf(cur), live, back: [...(cur.back || []), cur] };
+        render();
+      });
+      return;
+    }
+    if (state.peek && state.peek.live && sameQ(state.peek.live.q) && !(state.peek.back || []).length) { state.peek = null; return render(); }
+    let peek;
+    if (state.view.kind === 'source') peek = { src: { key: srcKey(state.view), line: q.l }, live: { q, status: 'loading' } };
+    else if (q.side === 'base') peek = { old: true, path: q.p, o: q.l, col: q.c, live: { q, status: 'loading' } };
+    else peek = { path: q.p, n: q.l, col: q.c, live: { q, status: 'loading' } };
+    state.peek = peek;
+    render();
+    askDefinition(q).then((live) => { peek.live = live; if (state.peek === peek) render(); });
   }
 
   // ---------- GitHub: the pull request's conversation
@@ -1697,11 +1731,12 @@
   const plusMinus = (a, d) => `<span class="a">+${fmt(a)}</span> <span class="d">−${fmt(d)}</span>`;
   const sumOf = (blocks, k) => blocks.reduce((x, b) => x + b[k], 0);
   // A view's header, in one row: where you are, what it holds, the previous and next change, the
-  // view's menu (⋯) and its one action. `below`: what follows it, scrolling away with the code.
+  // view's menu (⋯) and its one action. `pinned`: what stays on screen under it (a chain's
+  // members); `below`: what follows it, scrolling away with the code.
   function headerHtml(o) {
     const nav = o.nav ? iconBtn(ICON.up, 'Previous change', 'data-act="nav" data-step="-1"') + iconBtn(ICON.down, 'Next change', 'data-act="nav" data-step="1"') : '';
     const menu = viewMenuItems().length ? `<button type="button" class="ib" data-act="menu" data-menu="view" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="${MENU.open === 'view'}">${ICON.more}</button>` : '';
-    return `<div class="fv-head"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}<span class="sp"></span>${nav || menu ? `<span class="tools">${nav}${menu}</span>` : ''}${o.action || ''}</div>${o.below || ''}`;
+    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}<span class="sp"></span>${nav || menu ? `<span class="tools">${nav}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
   }
   function instancesHtml(g, blocks, key) {
     const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
@@ -1816,15 +1851,16 @@
     const all = blocksOf(c.blocks);
     const s = stats(all);
     const kind = c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain';
+    const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
     let h = headerHtml({
       crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
       nav: true,
       action: `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
+      // The members stay under the header, so going from one to another needs no scrolling back.
+      pinned: oneTestFile ? '' : stripHtml(c),
     });
-    const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
     if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + testListHtml(c, all);
-    h += stripHtml(c);
     if (state.showGraph) {
       h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
         <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code.</span></div></div>`;
@@ -2059,22 +2095,23 @@
     const openThreads = GH.data ? GH.data.threads.filter((x) => !x.resolved).length : '…';
     let h = `<div class="sb-top"><div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
       + (t.open ? `<b>${t.open}</b><span>change${t.open === 1 ? '' : 's'} to review</span>` : `<b>${ICON.check}</b><span>All ${t.total} changes reviewed</span>`)
-      + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where the marks are kept" aria-label="Marks" aria-haspopup="menu" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
+      + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where your marks are kept" aria-label="Marks" aria-haspopup="dialog" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
       + `<div class="sb-tabs" role="tablist">${tab('chains', 'Chains', m.chains.length)}${tab('files', 'Files', m.files.length)}${GH.on ? tab('comments', 'Threads', openThreads) : ''}</div></div>`;
     if (state.tab === 'comments') {
       h += commentsTabHtml(v);
     } else if (state.tab === 'chains') {
-      const row = (c, depth) => {
+      // `next`: the depth of the row after it, for its guides.
+      const row = (c, depth, next) => {
         const st = stats(blocksOf(c.blocks));
         const on = v.kind === 'chain' && v.id === c.id;
         const n = splitName(c.name), d = Math.min(depth, 6);
-        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d)}${markHtml(st)}<span class="nm">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
+        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
       };
       const linked = m.families.filter((f) => f.chains.length > 1);
       const lone = m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
       h += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
-      linked.forEach((f) => { h += `<div class="sb-group"><span title="${esc(f.top.name)}">The ${esc(trunc(f.top.name, 34))} family</span></div>` + f.chains.map((c) => row(c, c.depth)).join(''); });
-      if (lone.length) h += '<div class="sb-group"><span>Unlinked</span></div>' + lone.map((c) => row(c, 0)).join('');
+      linked.forEach((f) => { h += `<div class="sb-group"><span title="${esc(f.top.name)}">The ${esc(trunc(f.top.name, 34))} family</span></div>` + f.chains.map((c, k) => row(c, c.depth, k + 1 < f.chains.length ? f.chains[k + 1].depth : -1)).join(''); });
+      if (lone.length) h += '<div class="sb-group"><span>Unlinked</span></div>' + lone.map((c) => row(c, 0, 0)).join('');
       const st = stats(m.standalone);
       if (st.total) h += `<div class="sb-group"><span>Outside chains</span></div><button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''} title="Changes that don’t use, and aren’t used by, anything changed elsewhere: ${leftWords(st)}">${markHtml(st)}<span class="nm ui">Not in a chain</span><span class="cnt">${st.open || ''}</span></button>`;
     } else {
@@ -2082,9 +2119,9 @@
       h += treeHtml(fileTree(m.files), 0, {
         prefix: '',
         count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open }; },
-        file: (f, depth) => {
+        file: (f, depth, g) => {
           const st = stats(f.blocks);
-          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}">${guides(depth)}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
+          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
         },
       });
       if (m.generated.length) {
@@ -2092,7 +2129,7 @@
         h += treeHtml(fileTree(m.generated), 0, {
           prefix: 'gen:',
           count: () => ({ text: '', done: false }),
-          file: (f, depth) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: generated (${esc(f.gen)})">${guides(depth)}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">+${fmt(f.a)}</span></button>`,
+          file: (f, depth, g) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: generated (${esc(f.gen)})">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">+${fmt(f.a)}</span></button>`,
         });
       }
     }
@@ -2103,6 +2140,11 @@
     sideHtml = h;
     if (before) sideMotion(before);
   }
+  // Whether the pointer is on an element (a row drawn under a still pointer isn't :hover yet).
+  let pointerAt = null;
+  document.addEventListener('pointermove', (e) => { pointerAt = [e.clientX, e.clientY]; }, { passive: true, capture: true });
+  document.addEventListener('pointerdown', (e) => { pointerAt = [e.clientX, e.clientY]; }, { passive: true, capture: true });
+  const under = (el) => { if (!pointerAt) return false; const r = el.getBoundingClientRect(); return pointerAt[0] >= r.left && pointerAt[0] < r.right && pointerAt[1] >= r.top && pointerAt[1] < r.bottom; };
   // The sidebar's rows by what they open, for the motion between two drawings of it.
   const sideKey = (r) => { const d = r.dataset; return d.chain != null ? 'c' + d.chain : d.open != null ? 'f' + d.open : d.standalone ? 's' : d.thread ? 't' + d.thread : d.map != null ? 'map' : d.dir != null ? 'd' + d.dir : d.act || ''; };
   function sideRows() {
@@ -2111,7 +2153,8 @@
     return out;
   }
   // A row done since: its count gives way to a check and it dims. A count that changed rolls. The
-  // highlight slides from the row that was open to the one that is.
+  // highlight slides from the row that was open to the one that is, unless the pointer is on that
+  // row already (it was clicked: the hover went there first).
   function sideMotion(before) {
     let from = null;
     before.forEach((v) => { if (v.cur) from = v; });
@@ -2126,7 +2169,7 @@
       }
       const cnt = r.querySelector('.cnt');
       if (cnt && v.cnt !== cnt.textContent && /^\d*$/.test(v.cnt || '') && /^\d*$/.test(cnt.textContent)) cnt.animate([{ transform: 'translateY(-5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: EASE });
-      if (r.getAttribute('aria-current') === 'true' && from && !v.cur && Math.abs(r.offsetTop - from.top) < 600) {
+      if (r.getAttribute('aria-current') === 'true' && from && !v.cur && !under(r) && Math.abs(r.offsetTop - from.top) < 600) {
         const hl = document.createElement('div');
         hl.className = 'sb-hl';
         hl.style.cssText = `top:${r.offsetTop}px;left:${r.offsetLeft}px;width:${r.offsetWidth}px;height:${r.offsetHeight}px`;
@@ -2155,18 +2198,24 @@
   }
   const byName = (x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
   const filesIn = (d) => d.files.concat(...[...d.dirs.values()].map(filesIn));
-  const guides = (depth) => Array.from({ length: depth }, (_, i) => `<i class="ig" style="left:${14 + i * 14}px"></i>`).join('');
+  // The lines that mark a row's levels. A level's line ends on the last row it holds (when the
+  // next row, at depth `next`, is back at that level or above), turning toward the row (└).
+  const guides = (depth, next) => Array.from({ length: depth }, (_, i) => `<i class="ig${next != null && next <= i ? (i === depth - 1 ? ' end elbow' : ' end') : ''}" style="left:${14 + i * 14}px"></i>`).join('');
+  // A tree's rows, as drawn, each knowing the depth of the row after it for its guides.
   function treeHtml(node, depth, o) {
-    let h = '';
-    [...node.dirs.values()].sort((x, y) => byName(x.name, y.name)).forEach((d) => {
-      let name = d.name;
-      while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
-      const key = o.prefix + d.path, open = !state.closedDirs.has(key), c = o.count(filesIn(d));
-      h += `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${depth}" title="${esc(d.path)}/">${guides(depth)}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span><span class="cnt">${c.text}</span></button>`;
-      if (open) h += treeHtml(d, depth + 1, o);
-    });
-    node.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => { h += o.file(f, depth); });
-    return h;
+    const rows = [];
+    const walk = (nd, dp) => {
+      [...nd.dirs.values()].sort((x, y) => byName(x.name, y.name)).forEach((d) => {
+        let name = d.name;
+        while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
+        const key = o.prefix + d.path, open = !state.closedDirs.has(key), c = o.count(filesIn(d));
+        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span><span class="cnt">${c.text}</span></button>` });
+        if (open) walk(d, dp + 1);
+      });
+      nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => rows.push({ depth: dp, html: (g) => o.file(f, dp, g) }));
+    };
+    walk(node, depth);
+    return rows.map((r, k) => r.html(guides(r.depth, k + 1 < rows.length ? rows[k + 1].depth : -1))).join('');
   }
 
   // ---------- motion: what changes moves from where it was to where it goes, fast enough not to
@@ -2212,7 +2261,7 @@
       });
     }
     const pk = main.querySelector('.peek');
-    if (pk) { const r = pk.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.peek = { el: pk, before: pk.previousElementSibling, h: r.height }; }
+    if (pk) { const r = pk.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.peek = { el: pk, before: pk.previousElementSibling, h: r.height, anchor: peekKey(shownPeek) }; }
     main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
     return snap;
   }
@@ -2277,10 +2326,17 @@
   }
   let shownPeek = null, clickX = null;
   document.addEventListener('pointerdown', (e) => { clickX = e.clientX; }, true);
-  // A peek grows from the name it was asked from, and folds back into its line when it closes.
+  // Where a peek is: under which line.
+  const peekKey = (p) => (p ? JSON.stringify([p.path, p.n, !!p.old, p.o, p.src ? p.src.key + ':' + p.src.line : null]) : '');
+  // A peek grows from the name it was asked from, and folds back into its line when it closes. One
+  // that stays where it is with other content (an answer, another definition, Back) eases to its
+  // new height.
   function peekMotion(snap) {
     const el = main.querySelector('.peek');
-    if (state.peek && el && state.peek !== shownPeek) {
+    if (state.peek && el && snap.peek && snap.peek.anchor === peekKey(state.peek)) {
+      const h = el.getBoundingClientRect().height;
+      if (Math.abs(h - snap.peek.h) > 3) el.animate([{ height: snap.peek.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE });
+    } else if (state.peek && el && state.peek !== shownPeek) {
       const r = el.getBoundingClientRect();
       if (clickX != null) el.style.transformOrigin = `${Math.max(0, Math.min(r.width, clickX - r.left))}px 0`;
       el.animate([{ height: '0px', opacity: 0, transform: 'scale(.97) translateY(-4px)' }, { height: r.height + 'px', opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
@@ -2408,6 +2464,7 @@
     commentsMotion();
     if (MENU.open) renderMenu();
     renderPill();
+    spyStrip();
     mini.update();
   }
   // The top bar: the pull request (its number quiet), its state, the commit reviewed and a way to
@@ -2623,10 +2680,21 @@
     const b = el.querySelector('.pill-n b'), now = b ? Number(b.textContent) : null;
     if (b && was != null && now !== was && moving()) b.animate([{ transform: `translateY(${now > was ? 6 : -6}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: EASE });
   }
+  // A chain's strip marks the member being read: the last one whose section starts above the
+  // reading line.
+  function spyStrip() {
+    const nodes = main.querySelectorAll('.fv-head .node[data-i]');
+    if (!nodes.length) return;
+    const ref = readY();
+    let at = null;
+    main.querySelectorAll('.sec[id^="sec-"]').forEach((sec) => { if (sec.getBoundingClientRect().top <= ref) at = sec.id.slice(4); });
+    if (at == null) { const first = main.querySelector('.sec[id^="sec-"]'); at = first ? first.id.slice(4) : null; }
+    nodes.forEach((n) => n.classList.toggle('here', n.dataset.i === at));
+  }
   let scrollRaf = 0;
   main.addEventListener('scroll', () => {
     if (scrollRaf) return;
-    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); mini.scrolled(); });
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); spyStrip(); mini.scrolled(); });
   }, { passive: true });
   // n and p: the next and previous chain with changes to review.
   function goChain(step) {
@@ -3221,7 +3289,6 @@
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
     if (act === 'jump') return palOpen();
-    if (act === 'keys') return toggleKeys(true);
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
     if (act === 'graph') { state.showGraph = !state.showGraph; return render(); }
@@ -3344,6 +3411,18 @@
   });
   // A click outside the open menu closes it.
   document.addEventListener('click', (e) => { if (MENU.open && !e.target.closest('.menu, [data-menu]')) closeMenu(); }, true);
+  // So does a click outside a peek, unless it was a drag (selecting text) or asks about another
+  // name (which opens its own peek). Whatever the click does draws the page; when it does
+  // nothing, the page is drawn here.
+  let downAt = null;
+  document.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; }, { passive: true, capture: true });
+  document.addEventListener('click', (e) => {
+    if (!state.peek || !main.querySelector('.peek') || !(e.target instanceof Element)) return;
+    if (e.target.closest('.peek, .ref, .menu, .pal, .scrim, .keys, .mn-pop')) return;
+    if (downAt && e.detail && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+    state.peek = null;
+    setTimeout(() => { if (!state.peek && main.querySelector('.peek')) render(); }, 0);
+  }, true);
   window.addEventListener('resize', () => { if (MENU.open) renderMenu(); });
   viewer.addEventListener('keydown', (e) => {
     if (mentionKey(e)) return;

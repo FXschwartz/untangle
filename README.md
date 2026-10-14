@@ -76,14 +76,18 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
     reviewed). The menu holds open in the editor, the whole file, side by side, the diffs of
     reviewed code, the minimap, a comment on the file, the chain map and the chains a chain
     uses or is used by. A file's "In 3 chains" lists its chains.
-  - **A chain** shows its members as a row of pills, by level, each with what's left in it;
-    Graph draws them as before, and a member's counts and "Mark reviewed" show on hover.
+  - **A chain** shows its members as a row of pills, by level, each with what's left in it,
+    pinned under the header with the one you're reading marked: click one, then another, without
+    scrolling back. Graph draws them as before, and a member's counts and "Mark reviewed" show on
+    hover.
 - **The code** has one gutter: the review mark (muted until the pointer is on its line), one
   line number (the old one, in red, for a removed line) and the sign. Same changes elsewhere and
   changed usages are grey notes at the line's end.
 - **Go to definition anywhere.** Names on changed lines answer at once (computed ahead). Any
   other name, in a whole file, inside a peek or on a removed line, asks the language server;
-  in a peek, clicking a name moves the peek there and Back returns.
+  in a peek, clicking a name changes the peek in place to its definition (Back returns), and
+  leaves it as it is when that's the definition it already shows. A click outside a peek closes
+  it.
 - **More of the file.** The divider above each hunk (its first line and context, in grey)
   stands for the lines hidden above it: click it for 20 more (up from the hunk, or down from the
   one before), or all of them when 20 or fewer are left, as on GitHub. Its buttons, and "Mark
@@ -141,8 +145,8 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
   When the base moves (a rebase), the branch is replayed onto the new base with a 3-way merge,
   [mergiraf](https://mergiraf.org) first when it's installed; what still conflicts goes back to
   unreviewed. For a URL, the branch lives in the cached clone; for a directory, in your
-  repository. Marks on part of a change stay next to the analysis. The sidebar's ··· menu says
-  where they are, and resets them.
+  repository. Marks on part of a change stay next to the analysis. The sidebar's ··· says where
+  they are, with a button to reset them.
 
 `-export review.html` writes the same page as one HTML file, for sharing a review read-only:
 everything computed ahead, marks kept in the reader's browser, and the generated diffs that fit
