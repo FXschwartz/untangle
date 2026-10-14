@@ -345,36 +345,71 @@
   }
 
   // ---------- peek
+  // The top panel shows the definition, or the changed usage picked in the list below it.
+  // Clicking a usage once shows it here; clicking it again (or "Go to it") opens it.
+  const plainHtml = (path, text) => codeHtml({ p: path, lang: C.langOf(path) }, text, null, {});
+  function usageContextHtml(hl) {
+    const h = hl.f.hunks[hl.hi];
+    const rows = [];
+    for (let i = 0; i < h.rows.length; i++) if (h.meta[i].n != null) rows.push(i);
+    const at = rows.indexOf(hl.ri);
+    return rows.slice(Math.max(0, at - 4), at + 5).map((i) => {
+      const r = h.meta[i];
+      return `<div class="pk-ln${i === hl.ri ? ' hit' : ''}${r.t === '+' ? ' add' : ''}"><span class="no">${r.n}</span><span class="sg">${r.t === '+' ? '+' : ''}</span><span class="tx">${codeHtml(hl.f, h.rows[i][1], null, {})}</span></div>`;
+    }).join('');
+  }
   function peekHtml(p) {
     let h = '<div class="peek" role="region" aria-label="Peek">';
-    if (p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti)) {
+    const hasDef = p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti);
+    const list = p.usageKey ? REFS[state.compare][p.usageKey] || [] : [];
+    const isOpen = ([up, ul]) => { const hl = M().head.get(up + ':' + ul); return hl && hl.r.block && !done(hl.r.block); };
+    const sel = p.sel != null && list[p.sel] ? list[p.sel] : null;
+    const selHl = sel && M().head.get(sel[0] + ':' + sel[1]);
+    if (sel && selHl) {
+      h += `<div class="pk-h"><b>Usage ${p.sel + 1} of ${list.length}</b><span class="pk-loc">${esc(sel[0])}:${sel[1]}</span><span class="pk-src">${isOpen(sel) ? 'not reviewed' : 'reviewed'}</span><span class="sp"></span>`
+        + (hasDef ? '<button type="button" class="btn xs" data-act="peek-def">Back to definition</button>' : '')
+        + `<button type="button" class="btn xs primary" data-act="peek-go">Go to it</button><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
+        + `<div class="pk-code">${usageContextHtml(selHl)}</div>`;
+    } else if (hasDef) {
       const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : DEFS.targets[p.ti];
       const where = (p.old ? `old side · ${M().raw.left} · ` : '') + (t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package');
       h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>
         <div class="pk-code">${t.code.map((line, i) => {
           const ln = t.s + i;
-          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${C.tokenize(line, 'dart').map((tk) => (tk.k === 'ws' ? esc(tk.t) : `<span class="t-${tk.k}">${esc(tk.t)}</span>`)).join('')}</span></div>`;
+          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${plainHtml(t.p, line)}</span></div>`;
         }).join('')}</div>`;
       if (!p.old && t.w === 'repo' && M().head.has(t.p + ':' + t.l) && !(t.p === p.path && t.l === p.n)) {
         h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
       }
     }
     if (p.usageKey) {
-      const list = REFS[state.compare][p.usageKey] || [];
-      const isOpen = ([up, ul]) => { const hl = M().head.get(up + ':' + ul); return hl && hl.r.block && !done(hl.r.block); };
       const open = list.filter(isOpen).length;
-      h += `<div class="pk-h pk-h2"><b>${list.length} changed usages</b><span class="pk-src">${open} not reviewed</span><span class="sp"></span>
+      h += `<div class="pk-h pk-h2"><b>${list.length} changed usage${list.length === 1 ? '' : 's'}</b><span class="pk-src">${open} not reviewed</span><span class="pk-hint">Click one to show it above, again to go to it</span><span class="sp"></span>
         <button type="button" class="btn xs" data-act="mark-usages" data-usage="${esc(p.usageKey)}">${open ? 'Mark them reviewed' : 'Mark them unreviewed'}</button></div><div class="pk-list">`;
-      list.forEach((u) => {
+      list.forEach((u, i) => {
         const [up, ul] = u;
         const hl = M().head.get(up + ':' + ul);
-        h += `<button type="button" class="pk-use${isOpen(u) ? '' : ' done'}" data-open="${esc(up)}" data-line="${ul}"><span class="pk-up">${esc(fileName(up))}:${ul}</span><code>${esc(hl ? h2text(hl) : '')}</code></button>`;
+        const text = hl ? hl.f.hunks[hl.hi].rows[hl.ri][1].trim() : '';
+        h += `<button type="button" class="pk-use${isOpen(u) ? '' : ' done'}" data-act="peek-use" data-i="${i}" aria-current="${p.sel === i}" title="${p.sel === i ? 'Go to it' : 'Show it above'}"><span class="pk-up">${esc(fileName(up))}:${ul}</span><code>${hl ? codeHtml(hl.f, text, null, {}) : ''}</code></button>`;
       });
       h += '</div>';
     }
     return h + '</div>';
   }
-  const h2text = (hl) => hl.f.hunks[hl.hi].rows[hl.ri][1].trim().slice(0, 110);
+  // Re-render only the peek, keeping the page and the usage list where they were.
+  function refreshPeek(from, focusSel) {
+    const el = from.closest('.peek');
+    if (!el) return render();
+    const listTop = el.querySelector('.pk-list') ? el.querySelector('.pk-list').scrollTop : 0;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = peekHtml(state.peek);
+    const next = tmp.firstElementChild;
+    el.replaceWith(next);
+    const lst = next.querySelector('.pk-list');
+    if (lst) lst.scrollTop = listTop;
+    const f = next.querySelector(focusSel);
+    if (f) f.focus();
+  }
 
   // ---------- graphs
   const NW = 214, NH = 52, GX = 66, GY = 14, PAD = 16;
@@ -797,6 +832,15 @@
     const act = d.act;
     if (act === 'reset') { state.rev[state.compare] = new Set(); state.blockDiff.clear(); save(); return render(); }
     if (act === 'close-peek') { state.peek = null; return render(); }
+    if (act === 'peek-use' || act === 'peek-go') {
+      const list = (state.peek && REFS[state.compare][state.peek.usageKey]) || [];
+      const i = act === 'peek-go' ? state.peek.sel : Number(d.i);
+      if (!list[i]) return;
+      if (act === 'peek-go' || state.peek.sel === i) return openFile(list[i][0], list[i][1]);
+      state.peek.sel = i;
+      return refreshPeek(t, `[data-act="peek-use"][data-i="${i}"]`);
+    }
+    if (act === 'peek-def') { state.peek.sel = null; return refreshPeek(t, '[data-act="peek-use"]'); }
     if (act === 'clear-focus') { state.focus = null; return render(); }
     if (act === 'toggle-block') { const b = m.blockById.get(d.block); toggleBlocks([b]); return render(); }
     if (act === 'toggle-diff') { state.blockDiff.has(d.block) ? state.blockDiff.delete(d.block) : state.blockDiff.add(d.block); return render(); }

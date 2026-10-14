@@ -1,8 +1,8 @@
-# UX proposal v8: start from the chain map, end in the code
+# UX proposal v9: start from the chain map, end in the code
 
-> Draft v8, 2026-10-13. Replaces v7 (see "History" at the end).
+> Draft v9, 2026-10-13. Replaces v8 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 9).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 10).
 > Prototype sources: [prototype/](prototype/).
 
 ## Requirements
@@ -50,6 +50,11 @@ From the review of v7:
 - **The first version is a web page,** not a VS Code extension, so it runs anywhere,
   including Orca's built-in browser.
 
+From the review of v8:
+- **A changed usage previews inside the peek.** Clicking it shows its code there instead
+  of leaving the view; clicking it again goes to it.
+- **Usage snippets are syntax highlighted.**
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
@@ -65,6 +70,9 @@ From the review of v7:
 7. **The diff layout is choosable,** unified by default.
 8. **Where it runs:** a local web app first, open in any browser. A VS Code extension can
    wrap it later.
+9. **Language servers:** one server with both checkouts as workspace folders, so go to
+   definition stays live on both sides (about 850 MB on #168).
+10. **Server language:** TypeScript on Node, for now.
 
 ## Rules
 
@@ -170,6 +178,9 @@ From the review of v7:
 - **Each view has its own hunks.** A chain section shows each change with 3 lines of
   context, merged when they touch. Folding a hunk in one place never folds another.
 - **Clicking a graph node** shows only that node's code and dims unrelated nodes.
+- **Peek:** the definition on top, the changed usages below. Clicking a usage shows its
+  code in the peek, with the usage line marked; clicking it again, or "Go to it", opens
+  it. "Back to definition" returns. Usage snippets are highlighted like the code.
 - **Dark palette** with VS Code Dark+-style syntax colors. Function names are told apart
   from other identifiers.
 - **Unified by default, split on demand.** Split pairs removed and added lines per
@@ -233,20 +244,21 @@ From the review of v7:
 
 ## Cost of the language servers (measured on #168)
 
-The web app runs its own Dart analysis servers, one per side.
+The web app runs one Dart analysis server with both checkouts as workspace folders.
 
-- **Memory:** about 640 MB peak on the PR head and 690 MB on the old side, so roughly
-  1.3 GB for two separate servers. One server with both checkouts as workspace folders
-  peaks at about 850 MB, so the old side adds about 210 MB. This duplicates memory only
-  when an editor already has the PR head open.
+- **Memory:** about 850 MB peak with both checkouts in one server, so the old side adds
+  about 210 MB to the head's 640 MB. Two separate servers would need about 1.3 GB (the old
+  side alone peaks at 690 MB). This duplicates memory only when an editor already has the
+  PR head open.
 - **Time:** the batch that builds chains took 106 s for the head side's 8,526 lookups and
   23 s for the old side's 1,846, about 12 ms per lookup with startup. After that, a click
   is one lookup.
 - **Disk:** the old checkout is a git worktree sharing objects with the repo: 18 MB of
   source plus 76 KB of `.dart_tool`. Packages come from the shared pub cache (no new ones
   for this commit).
-- **Run once per old commit:** the old side only changes on a rebase. Its answers can be
-  computed once, cached (about 500 KB here), and the server stopped.
+- **The batch runs once per pair of commits:** its answers are cached with the analysis
+  (about 500 KB for the old side here), so reopening a review doesn't redo it. Only the
+  page's live requests reach the server after that.
 
 - **Tooling limit:** the YAML grammar from `tree-sitter-wasms` doesn't load with
   `web-tree-sitter` 0.25. The `.spy.yaml` and Markdown files fall back to plain token
@@ -276,8 +288,10 @@ machine's through a forwarded port.
     worktree.
   - **Analysis:** the core from `prototype/analyze.js` (edits, same-change groups, chains
     and the chain map), cached per pair of commits.
-  - **Language servers:** one per side. They answer the batch that builds chains, then
-    the page's live requests.
+  - **Language server:** one Dart analysis server with both checkouts as workspace
+    folders. It answers the batch that builds chains, then the page's live requests.
+  - **Stack:** TypeScript on Node, reusing this prototype, web-tree-sitter, Shiki and
+    `vscode-jsonrpc`, the LSP layer VS Code is built on.
   - **Access:** localhost only, with a random token in the URL, as Jupyter does.
 - **Open in editor:** every location links to the editor, `vscode://file/<path>:<line>`
   by default, or a command you configure.
@@ -305,26 +319,19 @@ machine's through a forwarded port.
 
 ## Open questions
 
-- **Q1.** How should the language servers run: one server with both checkouts as roots
-  (about 850 MB while a review is open, everything live), or the head live and the old
-  side answered once per old commit and cached (about 640 MB, plus a 20-second burst when
-  the base moves, with removed-line lookups limited to the diff)?
-- **Q2.** Member cohesion makes chains complete but larger
+- **Q1.** Member cohesion makes chains complete but larger
   (`− OfflineSyncSpace.currentNode` reaches 64 changes). Should it stay?
-- **Q3.** Model adapters: should each generator ship one (Serverpod, freezed,
+- **Q2.** Model adapters: should each generator ship one (Serverpod, freezed,
   json_serializable, protobuf), or should the mapping be declared in `.review.yaml`?
-- **Q4.** How should chains inside a family be ordered: by level, or by what is left to
+- **Q3.** How should chains inside a family be ordered: by level, or by what is left to
   review?
-- **Q5.** For large graphs, should busy levels collapse into "+N more", or should nodes be
+- **Q4.** For large graphs, should busy levels collapse into "+N more", or should nodes be
   grouped by file?
-- **Q6.** Should a same change also need the same symbol? `userId → spaceId` as a
+- **Q5.** Should a same change also need the same symbol? `userId → spaceId` as a
   declaration is one group of six different parameters. Requiring the language server to
   resolve each instance to the same declaration would split it into six, but it would
   also split a class rename from its constructor calls and an interface method from its
   override.
-- **Q7.** What should the server be written in: TypeScript on Node, which reuses this
-  prototype, web-tree-sitter, Shiki and `vscode-jsonrpc` (the LSP layer VS Code is built
-  on), or a single Rust binary, like mergiraf and difftastic?
 
 ## History
 
@@ -358,6 +365,10 @@ machine's through a forwarded port.
 - **v7:** stricter same change.
   - Feedback: make the first version a web page instead of a VS Code extension, so it
     runs anywhere, including Orca's browser.
+- **v8:** a local web app instead of a VS Code extension.
+  - Decided: one language server with both checkouts, and TypeScript for the server.
+  - Feedback: preview a changed usage inside the peek, highlighted, and go to it on a
+    second click.
 
 ## References
 

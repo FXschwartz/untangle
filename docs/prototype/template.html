@@ -266,11 +266,17 @@ code, .mono { font-family: var(--font-mono); font-size: .86em; }
 .pk-code { font: 400 12px/1.6 var(--font-mono); padding: 6px 0; overflow-x: auto; }
 .pk-ln { display: flex; white-space: pre; }
 .pk-ln .no { width: 46px; flex: none; text-align: right; padding-right: 10px; color: var(--ink-3); }
-.pk-ln.hit { background: rgba(255, 255, 255, .07); }
+.pk-ln.hit { background: rgba(255, 255, 255, .07); box-shadow: inset 3px 0 0 var(--mark-ink); }
+.pk-ln.add { background: var(--add-bg); }
+.pk-ln.add.hit { background: linear-gradient(rgba(255, 255, 255, .06), rgba(255, 255, 255, .06)), var(--add-bg); }
+.pk-ln .sg { width: 14px; flex: none; color: var(--add-ink); }
+.pk-hint { font-size: 12px; color: var(--ink-3); }
 .pk-foot { padding: 6px 12px 10px; font-size: 13px; }
 .pk-list { display: grid; max-height: 240px; overflow-y: auto; padding: 4px 0; }
 .pk-use { appearance: none; border: 0; background: none; text-align: left; display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); gap: 12px; padding: 4px 12px; cursor: pointer; font: 400 12px/1.5 var(--font-mono); color: var(--ink); }
 .pk-use:hover { background: var(--surface-2); }
+.pk-use[aria-current="true"] { background: var(--surface-3); box-shadow: inset 3px 0 0 var(--mark-ink); }
+.pk-use[aria-current="true"] .pk-up::after { content: " →"; color: var(--mark-ink); }
 .pk-use .pk-up { color: var(--accent-ink); overflow-wrap: anywhere; }
 .pk-use code { white-space: pre; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .pk-use.done { opacity: .55; }
@@ -345,11 +351,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v8 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v9 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
     <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v7: the first version is a local web app instead of a VS Code extension. A small command-line tool serves this page on localhost, so it opens in any browser, Orca’s included, and go to definition and search reach the whole repository.</p>
+    <p class="changed">Changed since v8: in a peek, clicking a changed usage shows it in the peek, highlighted, and clicking it again goes to it. Decided: one language server holds both checkouts, and the server is written in TypeScript.</p>
   </header>
 
   <section class="section" id="try">
@@ -362,7 +368,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><b>Start on the chain map.</b> It lays the 57 linked chains out in 9 levels, with the model changes at the bottom. Click a chain to open it.</li>
       <li><b>Click a node</b> in a chain’s graph to show only that member’s code. Click it again, or “Show all”, to go back.</li>
       <li><b>Mark</b> a change, a hunk, a node or the whole chain reviewed. The code stays, muted. When a hunk’s last change is reviewed, the hunk folds.</li>
-      <li><b>Click an identifier</b> to peek at its definition, on added and removed lines alike. Each side has its own Dart analysis server.</li>
+      <li><b>Click an identifier</b> to peek at its definition, on added and removed lines alike. In a peek, click a changed usage to show it there, then click it again to go to it.</li>
       <li><b>Switch</b> to the split layout, search the changes, or compare with “Reviewed at 0540639”.</li>
     </ul>
 
@@ -470,7 +476,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 to v7 reviews</h2>
+      <h2>Answers from the v2 to v8 reviews</h2>
     </header>
     <ol class="decide">
       <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another. Overlapping runs are one edit, and punctuation alone never counts.</span></li>
@@ -485,6 +491,8 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">First screen</span><span>The chain map.</span></li>
       <li><span class="q">Models</span><span>Generated code links back to the model file it comes from.</span></li>
       <li><span class="q">Where</span><span>A local web app, open in any browser. A VS Code extension can wrap it later.</span></li>
+      <li><span class="q">Servers</span><span>One language server with both checkouts as workspace folders, so go to definition stays live on both sides.</span></li>
+      <li><span class="q">Language</span><span>TypeScript on Node, for now.</span></li>
     </ol>
   </section>
 
@@ -509,7 +517,8 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>Git:</b> diffs, files at either revision, and the reviewed-snapshot branch, with mergiraf on a rebase. Your marks are commits on that branch, so git-tree-compare and <code>git diff</code> still show what’s left.</li>
             <li><b>Checkouts:</b> each side is a git worktree that shares objects with the repo (18 MB of source for #168), or an existing checkout of the same commit, such as an agent’s worktree.</li>
             <li><b>Analysis:</b> this prototype’s core (edits, same changes, chains and the chain map), cached per pair of commits.</li>
-            <li><b>Language servers:</b> one per side. They answer the batch that builds chains, then the page’s live requests.</li>
+            <li><b>Language server:</b> one Dart analysis server with both checkouts as workspace folders. It answers the batch that builds chains, then the page’s live requests.</li>
+            <li><b>Stack:</b> TypeScript on Node, reusing this prototype, web-tree-sitter, Shiki and <code>vscode-jsonrpc</code>, the LSP layer VS Code is built on.</li>
             <li><b>Access:</b> localhost only, with a random token in the URL, as Jupyter does.</li>
           </ul>
         </div>
@@ -530,14 +539,14 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
     <header>
       <span class="eyebrow">Measured on #168</span>
       <h2>What the language servers cost</h2>
-      <p class="section-intro prose">The web app runs its own Dart analysis servers, one per side. Measured on this machine, resolving the identifiers of #168’s diff.</p>
+      <p class="section-intro prose">The web app runs one Dart analysis server with both checkouts as workspace folders. Measured on this machine, resolving the identifiers of #168’s diff.</p>
     </header>
     <div class="musts">
-      <div class="must"><h3>Memory</h3><p>One server peaks at about 640 MB on the PR head and 690 MB on the old side. Two separate servers need about 1.3 GB at the peak. One server with both checkouts as workspace folders peaks at about 850 MB, so the old side adds about 210 MB. This duplicates memory only when an editor already has the PR head open.</p></div>
+      <div class="must"><h3>Memory</h3><p>About 850 MB at the peak with both checkouts in one server, so the old side adds about 210 MB to the head’s 640 MB. Two separate servers would need about 1.3 GB. This duplicates memory only when an editor already has the PR head open.</p></div>
       <div class="must"><h3>Time</h3><p>The batch that builds chains took 106 seconds for the head side’s 8,526 lookups and 23 seconds for the old side’s 1,846, about 12 ms per lookup with startup. After that, a click on an identifier is one lookup.</p></div>
       <div class="must"><h3>Disk</h3><p>The old checkout is a git worktree that shares objects with the repo: 18 MB of source plus 76 KB of <code>.dart_tool</code>. Packages come from the shared pub cache, and this commit needed no new ones.</p></div>
     </div>
-    <p class="filters"><b>It only has to run once per old commit.</b> The old side doesn’t change during a review, only on a rebase. Its answers can be computed once, cached (about 500 KB here), and the server stopped. The steady cost is then a cache file, and a burst of about 20 seconds when the base moves.</p>
+    <p class="filters"><b>The batch runs once per pair of commits.</b> Its answers are cached with the analysis (about 500 KB for the old side here), so reopening a review doesn’t redo it. Only the page’s live requests reach the server after that.</p>
   </section>
 
   <section class="section" id="plan">
@@ -559,13 +568,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <h2>Open questions</h2>
     </header>
     <ol class="q-list">
-      <li><span class="q">Q1</span><span><b>Language servers:</b> one server with both checkouts as roots (about 850 MB while a review is open, everything live), or the head live and the old side answered once per old commit and cached (about 640 MB, plus a 20-second burst when the base moves, with removed-line lookups limited to the diff)?</span></li>
-      <li><span class="q">Q2</span><span><b>Member cohesion:</b> it makes chains complete but larger. <code>− OfflineSyncSpace.currentNode</code> reaches 64 changes because whole members join. Keep it, or show those changes as linked but outside?</span></li>
-      <li><span class="q">Q3</span><span><b>Model adapters:</b> the generated-to-model mapping is Serverpod-specific. Should each generator ship a small adapter (Serverpod, freezed, json_serializable, protobuf), or should the mapping be declared in <code>.review.yaml</code>?</span></li>
-      <li><span class="q">Q4</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
-      <li><span class="q">Q5</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
-      <li><span class="q">Q6</span><span><b>Same change across symbols:</b> <code>userId → spaceId</code> as a declaration is one group of six different parameters. Requiring the language server to resolve each instance to the same declaration would split it into six. It would also split a class rename from its constructor calls, and an interface method from its override. Keep the syntax-only rule, or require the same symbol?</span></li>
-      <li><span class="q">Q7</span><span><b>Server language:</b> TypeScript on Node, which reuses this prototype, web-tree-sitter, Shiki and <code>vscode-jsonrpc</code> (the LSP layer VS Code is built on), or a single Rust binary, like mergiraf and difftastic?</span></li>
+      <li><span class="q">Q1</span><span><b>Member cohesion:</b> it makes chains complete but larger. <code>− OfflineSyncSpace.currentNode</code> reaches 64 changes because whole members join. Keep it, or show those changes as linked but outside?</span></li>
+      <li><span class="q">Q2</span><span><b>Model adapters:</b> the generated-to-model mapping is Serverpod-specific. Should each generator ship a small adapter (Serverpod, freezed, json_serializable, protobuf), or should the mapping be declared in <code>.review.yaml</code>?</span></li>
+      <li><span class="q">Q3</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
+      <li><span class="q">Q4</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
+      <li><span class="q">Q5</span><span><b>Same change across symbols:</b> <code>userId → spaceId</code> as a declaration is one group of six different parameters. Requiring the language server to resolve each instance to the same declaration would split it into six. It would also split a class rename from its constructor calls, and an interface method from its override. Keep the syntax-only rule, or require the same symbol?</span></li>
     </ol>
   </section>
 
