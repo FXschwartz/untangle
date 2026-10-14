@@ -83,8 +83,8 @@ same review again is immediate.
 - **The pull request's comments, as on GitHub** (through `gh`): threads under the lines they're
   on, with replies, reactions and suggestions; the Comments tab lists the open and resolved ones,
   and the conversation (the description, comments and reviews).
-  - **Writing:** the **+** over a line's number starts a comment; shift-click it on another line
-    of the hunk for a range. "Add single comment" posts it now; "Start a review" keeps it, and
+  - **Writing:** the **+** over a line's number starts a comment; drag it over more lines of the
+    hunk (or shift-click another line's) for a range. "Add single comment" posts it now; "Start a review" keeps it, and
     the comments after it, in your pending review. Write and Preview, Ctrl+Enter, and
     "Suggest a change" for lines on the new side. Comment on a whole file from its tools.
   - **Threads:** reply, resolve and unresolve, edit and delete your comments, react. A reviewed
@@ -93,7 +93,12 @@ same review again is immediate.
     request for changes, or discards it.
   - What you type is kept in the browser until it's sent. The page checks GitHub every minute.
     When the pull request has newer commits than the review, comments on lines wait for a
-    restart; replies, file comments and reviews don't.
+    refresh; replies, file comments and reviews don't.
+- **Refreshing without a restart.** When the pull request (or the branch) gets new commits, a
+  banner offers to refresh, as GitHub does; the button next to the title looks for them anytime.
+  untangle builds the new review while the page keeps working on the current one, then the page
+  reloads on the same view, with marks carried over and unsent comments kept. A page left on the
+  old review, in another tab, is told to reload instead of saving marks onto the new one.
 - **Marks on a branch.** Your review is a local git branch, `untangle/pr-<number>` (or
   `untangle/<branch>`): the base plus every change you marked reviewed, a commit per save.
   `git diff untangle/pr-123 <head>` shows what's left. Marks come back from the branch's

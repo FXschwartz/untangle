@@ -292,9 +292,12 @@ From the review of v11:
 - **The pull request's comments, as on GitHub.** Threads show under their lines (a resolved one
   folds), with replies, reactions and suggestions. A Comments tab lists them, open ones first,
   with the conversation (description, comments, reviews). The **+** over a line starts a comment
-  (shift-click for a range in the hunk): a single comment, or one kept in the pending review that
+  (drag it, or shift-click, for a range in the hunk): a single comment, or one kept in the pending review that
   "Finish your review" submits as a comment, an approval or a request for changes. A reviewed
   hunk doesn't fold while a conversation in it is open.
+- **Refresh in place.** New commits on the pull request show as a banner with Refresh, as on
+  GitHub. untangle builds the new review in the background, and the page reloads on the same
+  view when it's ready.
 - **Clicking a graph node** shows only that node's code and dims unrelated nodes.
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. "Next unreviewed" (key `n`) walks the same order.
@@ -549,6 +552,8 @@ through the page.
   - Asked: the pull request's comments from GitHub, to review without leaving the page (adding,
     showing, pending reviews, replies), through the local `gh` login rather than a token. Done,
     tested on a throwaway pull request of this repository.
+  - Asked: drag to comment on several lines, and refresh to new commits without relaunching.
+    Done.
 
 ## References
 

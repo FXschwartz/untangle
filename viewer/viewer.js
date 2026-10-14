@@ -51,6 +51,16 @@
   const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
 
   const viewer = $('#viewer'), side = $('#vw-side'), main = $('#vw-main'), qInput = $('#vw-q');
+  // The page's calls to untangle say which review the page shows. A 409 answer means untangle has
+  // moved on to newer commits (refreshed from another page): this one offers to reload.
+  function api(path, init) {
+    init = init || {};
+    const headers = Object.assign({}, init.headers, CONFIG.head ? { 'x-untangle-head': CONFIG.head } : {});
+    return fetch('api/' + path, Object.assign({}, init, { headers })).then((r) => {
+      if (r.status === 409) r.clone().json().then((j) => { if (j.moved) { FRESH.moved = j.moved; renderFresh(); } }).catch(() => {});
+      return r;
+    });
+  }
 
   // ---------- state
   const state = {
@@ -80,7 +90,7 @@
     const data = pendingSave;
     pendingSave = null;
     clearTimeout(saveTimer);
-    fetch('api/state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: data, keepalive: true })
+    api('state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: data, keepalive: true })
       .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => {
         viewer.classList.remove('unsaved');
@@ -950,7 +960,7 @@
     let abs = loc.abs || null;
     if (!abs && loc.side && loc.p) {
       if (!CONFIG.roots) {
-        if (!rootsAsked) { rootsAsked = true; fetch('api/roots').then((r) => r.json()).then((j) => { if (j.head) { CONFIG.roots = j; render(); } }).catch(() => {}); }
+        if (!rootsAsked) { rootsAsked = true; api('roots').then((r) => r.json()).then((j) => { if (j.head) { CONFIG.roots = j; render(); } }).catch(() => {}); }
         return '';
       }
       abs = CONFIG.roots[loc.side] + '/' + loc.p;
@@ -990,7 +1000,7 @@
     const s = { status: 'loading', wanted: !!wanted };
     sources.set(key, s);
     const q = new URLSearchParams(v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
-    fetch('api/file?' + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+    api('file?' + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => {
         const lines = j.text === '' ? [] : j.text.replace(/\r?\n$/, '').split(/\r?\n/);
         Object.assign(s, { status: 'ok', text: j.text, lines, count: lines.length, abs: j.abs, generated: j.generated });
@@ -1065,7 +1075,7 @@
     if (q.side) params.set('side', q.side);
     if (q.p) params.set('p', q.p);
     if (q.ext != null) params.set('ext', String(q.ext));
-    fetch('api/definition?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+    api('definition?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => { peek.live = j.target ? { q, status: 'ok', target: j.target } : { q, status: 'none' }; })
       .catch((e) => { peek.live = { q, status: 'error', error: e.message }; })
       .then(() => { if (state.peek === peek) render(); });
@@ -1083,7 +1093,7 @@
     opened: new Set(), replying: new Set(), editing: null, picker: null, previews: new Map(), preview: new Set(),
     showResolved: false, away: new Set(), fileCompose: null, reviewOpen: false, event: 'COMMENT',
   };
-  const DRAFTS = 'untangle:drafts:' + (CONFIG.key || 'review');
+  const DRAFTS = 'untangle:drafts:' + ((CONFIG.github && CONFIG.github.url) || CONFIG.key || 'review');
   const drafts = new Map();
   try { Object.entries(JSON.parse(localStorage.getItem(DRAFTS) || '{}')).forEach(([k, v]) => { if (typeof v === 'string') drafts.set(k, v); }); } catch (e) { /* storage unavailable */ }
   let draftTimer = null;
@@ -1123,12 +1133,13 @@
     if (!GH.on || GH.loading) return;
     GH.loading = true;
     if (!quiet) render();
-    fetch('api/github', { cache: 'no-store' })
+    api('github', { cache: 'no-store' })
       .then((r) => r.json().catch(() => ({ error: r.statusText })).then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => {
         GH.loading = false; GH.error = null; GH.at = Date.now();
         // Polled: the page changes only when the conversation did.
         if (JSON.stringify(j) !== GH.sig) { ghSet(j); render(); } else if (!quiet) render();
+        if (GH.stale) freshCheck();
       })
       .catch((e) => { GH.loading = false; GH.error = e.message; GH.at = Date.now(); render(); });
   }
@@ -1138,7 +1149,7 @@
     GH.busy = key;
     GH.errors.delete(key);
     render();
-    fetch('api/github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+    api('github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
       .then((r) => r.json().catch(() => ({ error: r.statusText })).then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => { GH.at = Date.now(); ghSet(j); if (done) done(); })
       .catch((e) => { GH.errors.set(key, e.message); ghLoad(true); })
@@ -1151,7 +1162,7 @@
     const entry = { text, html: null, error: null };
     GH.previews.set(key, entry);
     if (!text.trim()) { entry.html = '<p class="muted">Nothing to preview.</p>'; return; }
-    fetch('api/github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'preview', text }) })
+    api('github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'preview', text }) })
       .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => { entry.html = j.html; })
       .catch((e) => { entry.error = e.message; })
@@ -1329,20 +1340,29 @@
     const x = side === 'LEFT' ? M().old.get(path + ':' + line) : M().head.get(path + ':' + line);
     return x ? { hi: x.hi, ri: x.ri, side, line } : null;
   }
-  // Opens the composer on a line; with shift, stretches the open one to it (within its hunk).
+  // Opens the composer on the lines from `from` to `to` (one line when they're the same), within a hunk.
+  function composeRange(from, to) {
+    const a = rowAt(from.path, from.side, from.line), b = rowAt(to.path, to.side, to.line);
+    if (a && b && a.hi !== b.hi) return toast('A comment’s lines must be in one hunk.');
+    const one = !a || !b || a.ri === b.ri;
+    const [s, e] = one ? [a, a] : a.ri < b.ri ? [a, b] : [b, a];
+    // The text written so far stays with the composer while its lines change.
+    const c = state.compose;
+    const key = c && c.path === from.path && c.anchor.side === from.side && c.anchor.line === from.line ? c.key : `new:${from.path}:${from.side}:${from.line}`;
+    state.compose = {
+      key, anchor: { side: from.side, line: from.line }, path: from.path,
+      side: one ? from.side : e.side, line: one ? from.line : e.line,
+      startSide: one ? null : s.side, startLine: one ? null : s.line,
+      hi: a ? a.hi : null, r0: s ? s.ri : -1, r1: e ? e.ri : -1,
+    };
+    GH.focus = key;
+    render();
+  }
+  // Opens the composer on a line; with shift, stretches the open one to it.
   function openCompose(at, extend) {
     const c = state.compose;
-    if (extend && c && c.path === at.path && c.hi != null) {
-      const a = rowAt(at.path, c.anchor.side, c.anchor.line), b = rowAt(at.path, at.side, at.line);
-      if (!a || !b || a.hi !== b.hi) return toast('A comment’s lines must be in one hunk.');
-      const [s, e] = a.ri <= b.ri ? [a, b] : [b, a];
-      state.compose = { ...c, side: e.side, line: e.line, startSide: s.side, startLine: s.line, r0: s.ri, r1: e.ri };
-    } else {
-      const a = rowAt(at.path, at.side, at.line);
-      state.compose = { key: `new:${at.path}:${at.side}:${at.line}`, anchor: { side: at.side, line: at.line }, path: at.path, side: at.side, line: at.line, startSide: null, startLine: null, hi: a ? a.hi : null, r0: a ? a.ri : -1, r1: a ? a.ri : -1 };
-    }
-    GH.focus = state.compose.key;
-    render();
+    if (extend && c && c.path === at.path && c.hi != null) return composeRange({ path: c.path, side: c.anchor.side, line: c.anchor.line }, at);
+    return composeRange(at, at);
   }
   // The lines a suggestion starts from: the new side's lines in the comment's range.
   function suggestionLines(c) {
@@ -1397,7 +1417,7 @@
     const d = GH.data;
     let h = `<div class="sb-gh">${GH.error ? `<span class="d">${esc(GH.error)}</span>` : !d ? 'Loading comments from GitHub…' : GH.loading ? 'Refreshing…' : `Updated ${ago(new Date(GH.at).toISOString())}`}<span class="sp"></span>${iconBtn(ICON.refresh, 'Refresh from GitHub', 'data-act="gh-refresh"')}</div>`;
     if (!d) return h;
-    if (GH.stale) h += `<div class="sb-warn">GitHub has newer commits (${esc(d.pr.head.slice(0, 7))}). Restart untangle to review them; comments on lines need this review to be on the pull request’s head.</div>`;
+    if (GH.stale) h += `<div class="sb-warn">GitHub has newer commits (<code>${esc(d.pr.head.slice(0, 7))}</code>). Comments on lines wait for this review to be on them. <button type="button" class="btn xs" data-act="refresh">Refresh</button></div>`;
     if (d.pending) h += `<button type="button" class="sb-pend" data-act="review-toggle">${d.pending.comments} pending comment${d.pending.comments === 1 ? '' : 's'} · Finish your review</button>`;
     h += `<button type="button" class="sb-row" data-act="conversation"${v.kind === 'conversation' ? ' aria-current="true"' : ''}><span class="tw">${ICON.discussion}</span><span class="nm">Conversation<span class="sub">description · ${d.comments.length} comment${d.comments.length === 1 ? '' : 's'} · ${d.reviews.length} review${d.reviews.length === 1 ? '' : 's'}</span></span><span class="cnt">›</span></button>`;
     const order = new Map(M().files.map((f, i) => [f.p, i]));
@@ -1429,7 +1449,7 @@
       const mine = d.pr.mine;
       const opt = (ev, label, note, off) => `<label class="rv-opt${off ? ' off' : ''}"><input type="radio" name="rv-event" value="${ev}"${GH.event === ev ? ' checked' : ''}${off ? ' disabled' : ''}><span><b>${label}</b><span class="muted">${note}</span></span></label>`;
       h += `<div class="rv-pop" role="dialog" aria-label="Finish your review"><div class="rv-h"><b>Finish your review</b><span class="muted">${n ? `${n} pending comment${n === 1 ? '' : 's'}` : 'no pending comments'}</span></div>`
-        + (GH.stale ? `<div class="sb-warn">GitHub has newer commits than this review (${esc(d.pr.head.slice(0, 7))}).</div>` : '')
+        + (GH.stale ? `<div class="sb-warn">GitHub has newer commits than this review (<code>${esc(d.pr.head.slice(0, 7))}</code>). <button type="button" class="btn xs" data-act="refresh">Refresh</button></div>` : '')
         + composerHtml('review', {
           placeholder: 'Leave a comment', rows: 4,
           extra: `<div class="rv-opts">${opt('COMMENT', 'Comment', 'General feedback, without approving.', false)}${opt('APPROVE', 'Approve', mine ? 'Not for your own pull request.' : 'Feedback, and approval to merge.', mine)}${opt('REQUEST_CHANGES', 'Request changes', mine ? 'Not for your own pull request.' : 'Feedback that must be addressed before merging.', mine)}</div>`,
@@ -1459,7 +1479,7 @@
     const code = cell.closest('.code[data-p]');
     if (!code || !canCommentLines()) { addBtn.classList.remove('on'); return; }
     const [side, line] = cell.dataset.c.split(':');
-    addAt = { path: code.dataset.p, side: side === 'L' ? 'LEFT' : 'RIGHT', line: Number(line) };
+    addAt = { path: code.dataset.p, side: side === 'L' ? 'LEFT' : 'RIGHT', line: Number(line), cell };
     const mr = main.getBoundingClientRect(), r = cell.getBoundingClientRect();
     const sg = cell.querySelector('.sg') || cell;
     const sr = sg.getBoundingClientRect();
@@ -1468,12 +1488,61 @@
     addBtn.classList.add('on');
   }
   main.addEventListener('mouseover', (e) => {
-    if (!GH.on || e.target === addBtn) return;
+    if (!GH.on || drag || e.target === addBtn) return;
     const cell = e.target.closest('[data-c]');
     if (cell && main.contains(cell)) placeAdd(cell); else addBtn.classList.remove('on');
   });
-  main.addEventListener('mouseleave', () => addBtn.classList.remove('on'));
-  addBtn.addEventListener('click', (e) => { e.stopPropagation(); if (addAt) openCompose(addAt, e.shiftKey); });
+  main.addEventListener('mouseleave', () => { if (!drag) addBtn.classList.remove('on'); });
+  // Pressing the + and dragging over lines comments on all of them, as on GitHub (within a hunk;
+  // near the pane's edges it scrolls). Shift stretches the open comment instead.
+  let drag = null, dragUp = 0;
+  const cellAt = (x, y) => { const el = document.elementFromPoint(x, y); const c = el && el.closest('[data-c]'); return c && drag && drag.code.contains(c) ? c : null; };
+  const atOf = (cell) => { const [side, line] = cell.dataset.c.split(':'); return { path: drag.at.path, side: side === 'L' ? 'LEFT' : 'RIGHT', line: Number(line) }; };
+  function paintDrag() {
+    main.querySelectorAll('.cm-drag').forEach((x) => x.classList.remove('cm-drag'));
+    const cells = [...drag.code.querySelectorAll('[data-c]')];
+    let i = cells.indexOf(drag.cell), j = cells.indexOf(drag.end);
+    if (i < 0 || j < 0) return;
+    if (i > j) [i, j] = [j, i];
+    for (let k = i; k <= j; k++) { const row = cells[k].closest('.ln, .sl'); if (row) row.classList.add('cm-drag'); }
+  }
+  function dragTo(x, y) {
+    const cell = cellAt(x, y);
+    if (!cell || cell === drag.end) return;
+    const a = rowAt(drag.at.path, drag.at.side, drag.at.line), to = atOf(cell), b = rowAt(to.path, to.side, to.line);
+    if (a && b && a.hi !== b.hi) return;
+    drag.end = cell;
+    drag.to = to;
+    paintDrag();
+  }
+  function dragScroll() {
+    if (!drag) return;
+    const r = main.getBoundingClientRect(), top = r.top + headH();
+    const dy = drag.y < top + 30 ? -12 : drag.y > r.bottom - 30 ? 12 : 0;
+    if (dy) { main.scrollTop += dy; dragTo(drag.x, drag.y); }
+    requestAnimationFrame(dragScroll);
+  }
+  addBtn.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !addAt || !addAt.cell) return;
+    e.preventDefault();
+    drag = { at: { path: addAt.path, side: addAt.side, line: addAt.line }, to: null, cell: addAt.cell, end: addAt.cell, code: addAt.cell.closest('.code'), shift: e.shiftKey, x: e.clientX, y: e.clientY };
+    document.body.classList.add('dragging');
+    paintDrag();
+    requestAnimationFrame(dragScroll);
+  });
+  document.addEventListener('mousemove', (e) => { if (!drag) return; drag.x = e.clientX; drag.y = e.clientY; dragTo(e.clientX, e.clientY); });
+  document.addEventListener('mouseup', () => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    dragUp = Date.now();
+    document.body.classList.remove('dragging');
+    main.querySelectorAll('.cm-drag').forEach((x) => x.classList.remove('cm-drag'));
+    if (d.shift) openCompose(d.to || d.at, true);
+    else composeRange(d.at, d.to || d.at);
+  });
+  // The keyboard's click (a mouse's already opened the composer on its way up).
+  addBtn.addEventListener('click', (e) => { e.stopPropagation(); if (Date.now() - dragUp > 400 && addAt) openCompose(addAt, e.shiftKey); });
 
   // ---------- views
   function headerHtml(title, metaHtml, actionHtml, sub) {
@@ -1673,7 +1742,7 @@
       if (f.loadError) return h + `<div class="empty">${esc(f.loadError)}</div>`;
       if (!f.loading) {
         f.loading = true;
-        fetch('api/generated?p=' + encodeURIComponent(f.p))
+        api('generated?p=' + encodeURIComponent(f.p))
           .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
           .then((j) => { f.hunks = j.hunks; })
           .catch((e) => { f.loadError = `Couldn’t load this file’s diff: ${e.message}`; })
@@ -1712,7 +1781,7 @@
     if (!repoSearches.has(key)) {
       const r = { status: 'loading' };
       repoSearches.set(key, r);
-      fetch('api/search?' + new URLSearchParams({ side, q })).then((x) => x.json().then((j) => { if (!x.ok) throw new Error(j.error || x.status); return j; }))
+      api('search?' + new URLSearchParams({ side, q })).then((x) => x.json().then((j) => { if (!x.ok) throw new Error(j.error || x.status); return j; }))
         .then((j) => Object.assign(r, { status: 'ok', results: j.results, truncated: j.truncated }))
         .catch((e) => Object.assign(r, { status: 'error', error: e.message }))
         .then(() => { if (state.view.kind === 'search' && state.search.q.trim() === q) render(); });
@@ -1883,7 +1952,8 @@
       const [first, ...rest] = M().raw.title.split(' ');
       const name = `<b>${esc(first)}</b> ${esc(rest.join(' '))}`;
       title.innerHTML = (CONFIG.url ? `<a href="${esc(CONFIG.url)}" target="_blank" rel="noopener">${name}</a>` : `<span>${name}</span>`)
-        + `<span class="vw-where">${esc(CONFIG.where || M().raw.label)}</span>`;
+        + `<span class="vw-where">${esc(CONFIG.where || M().raw.label)}</span>`
+        + (CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : '');
     }
     viewer.classList.toggle('split', state.layout === 'split');
     const rd = $('#vw-revdiff');
@@ -1993,6 +2063,55 @@
     main.querySelectorAll('.flash').forEach((x) => x.classList.remove('flash'));
     void row.offsetWidth;
     row.classList.add('flash');
+  }
+
+  // ---------- refreshing in place
+  // untangle looks up the pull request again; when it moved, it builds the new review while this
+  // page keeps working, and the page then reloads on the same view. New commits show as a banner.
+  const FRESH = { state: null, head: null, steps: [], error: null, latest: null, moved: null, timer: null };
+  const RESUME = 'untangle:resume';
+  function startRefresh() {
+    if (!CONFIG.served || FRESH.state === 'checking' || FRESH.state === 'building') return;
+    Object.assign(FRESH, { state: 'checking', error: null, steps: [] });
+    renderFresh();
+    api('refresh', { method: 'POST' }).then((r) => r.json()).then(onFresh).catch((e) => onFresh({ state: 'failed', error: e.message }));
+  }
+  function onFresh(j) {
+    clearTimeout(FRESH.timer);
+    if (j.state === 'current') { Object.assign(FRESH, { state: null, latest: null }); renderFresh(); return toast(`Up to date: ${String(j.head).slice(0, 7)} is the latest`); }
+    Object.assign(FRESH, { state: j.state, head: j.head || FRESH.head, steps: j.steps || [], error: j.error || null });
+    if (j.state === 'ready') return reloadHere();
+    renderFresh();
+    if (j.state === 'checking' || j.state === 'building') FRESH.timer = setTimeout(() => api('refresh').then((r) => r.json()).then(onFresh).catch(() => onFresh({ state: FRESH.state, head: FRESH.head, steps: FRESH.steps })), 700);
+  }
+  // Whether newer commits exist (asked at most every half minute by untangle, however many ask).
+  function freshCheck() {
+    if (!CONFIG.served || FRESH.state) return;
+    api('refresh?check=1').then((r) => r.json()).then((j) => {
+      const newer = j.latest && j.latest !== CONFIG.head ? j.latest : null;
+      if (newer !== FRESH.latest) { FRESH.latest = newer; renderFresh(); }
+    }).catch(() => {});
+  }
+  function reloadHere() {
+    const v = state.view;
+    const r = { tab: state.tab, kind: v.kind, path: v.path || null, chain: v.kind === 'chain' && M().chains[v.id] ? M().chains[v.id].name : null };
+    try { sessionStorage.setItem(RESUME, JSON.stringify(r)); } catch (e) { /* storage unavailable */ }
+    flushSave();
+    location.reload();
+  }
+  function renderFresh() {
+    const el = $('#vw-fresh');
+    if (!el) return;
+    const short = (h) => esc(String(h || '').slice(0, 7));
+    const step = FRESH.steps.filter((x) => x.state === 'running').map((x) => x.label + (x.detail ? ': ' + x.detail : '')).pop();
+    let h = '';
+    if (FRESH.moved) h = `<span>untangle now reviews <code>${short(FRESH.moved)}</code>; this page shows <code>${short(CONFIG.head)}</code>.</span><button type="button" class="btn xs primary" data-act="reload">Reload</button>`;
+    else if (FRESH.state === 'checking') h = '<span class="spin" aria-hidden="true"></span><span>Looking for new commits…</span>';
+    else if (FRESH.state === 'building') h = `<span class="spin" aria-hidden="true"></span><span>Updating to <code>${short(FRESH.head)}</code>${step ? ` · ${esc(step)}` : ''}…</span>`;
+    else if (FRESH.state === 'failed') h = `<span class="d">Couldn’t update: ${esc(FRESH.error || 'unknown error')}</span><button type="button" class="btn xs" data-act="refresh">Try again</button>`;
+    else if (FRESH.latest) h = `<span>New commits: <code>${short(FRESH.latest)}</code></span><button type="button" class="btn xs primary" data-act="refresh">Refresh</button>`;
+    el.hidden = !h;
+    el.innerHTML = h;
   }
 
   // ---------- events
@@ -2153,6 +2272,8 @@
     if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
+    if (act === 'refresh') return startRefresh();
+    if (act === 'reload') return reloadHere();
     if (act && (act.startsWith('gh-') || GH_ACTS.has(act))) return ghClick(act, d);
     if (act === 'reset') { state.rev[state.compare] = new Set(); state.blockDiff.clear(); save(); return render(); }
     if (act === 'close-peek') { state.peek = null; return render(); }
@@ -2163,7 +2284,7 @@
       const p0 = state.peek;
       const params = new URLSearchParams({ side: p0.old ? 'base' : 'head', p: p0.path, l: String(p0.old ? p0.o : p0.n), c: String(p0.col) });
       t.textContent = 'Opening…';
-      fetch('api/definition?' + params).then((r) => r.json()).then((j) => {
+      api('definition?' + params).then((r) => r.json()).then((j) => {
         const x = j.target;
         if (!x) { t.textContent = 'Not found'; return; }
         openSource({ side: x.side || '', p: x.side ? x.p : '', ext: x.ext != null ? x.ext : '', line: x.l, label: x.side ? '' : x.p, where: x.w === 'sdk' ? 'Dart SDK' : x.w === 'package' ? 'package' : '' });
@@ -2171,7 +2292,7 @@
       return;
     }
     if (act === 'open-editor') {
-      fetch('api/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ side: d.side || undefined, p: d.p || undefined, ext: d.ext !== '' ? Number(d.ext) : undefined, l: Number(d.line) || 1, c: Number(d.col) || 0 }) })
+      api('open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ side: d.side || undefined, p: d.p || undefined, ext: d.ext !== '' ? Number(d.ext) : undefined, l: Number(d.line) || 1, c: Number(d.col) || 0 }) })
         .then((r) => r.json()).then((j) => { if (j.error) alert(j.error); }).catch(() => {});
       return;
     }
@@ -2301,6 +2422,22 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollMetrics(); });
   }
 
+  try {
+    const r = JSON.parse(sessionStorage.getItem(RESUME) || 'null');
+    sessionStorage.removeItem(RESUME);
+    if (r) {
+      if (r.tab) state.tab = r.tab;
+      const c = r.chain && M().chains.find((x) => x.name === r.chain);
+      if (r.kind === 'file' && r.path && (M().files.some((f) => f.p === r.path) || M().generated.some((f) => f.p === r.path))) state.view = { kind: 'file', path: r.path };
+      else if (c) state.view = { kind: 'chain', id: c.id };
+      else if (r.kind === 'conversation' && GH.on) state.view = { kind: 'conversation' };
+      else if (r.kind === 'standalone') state.view = { kind: 'standalone' };
+    }
+  } catch (e) { /* storage unavailable */ }
+  if (CONFIG.served) {
+    setInterval(() => { if (document.visibilityState === 'visible') freshCheck(); }, 120000);
+    setTimeout(freshCheck, 5000);
+  }
   if (GH.on) {
     ghLoad(true);
     // New comments from others show up while the page is on screen.

@@ -86,6 +86,24 @@ function branchPr(dir: string): PullRequest | null {
   }
 }
 
+/**
+ * The head a review of this target would have now, without fetching it: the pull request's
+ * (through gh, else GitHub's API), or the directory's HEAD.
+ */
+export async function latestHead(t: Target, byUrl: boolean): Promise<string | null> {
+  if (!byUrl) return gitMaybe(t.repo, 'rev-parse', 'HEAD')?.trim() || null;
+  if (!t.pr) return null;
+  const { owner, repo, number } = t.pr;
+  if (has('gh')) {
+    try {
+      return JSON.parse(await runAsync('gh', ['pr', 'view', String(number), '--repo', `${owner}/${repo}`, '--json', 'headRefOid'])).headRefOid;
+    } catch {
+      // The public API may still answer.
+    }
+  }
+  return (await prFromApi(owner, repo, number, null)).headRefOid;
+}
+
 const hasCommit = (repo: string, sha: string) => gitMaybe(repo, 'cat-file', '-e', `${sha}^{commit}`) !== null;
 
 /**

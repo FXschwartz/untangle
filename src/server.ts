@@ -11,8 +11,11 @@ export interface Api {
   page(): string | null;
   /** Static files the page loads (the highlighter), by name. */
   asset(name: string): { type: string; body: Buffer } | null;
-  /** The page's API: api/<route>, with the query and the body (JSON) of the request. */
-  call(route: string, method: string, query: URLSearchParams, body: unknown): Promise<{ status?: number; data: unknown }>;
+  /**
+   * The page's API: api/<route>, with the query and the body (JSON) of the request, and the head
+   * commit of the review the page shows (when it says).
+   */
+  call(route: string, method: string, query: URLSearchParams, body: unknown, head: string | null): Promise<{ status?: number; data: unknown }>;
 }
 
 export interface ServerOptions {
@@ -129,7 +132,8 @@ export class ReviewServer {
         }
       }
       try {
-        const out = await this.api.call(route.slice(4), req.method || 'GET', url.searchParams, body);
+        const head = req.headers['x-untangle-head'];
+        const out = await this.api.call(route.slice(4), req.method || 'GET', url.searchParams, body, typeof head === 'string' ? head : null);
         return this.json(res, out.status ?? 200, out.data);
       } catch (e) {
         return this.json(res, 500, { error: (e as Error).message });
