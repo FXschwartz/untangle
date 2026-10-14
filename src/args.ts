@@ -11,6 +11,8 @@ interface Flag {
 const FLAGS: Flag[] = [
   { name: 'base', type: 'string', usage: 'compare with this branch or commit instead of the pull request’s base' },
   { name: 'base-path', type: 'string', usage: 'base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)' },
+  { name: 'editor', type: 'string', usage: 'open locations with this command, or this URL, where {file}, {line} and {col} are replaced (e.g. "code -g {file}:{line}:{col}"); VS Code\'s vscode:// link when omitted' },
+  { name: 'export', type: 'string', usage: 'write the review to this HTML file, to share it read-only, and exit' },
   { name: 'host', type: 'string', usage: 'address to bind', default: '127.0.0.1' },
   { name: 'no-cache', type: 'bool', usage: 'build the review again, even when an analysis of the same commits is cached' },
   { name: 'no-color', type: 'bool', usage: 'disable colour output' },
@@ -26,6 +28,8 @@ export interface Options {
   target: string;
   base: string | null;
   basePath: string;
+  editor: string | null;
+  exportTo: string | null;
   host: string;
   port: number;
   portExplicit: boolean;
@@ -97,6 +101,8 @@ export function parseArgs(argv: string[]): Options {
     target: rest[0] || '.',
     base: str('base'),
     basePath,
+    editor: str('editor'),
+    exportTo: str('export'),
     host: str('host') || '127.0.0.1',
     port,
     portExplicit: values.has('port'),

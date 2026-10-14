@@ -13,7 +13,7 @@
     "viewer"
   ],
   "scripts": {
-    "build": "tsc -p .",
+    "build": "tsc -p . && esbuild viewer/highlight.js --bundle --format=iife --minify --legal-comments=none --outfile=dist/highlight.js",
     "watch": "tsc -p . --watch",
     "check": "tsc -p . --noEmit"
   },
@@ -28,6 +28,8 @@
   },
   "devDependencies": {
     "@types/node": "25.9.9",
+    "esbuild": "0.28.2",
+    "shiki": "4.5.0",
     "typescript": "5.9.3"
   }
 }

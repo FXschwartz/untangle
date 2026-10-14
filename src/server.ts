@@ -9,10 +9,10 @@ import type { Status } from './narrate.js';
 export interface Api {
   /** The review page, once it's built. */
   page(): string | null;
-  /** A generated file's diff: { hunks } or { error }. */
-  generated(path: string): { hunks?: unknown; error?: string };
-  /** Saves the page's marks and layout. */
-  saveState(json: string): void;
+  /** Static files the page loads (the highlighter), by name. */
+  asset(name: string): { type: string; body: Buffer } | null;
+  /** The page's API: api/<route>, with the query and the body (JSON) of the request. */
+  call(route: string, method: string, query: URLSearchParams, body: unknown): Promise<{ status?: number; data: unknown }>;
 }
 
 export interface ServerOptions {
@@ -109,21 +109,28 @@ export class ReviewServer {
       return this.send(res, 200, 'text/html', page ?? this.progressPage);
     }
     if (route === 'api/status' && req.method === 'GET') return this.json(res, 200, this.status);
-    if (route === 'api/generated' && req.method === 'GET') {
-      const p = url.searchParams.get('p');
-      if (!p) return this.json(res, 400, { error: 'which file? (p=)' });
-      const out = this.api.generated(p);
-      return this.json(res, out.error ? 404 : 200, out);
+    if (route.startsWith('assets/') && req.method === 'GET') {
+      const a = this.api.asset(route.slice(7));
+      if (!a) return this.send(res, 404, 'text/plain', 'Not found');
+      res.writeHead(200, { 'content-type': a.type, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+      return res.end(a.body);
     }
-    if (route === 'api/state' && req.method === 'PUT') {
-      const body = await readBody(req);
-      try {
-        JSON.parse(body);
-      } catch {
-        return this.json(res, 400, { error: 'not JSON' });
+    if (route.startsWith('api/')) {
+      let body: unknown = null;
+      if (req.method !== 'GET') {
+        try {
+          const text = await readBody(req);
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          return this.json(res, 400, { error: 'not JSON' });
+        }
       }
-      this.api.saveState(body);
-      return this.json(res, 200, { saved: true });
+      try {
+        const out = await this.api.call(route.slice(4), req.method || 'GET', url.searchParams, body);
+        return this.json(res, out.status ?? 200, out.data);
+      } catch (e) {
+        return this.json(res, 500, { error: (e as Error).message });
+      }
     }
     return this.send(res, 404, 'text/plain', 'Not found');
   }

@@ -42,21 +42,34 @@
       state.showReviewedDiff = !!saved.showReviewedDiff;
     }
   } catch (e) { /* storage unavailable */ }
-  // Marks go to the server (a moment after the last change), or else to this browser.
-  let saveTimer = null;
+  // Marks go to the server (a moment after the last change, or as the page goes away), or else
+  // to this browser.
+  let saveTimer = null, pendingSave = null;
+  function flushSave() {
+    if (pendingSave == null) return;
+    const data = pendingSave;
+    pendingSave = null;
+    clearTimeout(saveTimer);
+    fetch('api/state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: data, keepalive: true })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => {
+        viewer.classList.remove('unsaved');
+        if (j.snapshot && (!CONFIG.snapshot || j.snapshot.commit !== CONFIG.snapshot.commit)) { CONFIG.snapshot = j.snapshot; renderSide(); }
+      })
+      .catch(() => viewer.classList.add('unsaved'));
+  }
   function save() {
     const data = JSON.stringify({ rev: Object.fromEntries(Object.entries(state.rev).map(([k, v]) => [k, [...v]])), layout: state.layout, showReviewedDiff: state.showReviewedDiff });
     if (CONFIG.served) {
       clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        fetch('api/state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: data, keepalive: true })
-          .then((r) => { if (!r.ok) throw new Error(r.status); viewer.classList.remove('unsaved'); })
-          .catch(() => viewer.classList.add('unsaved'));
-      }, 300);
+      pendingSave = data;
+      saveTimer = setTimeout(flushSave, 300);
       return;
     }
     try { localStorage.setItem(STORE, data); } catch (e) { /* storage unavailable */ }
   }
+  window.addEventListener('pagehide', flushSave);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
 
   // ---------- model
   const models = {};
@@ -156,6 +169,47 @@
   }
   const kindWord = { member: 'changed member', type: 'changed type', param: 'parameter ripple', local: 'variable ripple' };
 
+  // ---------- syntax colors: Shiki once it has loaded (VS Code's grammars and Dark+), the
+  // tokenizer's classes until then. A run of rows is highlighted as two pieces of code, its new
+  // side (context and added lines) and its old side (context and removed lines), so strings and
+  // comments over several lines keep their colors.
+  const SHIKI = window.UntangleShiki || null;
+  let shikiOn = false;
+  const rowsColorCache = new WeakMap();
+  function rowsColors(rows, path) {
+    if (!shikiOn) return null;
+    if (rowsColorCache.has(rows)) return rowsColorCache.get(rows);
+    const lang = SHIKI.langFor(path);
+    let out = null;
+    if (lang) {
+      const neu = [], old = [];
+      rows.forEach((r, i) => { if (r[0] !== '-') neu.push(i); if (r[0] !== '+') old.push(i); });
+      const nl = SHIKI.lines(neu.map((i) => rows[i][1]).join('\n'), lang), ol = SHIKI.lines(old.map((i) => rows[i][1]).join('\n'), lang);
+      out = { neu: [], old: [] };
+      if (nl) neu.forEach((ri, k) => { out.neu[ri] = nl[k]; });
+      if (ol) old.forEach((ri, k) => { out.old[ri] = ol[k]; });
+    }
+    rowsColorCache.set(rows, out);
+    return out;
+  }
+  const rowColors = (rows, path, i) => { const c = rowsColors(rows, path); return c ? (rows[i][0] === '-' ? c.old[i] : c.neu[i]) || null : null; };
+  const textColorCache = new Map();
+  // Colors of each line of a text (a whole file, a snippet), cached by its content.
+  function textColors(text, path) {
+    if (!shikiOn) return null;
+    const lang = SHIKI.langFor(path);
+    if (!lang) return null;
+    const k = lang + '\0' + text;
+    if (!textColorCache.has(k)) { if (textColorCache.size > 400) textColorCache.clear(); textColorCache.set(k, SHIKI.lines(text, lang)); }
+    return textColorCache.get(k);
+  }
+  const lineColors = (text, path) => { const c = textColors(text, path); return c ? c[0] : null; };
+  function colorAt(colors, col) {
+    let lo = 0, hi = colors.length - 1, best = null;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (colors[mid][0] <= col) { best = colors[mid]; lo = mid + 1; } else hi = mid - 1; }
+    return best;
+  }
+
   // ---------- code rendering
   function lineDefs(path, n) {
     const D = defsNow();
@@ -167,20 +221,27 @@
     const arr = o != null && d && d.defs[path] && d.defs[path][o];
     return arr ? new Map(arr.map(([c, , ti]) => [c, ti])) : null;
   }
+  // A line of code as tokens. opts: emphasis (mark changed tokens), refs with n or o (definitions
+  // answered ahead of time on that line), colors (the line's Shiki colors, else the line alone is
+  // highlighted), live ({ side, p, ext, line }: any other name asks the server where it's defined).
   function codeHtml(f, text, ranges, opts) {
     const toks = C.tokenize(text, f.lang);
     const marks = ranges && opts.emphasis ? new Map(ranges.map(([s, , id]) => [s, id])) : null;
     const defs = !opts.refs ? null : opts.n != null ? lineDefs(f.p, opts.n) : opts.o != null ? oldLineDefs(f.p, opts.o) : null;
+    const colors = opts.colors || lineColors(text, f.p);
+    const live = CONFIG.served ? opts.live || (opts.refs && opts.n != null ? { side: 'head', p: f.p, line: opts.n } : opts.refs && opts.o != null ? { side: 'base', p: f.p, line: opts.o } : null) : null;
     const nextCode = (i) => { for (let j = i + 1; j < toks.length; j++) if (toks[j].k !== 'ws') return toks[j]; return null; };
     return toks.map((tk, i) => {
       if (tk.k === 'ws') return esc(tk.t);
       let cls = 't-' + tk.k, attrs = '';
       if (tk.k === 'id') { const nx = nextCode(i); if (nx && (nx.t === '(' || nx.t === '<')) cls = 't-fn'; }
       if (marks && marks.has(tk.c)) cls += rev().has(marks.get(tk.c)) ? ' rv' : ' ch';
-      if (defs && (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann')) {
+      if (colors) { const c = colorAt(colors, tk.c); if (c && c[1]) attrs += ` style="color:${c[1]};font-style:${c[2] ? 'italic' : 'normal'}"`; }
+      if (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann') {
         const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
-        const ti = defs.get(col);
-        if (ti !== undefined) { cls += ' ref'; attrs = opts.n != null ? ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-n="${opts.n}" title="Peek definition"` : ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-o="${opts.o}" title="Peek definition (old side)"`; }
+        const ti = defs ? defs.get(col) : undefined;
+        if (ti !== undefined) { cls += ' ref'; attrs += opts.n != null ? ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-n="${opts.n}" title="Peek definition"` : ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-o="${opts.o}" title="Peek definition (old side)"`; }
+        else if (live) { cls += ' ref live'; attrs += ` data-ls="${live.side || ''}" data-lp="${esc(live.p || '')}" data-lx="${live.ext != null ? live.ext : ''}" data-ll="${live.line}" data-lc="${col}" title="Go to definition"`; }
       }
       return `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
     }).join('');
@@ -222,7 +283,7 @@
     const sign = o.sign != null ? o.sign : meta.t === '+' ? '+' : meta.t === '-' ? '−' : '';
     const n = meta.t !== '-' ? meta.n : null;
     const oldNo = meta.t === '-' ? meta.o : null;
-    return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '');
+    return `<div class="ln ${o.cls}"${n != null ? ` data-n="${n}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${o.hideOld ? '' : meta.o != null ? meta.o : ''}</span><span class="no">${n != null ? n : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span><span class="bdgs">${o.badges || ''}${o.toggle || ''}</span></div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '');
   }
   // A moved declaration. The removed copy is one line pointing at the new place. The added
   // copy shows the diff between the two bodies: unchanged lines are moved code, and long runs
@@ -254,9 +315,10 @@
       if (!open && !keep.has(i)) { skipped++; return; }
       flush();
       const meta = { t: t === ' ' ? ' ' : t, o: t === '+' ? null : o, n: t === '-' ? null : n };
-      if (t === ' ') h += uRow(f, { t: ' ', o, n }, text, null, { cls: 'mv' + (d ? ' rvd' : ''), sign: '', refs: !ctx.noRefs });
-      else if (t === '-') h += uRow(fromFile, meta, text, ranges, { cls: 'del' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs });
-      else h += uRow(f, meta, text, ranges, { cls: 'add' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs });
+      const colors = rowColors(rows, f.p, i);
+      if (t === ' ') h += uRow(f, { t: ' ', o, n }, text, null, { cls: 'mv' + (d ? ' rvd' : ''), sign: '', refs: !ctx.noRefs, colors });
+      else if (t === '-') h += uRow(fromFile, meta, text, ranges, { cls: 'del' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs, colors });
+      else h += uRow(f, meta, text, ranges, { cls: 'add' + (d ? ' rvd' : ''), emphasis: true, refs: !ctx.noRefs, colors });
     });
     flush();
     return h;
@@ -271,12 +333,13 @@
     for (let ri = start; ri < end; ri++) {
       const meta = h.meta[ri];
       const [t, text, ranges] = h.rows[ri];
+      const colors = rowColors(h.rows, f.p, ri);
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
         if (!placed.has(b.id)) { placed.add(b.id); out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b); }
         continue;
       }
-      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs }); continue; }
+      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors }); continue; }
       const d = done(b);
       const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
       const other = ctx.chain && !ctx.chain.blockSet.has(b.id) ? ' other' : '';
@@ -291,13 +354,13 @@
         }
         const first = !placed.has(b.id);
         placed.add(b.id);
-        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other, sign: '', hideOld: true, tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs });
+        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other, sign: '', hideOld: true, tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors });
         continue;
       }
       const first = !placed.has(b.id);
       placed.add(b.id);
       out += uRow(f, meta, text, ranges, {
-        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other, emphasis, refs: !ctx.noRefs,
+        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other, emphasis, refs: !ctx.noRefs, colors,
         tick: first ? tickHtml(b) : '', toggle: first && d ? diffToggle(b) : '',
         badges: ctx.noBadges ? '' : badgesHtml(f, b, ri, t !== '-' ? meta.n : null),
       });
@@ -311,7 +374,7 @@
     const num = side === 'l' ? meta.o : meta.n;
     const sign = o.sign != null ? o.sign : side === 'l' && meta.t === '-' ? '−' : side === 'r' && meta.t === '+' ? '+' : '';
     const oldNo = side === 'l' && meta.t === '-' ? meta.o : null;
-    return `<span class="half ${side} ${o.cls || ''}"><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false) })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
+    return `<span class="half ${side} ${o.cls || ''}"><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${side === 'r' ? `<span class="bdgs">${o.badges || ''}${o.toggle || ''}</span>` : ''}</span>`;
   }
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
@@ -328,7 +391,8 @@
       }
       if (!b || !b.edits.length) {
         const [, text] = h.rows[ri];
-        out += `<div class="sl" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx' })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '');
+        const colors = rowColors(h.rows, f.p, ri);
+        out += `<div class="sl" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx', colors })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs, colors })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '');
         ri++;
         continue;
       }
@@ -346,7 +410,8 @@
         }
         adds.forEach((i, k) => {
           const m2 = h.meta[i];
-          out += `<div class="sl rvd-quiet${other}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '' }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '' })}</div>` + peekAfter(f, m2.n);
+          const colors = rowColors(h.rows, f.p, i);
+          out += `<div class="sl rvd-quiet${other}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors })}</div>` + peekAfter(f, m2.n);
         });
       } else {
         const rows = Math.max(dels.length, adds.length);
@@ -354,8 +419,8 @@
           const li = dels[k], ai = adds[k];
           const lm = li != null ? h.meta[li] : null, am = ai != null ? h.meta[ai] : null;
           out += `<div class="sl${d ? ' rvd' : ''}${other}" data-n="${am ? am.n : ''}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>`
-            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis })
-            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '' })
+            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null })
+            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null })
             + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '');
         }
       }
@@ -412,7 +477,6 @@
   // ---------- peek
   // The top panel shows the definition, or the changed usage picked in the list below it.
   // Clicking a usage once shows it here; clicking it again (or "Go to it") opens it.
-  const plainHtml = (path, text) => codeHtml({ p: path, lang: C.langOf(path) }, text, null, {});
   function usageContextHtml(hl) {
     const h = hl.f.hunks[hl.hi];
     const rows = [];
@@ -420,10 +484,33 @@
     const at = rows.indexOf(hl.ri);
     return rows.slice(Math.max(0, at - 4), at + 5).map((i) => {
       const r = h.meta[i];
-      return `<div class="pk-ln${i === hl.ri ? ' hit' : ''}${r.t === '+' ? ' add' : ''}"><span class="no">${r.n}</span><span class="sg">${r.t === '+' ? '+' : ''}</span><span class="tx">${codeHtml(hl.f, h.rows[i][1], null, {})}</span></div>`;
+      return `<div class="pk-ln${i === hl.ri ? ' hit' : ''}${r.t === '+' ? ' add' : ''}"><span class="no">${r.n}</span><span class="sg">${r.t === '+' ? '+' : ''}</span><span class="tx">${codeHtml(hl.f, h.rows[i][1], null, { colors: rowColors(h.rows, hl.f.p, i), live: CONFIG.served ? { side: 'head', p: hl.f.p, line: r.n } : null })}</span></div>`;
     }).join('');
   }
+  // A definition asked live: where it is, its snippet (names in it can be asked in turn), and
+  // ways to open it.
+  function livePeekHtml(p) {
+    const L = p.live;
+    const back = p.back && p.back.length ? '<button type="button" class="btn xs" data-act="peek-back">Back</button>' : '';
+    const close = '<button type="button" class="pk-x" data-act="close-peek">Close</button>';
+    if (L.status === 'loading') return `<div class="pk-h"><b>Definition</b><span class="pk-src">looking it up…</span><span class="sp"></span>${back}${close}</div>`;
+    if (L.status !== 'ok') return `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(L.error || 'The language server knows no definition for this name.')}</span><span class="sp"></span>${back}${close}</div>`;
+    const t = L.target;
+    const where = t.side === 'base' ? `old side · ${(CONFIG.base || '').slice(0, 7)}` : t.side === 'head' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : t.w === 'package' ? 'package' : 'outside the repo';
+    const file = { p: t.p, lang: C.langOf(t.p) };
+    const colors = textColors(t.code.join('\n'), t.p);
+    let h = `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>${back}`
+      + sourceButton({ side: t.side, p: t.side ? t.p : null, ext: t.ext, line: t.l, label: t.w !== 'repo' ? t.p : null, where }, 'Open file', 'btn xs')
+      + editorHtml({ side: t.side, p: t.p, abs: t.abs, line: t.l, col: t.c }) + close + '</div>'
+      + `<div class="pk-code">${t.code.map((line, i) => {
+        const ln = t.s + i;
+        return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${codeHtml(file, line, null, { colors: colors && colors[i], live: { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } })}</span></div>`;
+      }).join('')}</div>`;
+    if (t.side === 'head' && M().head.has(t.p + ':' + t.l)) h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
+    return h;
+  }
   function peekHtml(p) {
+    if (p.live) return '<div class="peek" role="region" aria-label="Peek">' + livePeekHtml(p) + '</div>';
     let h = '<div class="peek" role="region" aria-label="Peek">';
     const hasDef = p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti);
     const list = p.usageKey ? REFS[state.compare][p.usageKey] || [] : [];
@@ -438,10 +525,14 @@
     } else if (hasDef) {
       const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : defsNow().targets[p.ti];
       const where = (p.old ? `old side · ${M().raw.left} · ` : '') + (t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package');
-      h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>
+      const side = t.w === 'repo' ? (p.old ? 'base' : 'head') : null;
+      const colors = textColors(t.code.join('\n'), t.p);
+      h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>`
+        + (side ? sourceButton({ side, p: t.p, line: t.l }, 'Open file', 'btn xs') + editorHtml({ side, p: t.p, line: t.l }) : CONFIG.served ? '<button type="button" class="btn xs" data-act="open-def">Open file</button>' : '')
+        + `<button type="button" class="pk-x" data-act="close-peek">Close</button></div>
         <div class="pk-code">${t.code.map((line, i) => {
           const ln = t.s + i;
-          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${plainHtml(t.p, line)}</span></div>`;
+          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${codeHtml({ p: t.p, lang: C.langOf(t.p) }, line, null, { colors: colors && colors[i], live: side ? { side, p: t.p, line: ln } : null })}</span></div>`;
         }).join('')}</div>`;
       if (!p.old && t.w === 'repo' && M().head.has(t.p + ':' + t.l) && !(t.p === p.path && t.l === p.n)) {
         h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
@@ -609,6 +700,106 @@
           attr: `data-chain="${c.id}"`, tip: c.name };
       }),
     });
+  }
+
+  // ---------- whole files and the editor
+  // A button that opens a file whole: { side, p } in the repository, or { ext } outside it.
+  function sourceButton(loc, label, cls) {
+    if (!CONFIG.served || (!loc.p && loc.ext == null)) return '';
+    return `<button type="button" class="${cls || 'btn sm'}" data-act="open-source" data-side="${loc.side || ''}" data-p="${esc(loc.p || '')}" data-ext="${loc.ext != null ? loc.ext : ''}" data-line="${loc.line || ''}" data-label="${esc(loc.label || '')}" data-where="${esc(loc.where || '')}">${label}</button>`;
+  }
+  let rootsAsked = false;
+  // "Open in editor": a link from the editor's URL template, or a button when untangle runs a command.
+  function editorHtml(loc) {
+    if (!CONFIG.served || !CONFIG.editor) return '';
+    const line = loc.line || 1, col = loc.col || 0;
+    if (CONFIG.editor.mode === 'command') return `<button type="button" class="btn xs" data-act="open-editor" data-side="${loc.side || ''}" data-p="${esc(loc.p || '')}" data-ext="${loc.ext != null ? loc.ext : ''}" data-line="${line}" data-col="${col}">Open in editor</button>`;
+    let abs = loc.abs || null;
+    if (!abs && loc.side && loc.p) {
+      if (!CONFIG.roots) {
+        if (!rootsAsked) { rootsAsked = true; fetch('api/roots').then((r) => r.json()).then((j) => { if (j.head) { CONFIG.roots = j; render(); } }).catch(() => {}); }
+        return '';
+      }
+      abs = CONFIG.roots[loc.side] + '/' + loc.p;
+    }
+    if (!abs) return '';
+    const href = CONFIG.editor.template.replace('{file}', encodeURI(abs)).replace('{line}', line).replace('{col}', col + 1);
+    return `<a class="btn xs" href="${esc(href)}" title="${esc(abs)}:${line}">Open in editor</a>`;
+  }
+  const sources = new Map();
+  const srcKey = (v) => (v.ext != null ? 'ext:' + v.ext : v.side + ':' + v.path);
+  function loadSource(v) {
+    const key = srcKey(v);
+    if (sources.has(key)) return sources.get(key);
+    const s = { status: 'loading' };
+    sources.set(key, s);
+    const q = new URLSearchParams(v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
+    fetch('api/file?' + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => Object.assign(s, { status: 'ok', text: j.text, lines: j.text.split('\n'), abs: j.abs, generated: j.generated }))
+      .catch((e) => Object.assign(s, { status: 'error', error: e.message }))
+      .then(() => { if (state.view.kind === 'source' && srcKey(state.view) === key) render(state.view.line ? { line: state.view.line } : { top: true }); });
+    return s;
+  }
+  // A whole file at one side, or outside the repository. Names in it ask the server where
+  // they are defined; lines this review changes are marked.
+  function renderSource(v) {
+    const s = loadSource(v);
+    const name = v.ext != null ? v.label || 'file' : v.path;
+    const f = v.ext == null ? M().files.find((x) => x.p === v.path) : null;
+    const g = v.ext == null ? M().generated.find((x) => x.p === v.path) : null;
+    const sha = v.side === 'base' ? CONFIG.base : CONFIG.head;
+    const changed = new Set();
+    if (f) f.hunks.forEach((hk) => hk.meta.forEach((r) => { if (v.side === 'base' ? r.t === '-' : r.t === '+') changed.add(v.side === 'base' ? r.o : r.n); }));
+    const dir = name.slice(0, name.lastIndexOf('/') + 1);
+    const meta = `<span>${v.ext != null ? esc(v.where || 'outside the repository') : `${v.side} · ${esc((sha || '').slice(0, 7))}`}</span>${s.lines ? `<span>${fmt(s.lines.length)} lines</span>` : ''}${changed.size ? `<span class="${v.side === 'base' ? 'd' : 'a'}">${changed.size} line${changed.size > 1 ? 's' : ''} ${v.side === 'base' ? 'removed' : 'added'} by this review</span>` : ''}${s.generated || g ? '<span>generated</span>' : ''}`;
+    const actions = (f || g ? `<button type="button" class="btn sm" data-open="${esc(v.path)}">Show changes</button>` : '')
+      + (f && f.s === 'M' ? sourceButton({ side: v.side === 'base' ? 'head' : 'base', p: v.path }, v.side === 'base' ? 'Head side' : 'Base side') : '')
+      + editorHtml({ side: v.side, p: v.path, ext: v.ext, abs: s.abs, line: v.line || 1 }).replace('btn xs', 'btn sm');
+    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(name))}</b>`, meta, actions);
+    if (s.status === 'loading') return h + '<div class="empty">Loading the file…</div>';
+    if (s.status === 'error') return h + `<div class="empty">${esc(s.error)}</div>`;
+    const colors = textColors(s.text, name);
+    const key = srcKey(v);
+    const file = { p: name, lang: C.langOf(name) };
+    h += '<div class="code src">';
+    s.lines.forEach((text, i) => {
+      const ln = i + 1, c = changed.has(ln);
+      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}" data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
+      if (state.peek && state.peek.src && state.peek.src.key === key && state.peek.src.line === ln) h += peekHtml(state.peek);
+    });
+    return h + '</div>';
+  }
+  function openSource(d) {
+    state.view = { kind: 'source', side: d.side || null, path: d.p || null, ext: d.ext !== '' && d.ext != null ? Number(d.ext) : null, line: d.line ? Number(d.line) : null, label: d.label || null, where: d.where || null };
+    if (state.view.ext == null && !state.view.side) state.view.side = 'head';
+    state.peek = null;
+    render(state.view.line ? { line: state.view.line } : { top: true });
+  }
+  // A name clicked anywhere without an answer computed ahead: ask the server. The peek opens
+  // under the line; clicked inside a peek, the peek moves to the new definition (Back returns).
+  const anchorOf = (p) => ({ path: p.path, n: p.n, old: p.old, o: p.o, col: p.col, src: p.src });
+  function liveLookup(el) {
+    const d = el.dataset;
+    const q = { side: d.ls || null, p: d.lp || null, ext: d.lx !== '' && d.lx != null ? Number(d.lx) : null, l: Number(d.ll), c: Number(d.lc) };
+    const sameQ = (x) => x && x.side === q.side && x.p === q.p && x.ext === q.ext && x.l === q.l && x.c === q.c;
+    let peek;
+    if (el.closest('.peek') && state.peek) peek = { ...anchorOf(state.peek), live: { q, status: 'loading' }, back: [...(state.peek.back || []), state.peek] };
+    else {
+      if (state.peek && state.peek.live && sameQ(state.peek.live.q) && !(state.peek.back || []).length) { state.peek = null; return render(); }
+      if (state.view.kind === 'source') peek = { src: { key: srcKey(state.view), line: q.l }, live: { q, status: 'loading' } };
+      else if (q.side === 'base') peek = { old: true, path: q.p, o: q.l, col: q.c, live: { q, status: 'loading' } };
+      else peek = { path: q.p, n: q.l, col: q.c, live: { q, status: 'loading' } };
+    }
+    state.peek = peek;
+    render();
+    const params = new URLSearchParams({ l: String(q.l), c: String(q.c) });
+    if (q.side) params.set('side', q.side);
+    if (q.p) params.set('p', q.p);
+    if (q.ext != null) params.set('ext', String(q.ext));
+    fetch('api/definition?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+      .then((j) => { peek.live = j.target ? { q, status: 'ok', target: j.target } : { q, status: 'none' }; })
+      .catch((e) => { peek.live = { q, status: 'error', error: e.message }; })
+      .then(() => { if (state.peek === peek) render(); });
   }
 
   // ---------- views
@@ -779,7 +970,7 @@
     const chains = [...new Set(f.blocks.flatMap((b) => m.chainsOf.get(b.id) || []))];
     let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`,
       `<span>${{ A: 'added', M: 'modified', D: 'deleted' }[f.s] || f.s}</span><span>${s.open} of ${s.total} changes to review</span>${s.open ? `<span class="a">+${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.adds, 0)}</span><span class="d">−${f.blocks.filter((b) => !done(b)).reduce((x, b) => x + b.dels, 0)}</span>` : ''}`,
-      `<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
+      `${sourceButton({ side: f.s === 'D' ? 'base' : 'head', p: f.p }, 'Whole file')}${editorHtml({ side: f.s === 'D' ? 'base' : 'head', p: f.p, line: (f.blocks.find((b) => b.adds) && f.hunks[f.blocks.find((b) => b.adds).hunk].meta[f.blocks.find((b) => b.adds).first].n) || 1 }).replace('btn xs', 'btn sm')}<button type="button" class="btn sm${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>`,
       chains.length ? `<div class="fv-sub">In chains: ${chains.slice(0, 6).map((id) => `<button type="button" class="chip-btn" data-chain="${id}">${esc(m.chains[id].name)}</button>`).join('')}${chains.length > 6 ? ` +${chains.length - 6}` : ''}</div>` : '');
     if (state.compare === 'since') h += `<div class="since-note">Left: your reviewed snapshot (as if you had reviewed everything up to <code>${esc(m.raw.left)}</code>). Right: the head <code>${esc(m.raw.right)}</code>.</div>`;
     h += '<div class="code">';
@@ -789,7 +980,7 @@
   function renderGenerated(path) {
     const f = M().generated.find((x) => x.p === path);
     const dir = f.p.slice(0, f.p.lastIndexOf('/') + 1);
-    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`, '',
+    let h = headerHtml(`<span class="fv-dir">${esc(dir)}</span><b>${esc(fileName(f.p))}</b>`, `<span>generated (${esc(f.gen)})</span><span class="a">+${f.a}</span><span class="d">−${f.d}</span>`, sourceButton({ side: f.s === 'D' ? 'base' : 'head', p: f.p }, 'Whole file'),
       '<div class="gen-note">Generated: not reviewed and not counted. Shown for reference only.</div>');
     if (!f.hunks) {
       if (!CONFIG.served) return h + `<div class="empty">This file’s ${fmt(f.a + f.d)} changed lines aren’t in this page.</div>`;
@@ -808,11 +999,11 @@
     f.hunks.forEach((hk) => {
       h += `<div class="hh"><span class="hh-tx">@@ −${hk.o} +${hk.n} @@ <span class="hh-ctx">${esc(hk.h)}</span></span></div>`;
       let o = hk.o, n = hk.n;
-      hk.rows.forEach(([t, text]) => {
+      hk.rows.forEach(([t, text], i) => {
         const meta = { t, o: t !== '+' ? o : null, n: t !== '-' ? n : null };
         if (t !== '+') o++;
         if (t !== '-') n++;
-        h += uRow({ p: f.p, lang: C.langOf(f.p) }, meta, text, null, { cls: (t === '+' ? 'add' : t === '-' ? 'del' : 'ctx') + ' gen', refs: false });
+        h += uRow({ p: f.p, lang: C.langOf(f.p) }, meta, text, null, { cls: (t === '+' ? 'add' : t === '-' ? 'del' : 'ctx') + ' gen', refs: false, colors: rowColors(hk.rows, f.p, i) });
       });
     });
     return h + '</div>';
@@ -838,7 +1029,50 @@
     });
     return h;
   }
+  const repoSearches = new Map();
+  function repoSearch(side, q) {
+    const key = side + '\0' + q;
+    if (!repoSearches.has(key)) {
+      const r = { status: 'loading' };
+      repoSearches.set(key, r);
+      fetch('api/search?' + new URLSearchParams({ side, q })).then((x) => x.json().then((j) => { if (!x.ok) throw new Error(j.error || x.status); return j; }))
+        .then((j) => Object.assign(r, { status: 'ok', results: j.results, truncated: j.truncated }))
+        .catch((e) => Object.assign(r, { status: 'error', error: e.message }))
+        .then(() => { if (state.view.kind === 'search' && state.search.q.trim() === q) render(); });
+    }
+    return repoSearches.get(key);
+  }
+  function scopesHtml() {
+    const b = (k, label) => `<button type="button" data-scope="${k}" aria-pressed="${state.search.scope === k}">${label}</button>`;
+    return `<span class="mini-seg" role="group" aria-label="Search scope">${b('unreviewed', 'Not reviewed')}${b('all', 'All changes')}${CONFIG.served ? b('repo-head', 'Repository · head') + b('repo-base', 'Repository · base') : ''}</span>`;
+  }
+  // Marks every place the query appears in a line (case-insensitive when the query is lower case).
+  function markAll(text, q) {
+    const hay = q === q.toLowerCase() ? text.toLowerCase() : text;
+    let out = '', at = 0, i;
+    while (q && (i = hay.indexOf(q, at)) >= 0) { out += esc(text.slice(at, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>'; at = i + q.length; }
+    return out + esc(text.slice(at));
+  }
+  function renderRepoSearch(side, q) {
+    const r = repoSearch(side, q);
+    let h = headerHtml(`<b>Search the repository for “${esc(q)}”</b>`, `<span>${side} · ${esc(((side === 'base' ? CONFIG.base : CONFIG.head) || '').slice(0, 7))}</span>${r.status === 'ok' ? `<span>${r.results.length}${r.truncated ? '+' : ''} result${r.results.length === 1 ? '' : 's'}</span>` : ''}${scopesHtml()}`);
+    if (q.length < 2) return h + '<div class="empty">Type at least two characters.</div>';
+    if (r.status === 'loading') return h + '<div class="empty">Searching…</div>';
+    if (r.status === 'error') return h + `<div class="empty">${esc(r.error)}</div>`;
+    if (!r.results.length) return h + '<div class="empty">No line in the repository matches.</div>';
+    // Generated files last.
+    const list = r.results.slice().sort((a, b) => (a.generated - b.generated) || 0);
+    h += '<div class="code">';
+    let last = null;
+    list.forEach((x) => {
+      if (x.p !== last) { h += `<div class="inst-file">${sourceButton({ side, p: x.p }, esc(x.p), 'linkish')}${x.generated ? ' <span class="gen-tag">generated</span>' : ''}</div>`; last = x.p; }
+      h += `<div class="ln ctx"><span class="g"></span><span class="no wide">${sourceButton({ side, p: x.p, line: x.l }, String(x.l), 'linkish')}</span><span class="sg"></span><span class="tx">${markAll(x.text, q)}</span></div>`;
+    });
+    if (r.truncated) h += `<div class="empty">The first ${r.results.length} matches. Make the search more precise for the rest.</div>`;
+    return h + '</div>';
+  }
   function renderSearch() {
+    if (state.search.scope.startsWith('repo-')) return renderRepoSearch(state.search.scope.slice(5), state.search.q.trim());
     const q = state.search.q.trim().toLowerCase();
     const m = M();
     const res = [];
@@ -847,8 +1081,7 @@
       const h = f.hunks[b.hunk];
       for (let i = b.first; i < b.first + b.len; i++) if (h.rows[i][1].toLowerCase().includes(q)) res.push({ f, meta: h.meta[i], text: h.rows[i][1] });
     }));
-    let h = headerHtml(`<b>Search changed lines for “${esc(state.search.q)}”</b>`, `<span>${res.length} result${res.length === 1 ? '' : 's'}</span>
-      <span class="mini-seg" role="group" aria-label="Search scope"><button type="button" data-scope="unreviewed" aria-pressed="${state.search.scope === 'unreviewed'}">Not reviewed</button><button type="button" data-scope="all" aria-pressed="${state.search.scope === 'all'}">All changes</button></span>`);
+    let h = headerHtml(`<b>Search changed lines for “${esc(state.search.q)}”</b>`, `<span>${res.length} result${res.length === 1 ? '' : 's'}</span>${scopesHtml()}`);
     h += '<div class="code">';
     let last = null;
     res.slice(0, 400).forEach(({ f, meta, text }) => {
@@ -857,11 +1090,18 @@
       const line = meta.t !== '-' ? meta.n : meta.o;
       h += `<div class="ln ${meta.t === '+' ? 'add' : 'del'}"><span class="g"></span><span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${meta.t !== '-' ? meta.n : ''}">${line}</button></span><span class="sg">${meta.t === '+' ? '+' : '−'}</span><span class="tx">${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}</span></div>`;
     });
-    if (!res.length) h += '<div class="empty">No changed line matches. In the tool, the editor’s own search covers the whole repository.</div>';
+    if (!res.length) h += `<div class="empty">No changed line matches.${CONFIG.served ? ' “Repository” searches every file.' : ''}</div>`;
     return h + '</div>';
   }
 
   // ---------- sidebar
+  // Where marks are kept: the reviewed-snapshot branch, or this browser for a page on its own.
+  function snapshotHtml() {
+    if (!CONFIG.served) return '<div class="sb-snap">Marks are kept in this browser.</div>';
+    const sn = CONFIG.snapshot;
+    if (!sn) return '';
+    return `<div class="sb-snap" title="git diff ${esc(sn.branch)} ${esc((CONFIG.head || '').slice(0, 12))} shows what’s left">Marks on <code>${esc(sn.branch)}</code>${sn.commit ? ` · ${esc(sn.commit.slice(0, 7))}` : ''}${sn.note ? `<br>${esc(sn.note)}` : ''}</div>`;
+  }
   function renderSide() {
     const m = M();
     const all = m.files.flatMap((f) => f.blocks);
@@ -870,7 +1110,7 @@
     const v = state.view;
     let h = `<div class="sb-prog"><div class="sb-big"><b>${t.open}</b> of ${t.total} changes to review</div>
       <div class="track" aria-hidden="true"><div class="fill" style="width:${pct}%"></div></div>
-      <div class="sb-sub">${pct}% of changed lines reviewed · <button type="button" class="linkish" data-act="reset">Reset</button></div></div>
+      <div class="sb-sub">${pct}% of changed lines reviewed · <button type="button" class="linkish" data-act="reset">Reset</button></div>${snapshotHtml()}</div>
       <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="chains" aria-selected="${state.tab === 'chains'}">Chains <span>${m.chains.length}</span></button><button type="button" role="tab" data-tab="files" aria-selected="${state.tab === 'files'}">Files <span>${m.files.length}</span></button></div>`;
     if (state.tab === 'chains') {
       const row = (c, indent) => {
@@ -914,7 +1154,7 @@
     const keep = main.scrollTop;
     renderSide();
     const v = state.view;
-    main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : renderFile(v.path);
+    main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : renderFile(v.path);
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     const title = $('#vw-title');
     if (title && M().raw.title && !title.childElementCount) {
@@ -954,6 +1194,7 @@
   // ---------- events
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-layout],[data-usage],[data-scope],.ref');
+    if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
     const m = M();
     const d = t.dataset;
@@ -974,6 +1215,7 @@
       return render(same ? {} : { section: node });
     }
     if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
+    if (t.classList.contains('live')) return liveLookup(t);
     if (t.classList.contains('ref') && d.o !== undefined) {
       const path = d.path, o = Number(d.o), col = Number(d.col);
       const same = state.peek && state.peek.old && state.peek.path === path && state.peek.o === o && state.peek.col === col;
@@ -1002,6 +1244,25 @@
     const act = d.act;
     if (act === 'reset') { state.rev[state.compare] = new Set(); state.blockDiff.clear(); save(); return render(); }
     if (act === 'close-peek') { state.peek = null; return render(); }
+    if (act === 'peek-back') { const prev = state.peek.back.slice(-1)[0]; state.peek = prev; return render(); }
+    if (act === 'open-source') return openSource(d);
+    if (act === 'open-def') {
+      // Ask the server where the peeked name is defined, then open that file whole.
+      const p0 = state.peek;
+      const params = new URLSearchParams({ side: p0.old ? 'base' : 'head', p: p0.path, l: String(p0.old ? p0.o : p0.n), c: String(p0.col) });
+      t.textContent = 'Opening…';
+      fetch('api/definition?' + params).then((r) => r.json()).then((j) => {
+        const x = j.target;
+        if (!x) { t.textContent = 'Not found'; return; }
+        openSource({ side: x.side || '', p: x.side ? x.p : '', ext: x.ext != null ? x.ext : '', line: x.l, label: x.side ? '' : x.p, where: x.w === 'sdk' ? 'Dart SDK' : x.w === 'package' ? 'package' : '' });
+      }).catch(() => { t.textContent = 'Not found'; });
+      return;
+    }
+    if (act === 'open-editor') {
+      fetch('api/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ side: d.side || undefined, p: d.p || undefined, ext: d.ext !== '' ? Number(d.ext) : undefined, l: Number(d.line) || 1, c: Number(d.col) || 0 }) })
+        .then((r) => r.json()).then((j) => { if (j.error) alert(j.error); }).catch(() => {});
+      return;
+    }
     if (act === 'peek-use' || act === 'peek-go') {
       const list = (state.peek && REFS[state.compare][state.peek.usageKey]) || [];
       const i = act === 'peek-go' ? state.peek.sel : Number(d.i);
@@ -1044,6 +1305,7 @@
   });
   // "n" walks to the next chain with changes to review, while the viewer is on screen.
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.peek && !e.defaultPrevented) { state.peek = null; render(); return; }
     if (e.key !== 'n' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
     if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     const r = viewer.getBoundingClientRect();
@@ -1072,4 +1334,5 @@
   });
 
   render({ top: true });
+  if (SHIKI) SHIKI.load().then(() => { shikiOn = true; render(); }).catch(() => {});
 })();

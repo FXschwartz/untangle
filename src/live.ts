@@ -1,0 +1,192 @@
+// The page's live requests: go to definition anywhere, whole files at either revision or from
+// outside the repository (a package, the SDK), search over the repository, and opening a
+// location in the editor. One Dart analysis server answers them, kept from the build or
+// started on the first request.
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { prepareCheckouts, type Checkouts, type Progress } from './build.js';
+import { git, gitMaybe, run } from './exec.js';
+import { DartServer, type Location } from './lsp/dart.js';
+import type { Target } from './target.js';
+import { VERSION } from './version.js';
+
+export type Side = 'head' | 'base';
+
+/** A definition as the page's peek shows it. */
+export interface LiveTarget {
+  /** Where it is: a side of the review (with a path inside it) or a file outside the repository. */
+  side: Side | null;
+  p: string;
+  /** For a file outside the repository: its id for api/file and api/definition, and its absolute path. */
+  ext?: number;
+  abs: string;
+  w: 'repo' | 'package' | 'sdk' | 'other';
+  /** Line (1-based) and column of the name, first line of the snippet, and the snippet. */
+  l: number;
+  c: number;
+  s: number;
+  code: string[];
+}
+
+const MAX_FILE = 4 << 20;
+const SEARCH_MAX = 500;
+
+export class LiveSession {
+  private server: DartServer | null = null;
+  private starting: Promise<DartServer> | null = null;
+  private dirs: { headDir: string; baseDir: string } | null = null;
+  // Files outside the repository that a definition led to: only these can be read by id.
+  private readonly external: string[] = [];
+
+  constructor(
+    private readonly target: Target,
+    private readonly progress: Progress,
+    built: Checkouts | null,
+  ) {
+    if (built) {
+      this.dirs = { headDir: built.headDir, baseDir: built.baseDir };
+      this.server = built.server;
+    }
+  }
+
+  /** The checkouts, made when the review came from the cache. */
+  async checkouts(): Promise<{ headDir: string; baseDir: string }> {
+    this.dirs ??= await prepareCheckouts(this.target, this.progress);
+    return this.dirs;
+  }
+
+  /** The checkouts as they will be, for links to the editor before they exist. */
+  get roots(): { head: string; base: string } | null {
+    return this.dirs && { head: this.dirs.headDir, base: this.dirs.baseDir };
+  }
+
+  /** The language server, started on first use. */
+  ensure(): Promise<DartServer> {
+    if (this.server) return Promise.resolve(this.server);
+    this.starting ??= (async () => {
+      const { headDir, baseDir } = await this.checkouts();
+      this.server = await DartServer.start([{ name: 'head', dir: headDir }, { name: 'base', dir: baseDir }], { clientVersion: VERSION, log: this.progress.verbose });
+      return this.server;
+    })().catch((e) => {
+      this.starting = null;
+      throw e;
+    });
+    return this.starting;
+  }
+
+  async stop() {
+    await this.server?.stop();
+    this.server = null;
+  }
+
+  private externalId(abs: string): number {
+    const at = this.external.indexOf(abs);
+    if (at >= 0) return at;
+    this.external.push(abs);
+    return this.external.length - 1;
+  }
+
+  /** The absolute path of a file the page asks about, or null when it isn't one it may read. */
+  private async resolve(where: { side?: string; p?: string; ext?: number }): Promise<string | null> {
+    if (where.ext != null) return this.external[where.ext] ?? null;
+    if ((where.side !== 'head' && where.side !== 'base') || !where.p || where.p.split('/').includes('..') || path.isAbsolute(where.p)) return null;
+    const { headDir, baseDir } = await this.checkouts();
+    return path.join(where.side === 'head' ? headDir : baseDir, where.p);
+  }
+
+  /** Where the identifier at a position is defined, with a snippet. */
+  async definition(where: { side?: string; p?: string; ext?: number }, line: number, col: number): Promise<LiveTarget | null> {
+    const file = await this.resolve(where);
+    if (!file) throw new Error('not a file of this review');
+    const server = await this.ensure();
+    // A file a definition led to may sit in a package nothing opened yet: ask again once its
+    // package is analyzed.
+    let loc: Location | null = await server.definition(file, line - 1, col).catch(() => null);
+    if (!loc) loc = await new Promise((r) => setTimeout(r, 400)).then(() => server.definition(file, line - 1, col).catch(() => null));
+    return loc && this.describe(loc);
+  }
+
+  private async describe(loc: Location): Promise<LiveTarget> {
+    const { headDir, baseDir } = await this.checkouts();
+    let lines: string[] = [];
+    try {
+      lines = fs.readFileSync(loc.path, 'utf8').split('\n');
+    } catch {
+      // A definition in a file that can't be read gets no snippet.
+    }
+    let start = loc.line;
+    while (start > 0 && start > loc.line - 6 && /^(\/\/\/|@)/.test((lines[start - 1] || '').trim())) start--;
+    const snippet = { l: loc.line + 1, c: loc.col, s: start + 1, code: lines.slice(start, Math.min(lines.length, loc.line + 12)).map((x) => x.slice(0, 400)) };
+    for (const [side, root] of [['head', headDir], ['base', baseDir]] as const) {
+      if (loc.path.startsWith(root + '/')) return { side, p: loc.path.slice(root.length + 1), abs: loc.path, w: 'repo', ...snippet };
+    }
+    const pub = loc.path.indexOf('/.pub-cache/'), sdk = loc.path.indexOf('/dart-sdk/lib/');
+    const [p, w] = pub >= 0 ? [loc.path.slice(pub + 12).split('/').slice(2).join('/'), 'package' as const]
+      : sdk >= 0 ? ['dart:' + loc.path.slice(sdk + 14), 'sdk' as const] : [path.basename(loc.path), 'other' as const];
+    return { side: null, p, ext: this.externalId(loc.path), abs: loc.path, w, ...snippet };
+  }
+
+  /** A whole file: at a side's commit (from git, so a checkout that moved on doesn't matter), or one outside the repository. */
+  async file(where: { side?: string; p?: string; ext?: number }): Promise<{ text: string; abs: string | null } | { error: string }> {
+    if (where.ext != null) {
+      const abs = this.external[where.ext];
+      if (!abs) return { error: 'not a file of this review' };
+      const st = fs.statSync(abs, { throwIfNoEntry: false });
+      if (!st) return { error: 'the file is gone' };
+      if (st.size > MAX_FILE) return { error: `${Math.round(st.size / 1024)} KB: too large to show` };
+      return { text: fs.readFileSync(abs, 'utf8'), abs };
+    }
+    if ((where.side !== 'head' && where.side !== 'base') || !where.p) return { error: 'which file?' };
+    const sha = where.side === 'head' ? this.target.headSha : this.target.baseSha;
+    const size = Number(gitMaybe(this.target.repo, 'cat-file', '-s', `${sha}:${where.p}`)?.trim());
+    if (!size && size !== 0) return { error: `${where.p} doesn't exist at ${sha.slice(0, 7)}` };
+    if (size > MAX_FILE) return { error: `${Math.round(size / 1024)} KB: too large to show` };
+    const text = git(this.target.repo, 'show', `${sha}:${where.p}`);
+    if (text.slice(0, 8000).includes('\0')) return { error: 'a binary file' };
+    const abs = this.dirs ? path.join(where.side === 'head' ? this.dirs.headDir : this.dirs.baseDir, where.p) : null;
+    return { text, abs };
+  }
+
+  /**
+   * The repository at a side's commit, searched with git grep for a fixed string: case-insensitive
+   * when the query is all lower case.
+   */
+  search(side: Side, q: string): { results: Array<{ p: string; l: number; text: string }>; truncated: boolean } {
+    const sha = side === 'head' ? this.target.headSha : this.target.baseSha;
+    const args = ['grep', '-n', '-I', '--full-name', '--null', '-F', '--max-count=50', ...(q === q.toLowerCase() ? ['-i'] : []), '-e', q, sha, '--'];
+    let out = '';
+    try {
+      out = run('git', ['-C', this.target.repo, ...args]);
+    } catch {
+      // No match: git grep exits with 1.
+    }
+    const results: Array<{ p: string; l: number; text: string }> = [];
+    const prefix = sha + ':';
+    for (const row of out.split('\n')) {
+      if (!row) continue;
+      // <sha>:<path>\0<line>\0<text>
+      const [where, line, ...text] = row.split('\0');
+      if (!where.startsWith(prefix) || !line) continue;
+      results.push({ p: where.slice(prefix.length), l: +line, text: text.join('\0').slice(0, 400) });
+      if (results.length >= SEARCH_MAX) break;
+    }
+    return { results, truncated: results.length >= SEARCH_MAX };
+  }
+
+  /** The absolute path behind a location, for the editor. */
+  async absolute(where: { side?: string; p?: string; ext?: number }): Promise<string | null> {
+    const file = await this.resolve(where);
+    return file && fs.existsSync(file) ? file : null;
+  }
+}
+
+/** Opens a location with the editor command: {file}, {line} and {col} are replaced in its words. */
+export function openInEditor(template: string, file: string, line: number, col: number): void {
+  const words = template.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  const argv = words.map((w) => w.replace(/^["']|["']$/g, '').replace(/\{file\}/g, file).replace(/\{line\}/g, String(line)).replace(/\{col\}/g, String(col + 1)));
+  if (!argv.length) return;
+  const child = spawn(argv[0], argv.slice(1), { stdio: 'ignore', detached: true });
+  child.on('error', () => {});
+  child.unref();
+}

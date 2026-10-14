@@ -426,7 +426,7 @@ untangle [flags] <pr-url>      # cloned into the cache first
   - **Stack:** TypeScript on Node, reusing this prototype, web-tree-sitter, Shiki and
     `vscode-jsonrpc`, the LSP layer VS Code is built on.
   - **Access:** localhost only, with a random token in the URL, as Jupyter does.
-- **Open in editor:** every location links to the editor, `vscode://file/<path>:<line>`
+- **Open in editor:** file headers and peeks link to the editor, `vscode://file/<path>:<line>`
   by default, or a command you configure.
 - **Static export:** `untangle -export` writes the page as one HTML file with everything
   computed ahead, as this prototype is, for sharing a review read-only.
@@ -439,19 +439,23 @@ untangle [flags] <pr-url>      # cloned into the cache first
 
 ## Build order
 
-Serving the review came first: steps 2 and 3 are under way in `untangle`, step 1 waits.
+Serving the review came first. Steps 2 and 3 are done in `untangle`, and step 1 is done
+through the page.
 
-1. **Snapshot CLI:** marking, status and rebase with mergiraf, on a local branch.
-   git-tree-compare and `git diff` show what's left from day one.
+1. **Snapshot (done, through the page):** marks are commits on a local branch,
+   `untangle/pr-<number>`, the base plus every change marked reviewed. A rebase replays the
+   branch with mergiraf, then git's line merge; what still conflicts goes back to unreviewed.
+   git-tree-compare and `git diff` show what's left. No separate `mark` or `status` command
+   yet.
 2. **Analysis core (done):** tree-sitter edits, same-change groups, chains and the chain
    map from the language server, as in `prototype/analyze.js`, cached per pair of
    commits. untangle's pipeline gives the prototype's answers exactly, step by step, on
    the eight PRs ([02-test-runs.md](02-test-runs.md)).
-3. **Local web app (started):** `untangle` serves the page, with progress while it builds,
-   review marks saved next to the analysis, and generated diffs loaded on demand. Still to
-   come: go to definition asked live on both sides, whole files, repository search, Shiki
-   highlighting, open in editor, marks on the snapshot branch, and `-export` for a
-   read-only page.
+3. **Local web app (done):** `untangle` serves the page with progress while it builds, go to
+   definition asked live on both sides (whole files, peeks, removed lines), whole files at
+   either side or outside the repository, repository search, Shiki highlighting, open in
+   editor, marks on the snapshot branch, and generated diffs loaded on demand. `-export`
+   writes the same page as one HTML file, for sharing a review read-only.
 4. **Later:** a VS Code extension around the same page, the API for agents, sharing
    snapshots with teammates, and syncing GitHub's viewed checkboxes.
 
@@ -520,6 +524,9 @@ Serving the review came first: steps 2 and 3 are under way in `untangle`, step 1
   - Asked: build the CLI, focused on serving the review, with px0's UX: a directory or a pull
     request URL, cloned into a temporary place. Named `untangle`; clones go to a cache, so the
     next pull request of the same repository only fetches.
+  - Asked: the rest of the local web app (live go to definition, whole files, repository
+    search, Shiki, open in editor, marks on the snapshot branch, `-export`). Done in
+    `untangle`.
 
 ## References
 

@@ -350,3 +350,34 @@ clone, worktrees and `pub get`, a first review of Serverpod #5864 took about 40 
 The stored `refs.json` of the four offline_sync runs didn't match their `defs.json` (they came
 from an earlier run). Computing the usages again from the same definitions gives untangle's
 answer.
+
+## Round 4: marks on the snapshot branch
+
+Marks are commits on a branch, and they come back from the branch's content: a change is
+reviewed when the branch no longer has its removed lines (compared with the base) and has its
+added lines as the head does (compared with the head).
+
+**On a synthetic repository** (21 checks): marks round-trip; after a new push, the change the
+push touched goes back to unreviewed and the others keep their marks; after a rebase onto a base
+that changed elsewhere, the branch is replayed and every mark stays; after a rebase onto a base
+that changed a reviewed line, only that change goes back to unreviewed.
+
+**On real PRs**, marking each change alone, then random halves of all changes, and reading the
+marks back from the branch:
+
+| PR | Each change alone | Random halves |
+|---|---:|---:|
+| offline_sync #157 | 102 of 102 | 20 of 20 |
+| Serverpod #5864 | 29 of 29 | 10 of 10 |
+| Serverpod #5630 | 86 of 88 | 7 of 10 |
+
+- A plain line diff matched blank lines and lone brackets to the wrong copies: #157 came back
+  for 62 of 102 changes and 3 of 20 halves. A histogram diff, with those lines counting only in
+  a change that has nothing else, gives the table above.
+- #5630's generator code repeats itself, so a marked change can match its identical twin. For
+  the commits a review last wrote, untangle keeps the marked changes next to the commit, and
+  reads them back exactly (10 of 10 halves); reading from content is for after a push or a
+  rebase.
+
+**Live go to definition** in directory mode answered 8 of 8 sampled positions on both sides as
+the batch did, in 38 ms to 1.3 s (the first lookup in a package waits for its analysis).

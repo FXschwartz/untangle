@@ -11,9 +11,9 @@ export class CommandError extends Error {
 }
 
 /** Runs a command and returns its stdout. Throws CommandError when it fails. */
-export function run(cmd: string, args: string[], opts: { cwd?: string; input?: string } = {}): string {
+export function run(cmd: string, args: string[], opts: { cwd?: string; input?: string; env?: NodeJS.ProcessEnv } = {}): string {
   try {
-    return execFileSync(cmd, args, { cwd: opts.cwd, input: opts.input, encoding: 'utf8', maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync(cmd, args, { cwd: opts.cwd, input: opts.input, env: opts.env ? { ...process.env, ...opts.env } : undefined, encoding: 'utf8', maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
     const err = e as { status?: number | null; stderr?: string };
     throw new CommandError([cmd, ...args].join(' '), err.status ?? null, String(err.stderr ?? ''));

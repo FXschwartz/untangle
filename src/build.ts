@@ -62,7 +62,18 @@ interface Answers {
   baseDir: string;
 }
 
-export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string }, progress: Progress): Promise<ReviewData> {
+/** Checkouts of both sides, with the language server that answered the batch when one ran. */
+export interface Checkouts {
+  headDir: string;
+  baseDir: string;
+  server: DartServer | null;
+}
+
+/**
+ * The review, and the checkouts and language server the build used. With keepServer, the
+ * server stays up for the page's live requests; otherwise it stops after the batch.
+ */
+export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string; keepServer: boolean }, progress: Progress): Promise<{ data: ReviewData; checkouts: Checkouts | null }> {
   const dir = reviewDir(target.repoKey, target.baseSha, target.headSha);
   fs.mkdirSync(dir, { recursive: true });
   const lspVersion = fingerprint(LSP_STAGE), modelVersion = lspVersion + '.' + fingerprint(MODEL_STAGE);
@@ -72,15 +83,16 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
     const data = readJson<ReviewData>(path.join(dir, 'review.json'));
     if (data) {
       progress.note(`using the analysis cached in ${tilde(dir)}`);
-      return data;
+      return { data, checkouts: null };
     }
   }
 
   let answers = !opts.noCache ? readJson<Answers>(path.join(dir, 'answers.json')) : null;
   // The analysis reads the checkouts too: they must still hold the same commits.
   if (answers && (answers.version !== lspVersion || !checkoutAt(answers.headDir, target.headSha) || !checkoutAt(answers.baseDir, target.baseSha))) answers = null;
+  let server: DartServer | null = null;
   if (answers) progress.note('reusing the language server’s answers; running the analysis again');
-  else answers = await askLanguageServer(target, dir, opts.label, lspVersion, progress);
+  else ({ answers, server } = await askLanguageServer(target, dir, opts.label, lspVersion, opts.keepServer, progress));
 
   progress.step('analysis');
   const t0 = Date.now();
@@ -103,15 +115,17 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
   const data: ReviewData = { model, defs: slim(answers.defs), refs: changedUsages(answers.diff, answers.headDir, answers.defs.raw), defsOld: { base: slim(answers.defsOld) } };
   writeJson(path.join(dir, 'review.json'), data);
   writeJson(path.join(dir, 'meta.json'), { version: modelVersion, untangle: VERSION, base: target.baseSha, head: target.headSha, builtAt: new Date().toISOString() });
-  return data;
+  return { data, checkouts: { headDir: answers.headDir, baseDir: answers.baseDir, server } };
 }
 
-async function askLanguageServer(target: Target, dir: string, label: string, version: string, progress: Progress): Promise<Answers> {
+/**
+ * Checkouts of both sides with their packages resolved. The directory itself serves as the head
+ * when it holds the head commit and its packages are resolved; untangle never runs pub get in it.
+ */
+export async function prepareCheckouts(target: Target, progress: Progress): Promise<{ headDir: string; baseDir: string }> {
   progress.step('checkouts');
   const needs = (checkout: string) => packageDirs(target.repo, target.baseSha, target.headSha, checkout);
-  // The directory itself serves as the head when its packages are resolved; untangle never
-  // runs pub get in it.
-  let headDir = target.headDir && needs(target.headDir).every(resolved) ? fs.realpathSync(target.headDir) : null;
+  let headDir = target.headDir && checkoutAt(target.headDir, target.headSha) && needs(target.headDir).every(resolved) ? fs.realpathSync(target.headDir) : null;
   if (target.headDir && !headDir) progress.note('your checkout’s packages aren’t resolved; using a worktree for the head');
   progress.detail('base ' + target.baseSha.slice(0, 7));
   const baseDir = await worktree(target.repo, target.repoKey, target.baseSha);
@@ -131,6 +145,11 @@ async function askLanguageServer(target: Target, dir: string, label: string, ver
     const failed = await pubGet(dirs, progress.verbose);
     failed.forEach((d) => progress.note(`pub get failed in ${tilde(d)}; its code resolves partly`));
   }
+  return { headDir, baseDir };
+}
+
+async function askLanguageServer(target: Target, dir: string, label: string, version: string, keepServer: boolean, progress: Progress): Promise<{ answers: Answers; server: DartServer | null }> {
+  const { headDir, baseDir } = await prepareCheckouts(target, progress);
 
   progress.step('diff');
   const diff = exportDiff(target.repo, { base: { left: target.baseSha, right: target.headSha, label } }, generatedPatterns(target.repo, target.headSha));
@@ -143,6 +162,7 @@ async function askLanguageServer(target: Target, dir: string, label: string, ver
   const old = oldPositions(diff, 'base');
   progress.detail('starting the Dart analysis server');
   const server = await DartServer.start([{ name: 'head', dir: headDir }, { name: 'base', dir: baseDir }], { clientVersion: VERSION, log: progress.verbose });
+  let kept = false;
   try {
     // Both sides' packages up front: the server builds its contexts once, before any lookup.
     server.openAll([...Object.keys(head.positions).map((p) => path.join(headDir, p)), ...Object.keys(old.positions).map((p) => path.join(baseDir, p))]);
@@ -158,8 +178,9 @@ async function askLanguageServer(target: Target, dir: string, label: string, ver
     const supers = await overrides(server, diff, headDir, defs.raw);
     const answers: Answers = { version, diff, defs, defsOld, calls, supers, headDir, baseDir };
     writeJson(path.join(dir, 'answers.json'), answers);
-    return answers;
+    kept = keepServer;
+    return { answers, server: kept ? server : null };
   } finally {
-    await server.stop();
+    if (!kept) await server.stop();
   }
 }

@@ -5,7 +5,7 @@ import type { ReviewData } from './build.js';
 import { ROOT } from './version.js';
 
 export interface PageConfig {
-  /** Served by untangle: marks and generated diffs go through its API. */
+  /** Served by untangle: marks, live definitions, whole files and search go through its API. */
   served: boolean;
   /** This review, for keys in browser storage. */
   key: string;
@@ -14,6 +14,14 @@ export interface PageConfig {
   /** The pull request's page, and where the comparison runs (repo · base → head). */
   url: string | null;
   where: string;
+  /** Absolute paths of the head and base checkouts, for links to the editor (null until they exist). */
+  roots?: { head: string; base: string } | null;
+  /** How "Open in editor" works: a link built from a template, or a command untangle runs. */
+  editor?: { mode: 'uri'; template: string } | { mode: 'command' };
+  /** The branch that holds the marks. */
+  snapshot?: { branch: string; commit: string | null; note: string | null };
+  head?: string;
+  base?: string;
 }
 
 const read = (f: string) => fs.readFileSync(path.join(ROOT, 'viewer', f), 'utf8');
@@ -21,14 +29,42 @@ const read = (f: string) => fs.readFileSync(path.join(ROOT, 'viewer', f), 'utf8'
 const inline = (data: unknown) => JSON.stringify(data).replace(/</g, '\\u003c');
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-/** Renders the page for a review: everything but the config is inlined once, up front. */
-export function reviewPage(data: ReviewData, title: string): (config: PageConfig) => string {
+/** The highlighter bundle (dist/highlight.js), built by `npm run build`. */
+export const highlighter = () => {
+  try {
+    return fs.readFileSync(path.join(ROOT, 'dist', 'highlight.js'));
+  } catch {
+    return null;
+  }
+};
+
+// Generated diffs kept in an exported page, smallest files first: the rest are listed without.
+const EXPORT_GENERATED_BUDGET = 1_000_000;
+
+/**
+ * Renders the page for a review: everything but the config is inlined once, up front. Served,
+ * the page loads the highlighter from untangle and asks for generated diffs when they open;
+ * exported, it carries both, within a budget for the generated diffs.
+ */
+export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'export'): (config: PageConfig) => string {
   const template = read('index.html'), core = read('core.js'), viewer = read('viewer.js');
-  for (const [name, src] of [['core.js', core], ['viewer.js', viewer]]) if (/<\/script/i.test(src)) throw new Error(`${name} contains </script`);
-  // Generated files are listed without their diffs; the page asks for one when it's opened.
-  const model = { compares: Object.fromEntries(Object.entries(data.model.compares).map(([k, c]) => [k, { ...c, generated: c.generated.map((g: object) => ({ ...g, hunks: null })) }])) };
+  const shiki = highlighter();
+  for (const [name, src] of [['core.js', core], ['viewer.js', viewer], ['highlight.js', shiki ? shiki.toString('utf8') : '']]) if (/<\/script/i.test(src)) throw new Error(`${name} contains </script`);
+  type Generated = { p: string; hunks: unknown };
+  // Exported, the smallest generated diffs stay within the budget; served, none: the page asks.
+  const generated = (list: Generated[]): Generated[] => {
+    if (mode === 'served') return list.map((g) => ({ ...g, hunks: null }));
+    const size = (g: Generated) => (g.hunks ? JSON.stringify(g.hunks).length : 0);
+    let used = 0;
+    const kept = new Set<Generated>();
+    [...list].sort((a, b) => size(a) - size(b)).forEach((g) => { if (g.hunks && used + size(g) <= EXPORT_GENERATED_BUDGET) { used += size(g); kept.add(g); } });
+    return list.map((g) => ({ ...g, hunks: kept.has(g) ? g.hunks : null }));
+  };
+  const model = { compares: Object.fromEntries(Object.entries(data.model.compares).map(([k, c]) => [k, { ...c, generated: generated(c.generated) }])) };
+  const highlight = !shiki ? '' : mode === 'served' ? '<script src="assets/highlight.js"></script>' : `<script>${shiki.toString('utf8')}</script>`;
   const parts: Array<[string, string]> = [
     ['/*TITLE*/', escapeHtml(title + ' · untangle')],
+    ['<!--HIGHLIGHT-->', highlight],
     ['/*CORE*/', core],
     ['/*CONFIG*/', '\0'],
     ['/*MODEL*/', inline(model)],

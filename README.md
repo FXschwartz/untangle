@@ -29,7 +29,7 @@ GitHub's public API answers for public ones.
 
 ```
 npm install
-npm run build
+npm run build   # the TypeScript, and the highlighter bundle (dist/highlight.js)
 npm link        # puts `untangle` on PATH
 ```
 
@@ -44,12 +44,38 @@ npm link        # puts `untangle` on PATH
    changed methods override. Like an editor, it only analyzes the packages the review touches.
 3. **Analysis.** The rules in [analysis/analyze.js](analysis/analyze.js) build edits, same-change
    groups, chains and the chain map.
-4. **Serving.** The page shows progress while the review builds, then the review. Review marks are
-   saved by untangle, next to the analysis. Generated files load their diffs when you open them.
+4. **Serving.** The page shows progress while the review builds, then the review. The language
+   server stays up for the page's live requests.
 
 The first review of a pair of commits takes from a few seconds to a few minutes, mostly the
 language server. Its answers and the analysis are cached per pair of commits, so opening the
 same review again is immediate.
+
+## In the page
+
+- **Go to definition anywhere.** Names on changed lines answer at once (computed ahead). Any
+  other name, in a whole file, inside a peek or on a removed line, asks the language server;
+  in a peek, clicking a name moves the peek there and Back returns.
+- **Whole files** at either side: "Whole file" in a file's header, "Open file" in a peek, or a
+  search result. Lines the review changes are marked. Files outside the repository (a package,
+  the SDK) open the same way from a definition.
+- **Search** the changed lines, or the whole repository at the head or the base (`git grep`).
+- **Highlighting** with [Shiki](https://shiki.style): VS Code's grammars and its Dark+ theme.
+- **Open in editor** from file headers and peeks: a `vscode://` link by default (through WSL
+  when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
+  or a URL template such as `cursor://file{file}:{line}:{col}`.
+- **Marks on a branch.** Your review is a local git branch, `untangle/pr-<number>` (or
+  `untangle/<branch>`): the base plus every change you marked reviewed, a commit per save.
+  `git diff untangle/pr-123 <head>` shows what's left. Marks come back from the branch's
+  content, so a new push to the pull request only brings back what changed since you looked.
+  When the base moves (a rebase), the branch is replayed onto the new base with a 3-way merge,
+  [mergiraf](https://mergiraf.org) first when it's installed; what still conflicts goes back to
+  unreviewed. For a URL, the branch lives in the cached clone; for a directory, in your
+  repository. Marks on part of a change stay next to the analysis.
+
+`-export review.html` writes the same page as one HTML file, for sharing a review read-only:
+everything computed ahead, marks kept in the reader's browser, and the generated diffs that fit
+in 1 MB.
 
 ## Flags
 
@@ -57,6 +83,8 @@ same review again is immediate.
 |---|---|
 | `-base string` | compare with this branch or commit instead of the pull request's base |
 | `-base-path string` | URL path prefix to serve from (e.g. `/rev-123/`), behind a proxy |
+| `-editor string` | a command or URL template to open locations with; `{file}`, `{line}` and `{col}` are replaced (also `UNTANGLE_EDITOR`) |
+| `-export string` | write the review to this HTML file and exit |
 | `-host string` | address to bind (default `127.0.0.1`) |
 | `-port int` | port (default `7778`; a busy default falls back to a free one; `0` picks one) |
 | `-no-open` | do not launch a browser |
@@ -75,7 +103,8 @@ same review again is immediate.
 - `worktrees/`: checkouts of base and head commits. A worktree of your own repository is listed
   by `git worktree list`; `git worktree remove` or deleting the folder is safe.
 - `reviews/`: per pair of commits, the language server's answers (`answers.json`), the review
-  (`review.json`) and your marks (`state.json`).
+  (`review.json`), and marks on parts of a change with the layout (`state.json`). Whole marks
+  live on the review's branch.
 
 ## Layout
 
@@ -83,5 +112,5 @@ same review again is immediate.
 |---|---|
 | `src/` | The CLI, the server and the pipeline, in TypeScript |
 | `analysis/` | The analysis rules (`analyze.js`) and the generated-code adapters, shared with the prototype |
-| `viewer/` | The page: `index.html`, `viewer.js`, and `core.js` (the tokenizer and diff, used by both sides) |
+| `viewer/` | The page: `index.html`, `viewer.js`, `highlight.js` (Shiki, bundled by the build), and `core.js` (the tokenizer and diff, used by both sides) |
 | `docs/` | The UX proposal, the test runs, and the prototype pipeline that produced them |

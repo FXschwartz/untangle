@@ -6,19 +6,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs, usage, UsageError, type Options } from './args.js';
-import { buildReview, type ReviewData } from './build.js';
-import { reviewDir } from './cache.js';
+import { buildReview } from './build.js';
 import { gitMaybe } from './exec.js';
+import { LiveSession } from './live.js';
 import { Narrator } from './narrate.js';
 import { openBrowser } from './open.js';
-import { progressPage, reviewPage, type PageConfig } from './page.js';
-import { fileHunks } from './pipeline/diff.js';
-import { ReviewServer, writeAtomic } from './server.js';
+import { highlighter, progressPage, reviewPage, type PageConfig } from './page.js';
+import { ReviewServer } from './server.js';
+import { editorFrom, ReviewSession } from './session.js';
 import { isPrUrl, resolveDirectory, resolveUrl, type Target } from './target.js';
 import { VERSION } from './version.js';
-
-// A generated file's diff past this many changed lines isn't shown.
-const GENERATED_MAX_LINES = 20_000;
 
 async function main(): Promise<number> {
   let opts: Options;
@@ -48,49 +45,48 @@ async function main(): Promise<number> {
     if (!fs.statSync(opts.target).isDirectory()) dir = path.dirname(opts.target);
     if (!gitMaybe(dir, 'rev-parse', '--git-dir')) throw new Error(`${path.resolve(dir)} is not inside a git repository`);
   }
+  const exporting = opts.exportTo !== null;
 
   const say = new Narrator({ quiet: opts.quiet, verbose: opts.verbose, color: opts.color });
   say.header([`untangle ${VERSION}`]);
 
+  // Served, the page shows the build's progress until the review replaces it.
+  let session: ReviewSession | null = null;
   let render: ((config: PageConfig) => string) | null = null;
-  let data: ReviewData | null = null;
-  let target: Target | null = null;
-  let state: unknown = null;
-  let stateFile = '';
-  let config: Omit<PageConfig, 'state'> | null = null;
-
-  const server = new ReviewServer(
-    { host: opts.host, port: opts.port, portExplicit: opts.portExplicit, basePath: opts.basePath },
-    say.status,
-    {
-      page: () => (render && config ? render({ ...config, state }) : null),
-      generated: (p) => {
-        const g = data?.model.compares.base.generated.find((x: { p: string }) => x.p === p);
-        if (!g || !target) return { error: `${p} is not a generated file of this review` };
-        if (g.hunks) return { hunks: g.hunks };
-        if (g.a + g.d > GENERATED_MAX_LINES) return { error: `${(g.a + g.d).toLocaleString('en-US')} changed lines: too many to show here` };
-        return { hunks: fileHunks(target.repo, target.baseSha, target.headSha, p).map((h) => ({ o: h.o, n: h.n, h: h.h, rows: h.l.map((l) => [l[0], l.slice(1)]) })) };
+  let server: ReviewServer | null = null;
+  let url = '';
+  if (!exporting) {
+    server = new ReviewServer(
+      { host: opts.host, port: opts.port, portExplicit: opts.portExplicit, basePath: opts.basePath },
+      say.status,
+      {
+        page: () => (render && session ? render(session.config()) : null),
+        asset: (name) => {
+          if (name !== 'highlight.js') return null;
+          const body = highlighter();
+          return body && { type: 'text/javascript; charset=utf-8', body };
+        },
+        call: (route, method, query, body) => (session ? session.call(route, method, query, body) : Promise.resolve({ status: 503, data: { error: 'the review is still being built' } })),
       },
-      saveState: (json) => {
-        state = JSON.parse(json);
-        if (stateFile) writeAtomic(stateFile, json);
-      },
-    },
-    progressPage(),
-    (line) => say.verbose(line),
-  );
-  const url = await server.listen();
-  say.serving(url);
-  if (opts.quiet) process.stdout.write(url + '\n');
-  if (opts.open && !openBrowser(url)) say.note('no browser to open: open the link above');
+      progressPage(),
+      (line) => say.verbose(line),
+    );
+    url = await server.listen();
+    say.serving(url);
+    if (opts.quiet) process.stdout.write(url + '\n');
+    if (opts.open && !openBrowser(url)) say.note('no browser to open: open the link above');
+  }
 
+  let live: LiveSession | null = null;
   const stop = async () => {
-    await server.close();
+    await server?.close();
+    await live?.stop();
     process.exit(0);
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
+  let target: Target;
   try {
     say.step(byUrl ? 'pull request' : 'branch');
     target = byUrl ? await resolveUrl(opts.target, (l) => say.detail(l)) : await resolveDirectory(dir, opts.base, (l) => say.detail(l));
@@ -106,22 +102,31 @@ async function main(): Promise<number> {
     say.title(title, where);
     t.notes.forEach((n) => say.note(n));
 
-    stateFile = path.join(reviewDir(t.repoKey, t.baseSha, t.headSha), 'state.json');
-    try {
-      state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-    } catch {
-      state = null;
+    const built = await buildReview(t, { noCache: opts.noCache, label: base.replace(' ', ' · '), title, keepServer: !exporting }, say);
+    const key = `${t.repoKey}:${t.baseSha.slice(0, 12)}-${t.headSha.slice(0, 12)}`;
+    if (exporting) {
+      const file = path.resolve(opts.exportTo!);
+      fs.writeFileSync(file, reviewPage(built.data, title, 'export')({ served: false, key, state: null, url: pr ? pr.url : null, where }));
+      say.finish();
+      say.note(`wrote ${file} (${Math.round(fs.statSync(file).size / 1024)} KB)`);
+      return 0;
     }
-    data = await buildReview(t, { noCache: opts.noCache, label: base.replace(' ', ' · '), title }, say);
-    config = { served: true, key: `${t.repoKey}:${t.baseSha.slice(0, 12)}-${t.headSha.slice(0, 12)}`, url: pr ? pr.url : null, where };
-    render = reviewPage(data, title);
+    live = new LiveSession(t, { step: () => {}, detail: () => {}, note: (l) => say.verbose(l), verbose: (l) => say.verbose(l) }, built.checkouts);
+    session = new ReviewSession(t, built.data, live, editorFrom(opts.editor), { key, url: pr ? pr.url : null, where, snapshotKey: pr ? `pr-${pr.number}` : branch && branch !== 'HEAD' ? branch : `head-${t.headSha.slice(0, 7)}` }, say);
+    render = reviewPage(built.data, title, 'served');
+    say.note(`marks go to the branch ${session.snapshot.branch}`);
     say.ready(url);
+    // The language server for live go to definition: kept from the build, or started now.
+    live.ensure().catch((e) => say.note(`live go to definition is off: ${(e as Error).message}`));
   } catch (e) {
     say.fail((e as Error).message);
     if (opts.verbose && e instanceof Error && e.stack) say.verbose(e.stack);
     // A moment for the page to show the error.
-    await new Promise((r) => setTimeout(r, 1500));
-    await server.close();
+    if (server) {
+      await new Promise((r) => setTimeout(r, 1500));
+      await server.close();
+    }
+    await live?.stop();
     return 1;
   }
   return new Promise<number>(() => {});

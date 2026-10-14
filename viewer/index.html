@@ -291,6 +291,14 @@ mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; }
   .graph-scroll { max-height: 300px; }
 }
 
+/* Whole files, the editor, search over the repository, the snapshot branch. */
+a.btn { text-decoration: none; display: inline-block; }
+.gen-tag { font: 600 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 2px 5px; margin-left: 6px; }
+.sb-snap { margin-top: 6px; font: 500 11px/1.45 var(--font-mono); color: var(--ink-3); overflow-wrap: anywhere; }
+.sb-snap code { color: var(--ink-2); }
+.code.src .ln.add .sg, .code.src .ln.del .sg { font-weight: 700; }
+.inst-file .linkish { font: inherit; }
+
 /* The app: the viewer fills the window. */
 html, body { height: 100%; margin: 0; }
 body { overflow: hidden; }
@@ -323,6 +331,7 @@ body { overflow: hidden; }
     <div class="vw-main" id="vw-main"><div class="empty">Loading the review…</div></div>
   </div>
 </div>
+<!--HIGHLIGHT-->
 <script>
 /*CORE*/
 </script>
