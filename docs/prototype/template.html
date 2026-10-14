@@ -360,11 +360,11 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
 
 <main class="page">
   <header class="masthead">
-    <span class="eyebrow">UX draft v10 · for discussion · Oct 13, 2026</span>
+    <span class="eyebrow">UX draft v11 · for discussion · Oct 13, 2026</span>
     <h1>Review by chain, end in the code</h1>
     <p class="lede">A review tool that opens on a map of chains and ends in the code. A chain follows one change across files: a new parameter, the calls that now pass it, and the function that had to take a parameter in turn. The map shows which chains build on which. You read a chain as a graph, focus on one member at a time, and mark the whole chain reviewed at once. Reviewed code stays on screen, muted, and its hunk folds away. Every chain, group and count comes from fixed rules over git, tree-sitter and the language server.</p>
     <div class="reqs"><span class="k">Must have</span><span class="pill">chains first</span><span class="pill">syntax highlighting</span><span class="pill">go to definition</span><span class="pill">search</span><span class="pill">same input, same view</span></div>
-    <p class="changed">Changed since v9: every problem the test runs on three more PRs found is fixed. A change now stops where a declaration starts, moved code shows as moved with only its real edits, a call links to the signature it uses even when only an argument changed, and tests follow the calls they make. #157, #166 and #162 are in the viewer next to #168, under “Other PRs”.</p>
+    <p class="changed">Changed since v10: changed methods that override the same method now join one chain, so #162’s two implementations of Serverpod’s new <code>watch</code> are reviewed together. v10 fixed every problem the test runs on #157, #166 and #162 found; those PRs are in the viewer under “Other PRs”.</p>
   </header>
 
   <section class="section" id="try">
@@ -432,6 +432,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
             <li><b>The same change in several places is a chain</b> when it names an identifier.</li>
             <li><b>A chain takes every change of the members it touches.</b> In test files that means the enclosing test. A doc comment counts with the declaration it documents.</li>
             <li><b>New code stays together.</b> A new or removed type is one chain with its members. Chains that never leave a new file are one chain, and a change of a new file that links to nothing joins that file’s main chain.</li>
+            <li><b>Overrides of the same method are one chain.</b> Changed methods that override the same method, a framework’s say, join one chain, and an override of a changed method links to it. The members of <code>Object</code> (<code>toString</code>, <code>==</code>, <code>hashCode</code>) are left out.</li>
             <li><b>Imports, parts and docs follow.</b> A new import joins the chains that use what it imports in that file, a <code>part</code> directive joins the chains of its part file, and a Markdown change that names a chain’s member in backticks joins that chain.</li>
             <li><b>Generated code leads back to its model.</b> A usage that the language server resolves into generated code links to the <code>.spy.yaml</code> field it was generated from. Generated <code>Table</code>, <code>Include</code> and <code>Repository</code> classes map to the model class, and a relation’s generated <code>…Id</code> column maps to the relation field.</li>
           </ul>
@@ -463,7 +464,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
           <ul>
             <li><b>#157</b> (batched projection reads): 85% → 97%, with 6 moved declarations.</li>
             <li><b>#166</b> (consistent outbound snapshot): 74% → 91%. Its central fix, in <code>collectPendingChanges</code>, is now in the <code>_streamPendingChanges</code> chain with the whole <code>transaction</code> ripple.</li>
-            <li><b>#162</b> (Serverpod 4.1 watches): 83% → 92%. Its clock fix is a chain of its own.</li>
+            <li><b>#162</b> (Serverpod 4.1 watches): 83% → 94%. Its clock fix is a chain of its own, and the two implementations of Serverpod’s new <code>watch</code>, the real one and a benchmark’s, are one chain.</li>
           </ul>
         </div>
       </div>
@@ -515,7 +516,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
   <section class="section" id="decided">
     <header>
       <span class="eyebrow">Decided so far</span>
-      <h2>Answers from the v2 to v8 reviews</h2>
+      <h2>Answers from the v2 to v10 reviews</h2>
     </header>
     <ol class="decide">
       <li><span class="q">Same edit</span><span>The same tree-sitter change, for example one token replaced by another. Overlapping runs are one edit, and punctuation alone never counts.</span></li>
@@ -532,6 +533,7 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Where</span><span>A local web app, open in any browser. A VS Code extension can wrap it later.</span></li>
       <li><span class="q">Servers</span><span>One language server with both checkouts as workspace folders, so go to definition stays live on both sides.</span></li>
       <li><span class="q">Language</span><span>TypeScript on Node, for now.</span></li>
+      <li><span class="q">Overrides</span><span>Changed methods that override the same method join one chain.</span></li>
     </ol>
   </section>
 
@@ -612,7 +614,6 @@ details.src pre { margin: 10px 0 0; max-height: 520px; overflow: auto; font: 400
       <li><span class="q">Q3</span><span><b>Chain order inside a family:</b> by level, as now, or by what is left to review?</span></li>
       <li><span class="q">Q4</span><span><b>Large graphs:</b> collapse busy levels into “+N more”, as now, or group nodes by file?</span></li>
       <li><span class="q">Q5</span><span><b>Same change across symbols:</b> <code>userId → spaceId</code> as a declaration is one group of six different parameters. Requiring the language server to resolve each instance to the same declaration would split it into six. It would also split a class rename from its constructor calls, and an interface method from its override. Keep the syntax-only rule, or require the same symbol?</span></li>
-      <li><span class="q">Q6</span><span><b>Overrides:</b> in #162, a test double overrides the same new <code>watch</code> method as the real database, and nothing links the two. Should changes that override the same method join one chain?</span></li>
     </ol>
   </section>
 

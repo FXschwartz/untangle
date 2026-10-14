@@ -1,8 +1,8 @@
-# UX proposal v10: start from the chain map, end in the code
+# UX proposal v11: start from the chain map, end in the code
 
-> Draft v10, 2026-10-13. Replaces v9 (see "History" at the end).
+> Draft v11, 2026-10-13. Replaces v10 (see "History" at the end).
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
-> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 11).
+> Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 12).
 > Prototype sources: [prototype/](prototype/).
 > Test runs of these rules on #157, #166 and #162: [02-test-runs.md](02-test-runs.md).
 
@@ -59,6 +59,9 @@ From the review of v8:
 From the review of v9 and the test runs ([02-test-runs.md](02-test-runs.md)):
 - **Fix every problem the runs on #157, #166 and #162 found.**
 
+From the review of v10:
+- **Changes that override the same method join one chain** (Q6).
+
 ## Decisions (answers to the v2 questions)
 
 1. **Same edit** = the same tree-sitter change. For example, one token replaced by
@@ -77,6 +80,7 @@ From the review of v9 and the test runs ([02-test-runs.md](02-test-runs.md)):
 9. **Language servers:** one server with both checkouts as workspace folders, so go to
    definition stays live on both sides (about 850 MB on #168).
 10. **Server language:** TypeScript on Node, for now.
+11. **Overrides:** changed methods that override the same method join one chain.
 
 ## Rules
 
@@ -135,30 +139,35 @@ From the review of v9 and the test runs ([02-test-runs.md](02-test-runs.md)):
     - Chains that never leave a new file are one chain, named after the file's main new
       type (or the file, for tests).
     - A change of a new file that links to nothing joins that file's main chain.
-11. **Imports, parts and docs.**
+11. **Overrides.** The language server says what each changed method overrides
+    (`dart/textDocument/super`).
+    - Changed methods that override the same method, a framework's say, join one chain.
+    - An override of a changed method links to it.
+    - The members of `Object` (`toString`, `==`, `hashCode`) are left out.
+12. **Imports, parts and docs.**
     - A new relative import joins the chains that, in the same file, use declarations from
       the imported file.
     - A `part` directive joins the chains that have changes in its part file.
     - A Markdown change that names a chain's member or declaration in backticks joins that
       chain.
-12. **Generated code leads back to its model.** A usage that resolves into generated code
+13. **Generated code leads back to its model.** A usage that resolves into generated code
     (`**/generated/**`) links to the change of the model field it was generated from
     (`**/*.spy.yaml`), on either side.
     - Serverpod adapter: generated `Table`, `Include` and `Repository` classes map to the
       model class, and a relation's `…Id` column maps to the relation field.
     - A doc-comment change in the model belongs to the field below it.
-13. A chain needs at least two members; same-change chains need two changes. Chains with
+14. A chain needs at least two members; same-change chains need two changes. Chains with
     exactly the same changes are one chain. Changes in no chain are listed by file.
-14. **Name:** the best declaration inside the chain: what remains before what was removed,
+15. **Name:** the best declaration inside the chain: what remains before what was removed,
     members and types before parameters and locals, public before private, then the most
     used. In a ripple, the top parameter comes first: the one whose callers don't pass it on
     from a parameter of their own.
-15. **Graph:**
+16. **Graph:**
     - one node per member;
     - nodes that are all the same change, 3 or more times, collapse into one;
     - arrows go from a change to what it uses;
     - layers are the distance from the root.
-16. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
+17. **Totals:** each chain shows its total diff (+/−) and how many changes are reviewed.
 
 ### Chain of chains
 
@@ -380,9 +389,6 @@ machine's through a forwarded port.
   resolve each instance to the same declaration would split it into six, but it would
   also split a class rename from its constructor calls and an interface method from its
   override.
-- **Q6.** Overrides: in #162 a test double overrides the same new `watch` method as the
-  real database, and nothing links the two. Should changes that override the same method
-  join one chain?
 
 ## History
 
@@ -424,6 +430,8 @@ machine's through a forwarded port.
   - Asked: how hard-coded is it to #168? The rules ran unchanged on #157, #166 and #162 and
     found seven problems ([02-test-runs.md](02-test-runs.md)).
   - Feedback: fix all of them.
+- **v10:** the fixes, with the three PRs in the viewer.
+  - Decided: overrides of the same method join one chain (Q6).
 
 ## References
 

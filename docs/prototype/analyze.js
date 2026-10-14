@@ -23,7 +23,10 @@ const [REPO, HEADDIR, DIFF, DEFS, OUT, ...REST] = process.argv.slice(2);
 // calls=<calls.json>: outgoing calls reachable from what changed tests call (lsp_calls.py).
 const CALLS_ARG = REST.find((a) => a.startsWith('calls='));
 const CALLS = CALLS_ARG ? JSON.parse(fs.readFileSync(CALLS_ARG.slice(6), 'utf8')) : null;
-const OLD_ARGS = REST.filter((a) => a !== CALLS_ARG);
+// supers=<supers.json>: what each changed declaration overrides (lsp_supers.py).
+const SUPERS_ARG = REST.find((a) => a.startsWith('supers='));
+const SUPERS = SUPERS_ARG ? JSON.parse(fs.readFileSync(SUPERS_ARG.slice(7), 'utf8')) : null;
+const OLD_ARGS = REST.filter((a) => a !== CALLS_ARG && a !== SUPERS_ARG);
 // The old side of each comparison has its own checkout and language-server answers.
 const OLD = Object.fromEntries(OLD_ARGS.map((a) => { const [name, dir, defs] = a.split(':'); return [name, { dir: path.resolve(dir) + '/', raw: JSON.parse(fs.readFileSync(defs, 'utf8')).raw }]; }));
 const HEAD = path.resolve(HEADDIR) + '/';
@@ -708,6 +711,46 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
       });
     });
 
+    // Overrides: a changed method that overrides a changed method links to it, and changed
+    // overrides of the same method elsewhere (a framework's, say) join one chain. Members of
+    // Object (toString, ==, hashCode) are left out: every class overrides them.
+    const isMemberName = (f, line, col) => {
+      const n = f.newTree.rootNode.descendantForPosition(pos(line, col));
+      if (!n || n.type !== 'identifier') return false;
+      for (let a = n.parent; a; a = a.parent) {
+        if (SIGNATURES.has(a.type)) { const nm = a.childForFieldName('name') || a.namedChildren.find((x) => x.type === 'identifier'); return !!nm && nm.startIndex === n.startIndex; }
+        if (a.type === 'formal_parameter_list' || a.type === 'function_body' || BODIES.has(a.type)) return false;
+      }
+      return false;
+    };
+    if (SUPERS) {
+      const byBase = new Map();
+      for (const [key, [tpath, tl, tc]] of Object.entries(SUPERS)) {
+        const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
+        const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
+        const u = plusRow.get(p + ':' + line), f = fileByPath.get(p);
+        if (!u || !f || !f.newTree || !isMemberName(f, line, col) || /\/dart-sdk\/lib\/core\/object\.dart$/.test(tpath)) continue;
+        if (tpath.startsWith(HEAD)) {
+          const rel = tpath.slice(HEAD.length), d = plusRow.get(rel + ':' + (tl + 1));
+          if (d) { if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc, { kind: 'member' })); continue; }
+        }
+        const k = JSON.stringify([tpath, tl, tc]);
+        if (!byBase.has(k)) byBase.set(k, []);
+        byBase.get(k).push(u.b);
+      }
+      byBase.forEach((list, k) => {
+        const blocks = [...new Set(list)];
+        if (blocks.length < 2) return;
+        const [tpath, tl, tc] = JSON.parse(k);
+        const t = diskTree(tpath);
+        const word = t && /^[A-Za-z_$][\w$]*/.exec((t.lines[tl] || '').slice(tc));
+        const at = t && memberAt(t.tree, tl + 1, ' '.repeat(tc) + 'x');
+        const dk = 'super:' + k;
+        decls.set(dk, { key: dk, name: word ? word[0] : '?', kind: 'member', block: blocks[0], users: new Set(blocks.slice(1)), member: (at && at.member) || (word && word[0]), line: tl + 1, file: tpath, overrides: true });
+        blocks.slice(1).forEach((b) => { if (!usesOf.has(b)) usesOf.set(b, new Map()); usesOf.get(b).set(dk, true); });
+      });
+    }
+
     // Removed lines link the same way, through the old side's language server.
     const minusRow = new Map();
     files.forEach((f) => f.blocks.forEach((b) => b.rows.forEach((r) => { if (r.type === '-' && (!b.changedOld || b.changedOld.has(r.o))) minusRow.set(f.p + ':' + r.o, { f, b, r }); })));
@@ -824,6 +867,7 @@ const BODIES = new Set(['class_body', 'extension_body', 'enum_body']);
     });
     const label = (d) => {
       if (!d) return '(changes)';
+      if (d.overrides) return 'overrides ' + d.member;
       if (d.removed) return '− ' + label({ ...d, removed: false });
       if (d.model) return d.member;
       let m = d.member;

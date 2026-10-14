@@ -18,9 +18,10 @@ Prerequisites:
 | 4 | `python3 slim_defs.py defs.json defs_slim.json` | Keeps only what the page embeds for go to definition. |
 | 5 | `python3 lsp_refs.py <head> diff.json defs.json refs.json` | References of declarations on added lines that fall on added lines elsewhere (the "changed usages" badges). |
 | 5a | `python3 lsp_calls.py <head> diff.json defs.json calls.json` | Outgoing calls (call hierarchy), up to 3 levels, from what changed tests call. Tests link to the first changed function on each path. |
+| 5b | `python3 lsp_supers.py <head> diff.json defs.json supers.json` | What each declaration on an added line overrides (`dart/textDocument/super`). Changed overrides of the same method join one chain. |
 | 5b | `node positions_old.js base diff.json positions_old_base.json`, then `python3 lsp_index.py <base-worktree> positions_old_base.json defs_old_base.json` | The same for removed lines, on the old side's checkout. Repeat per comparison. |
 | 5c | `python3 slim_defs_old.py base=defs_old_base.json [since=defs_old_since.json] defs_old_slim.json` | What the page embeds for the old side. |
-| 6 | `node analyze.js <repo> <head> diff.json defs.json model.json base:<base-worktree>:defs_old_base.json [since:<mid-worktree>:defs_old_since.json] [calls=calls.json]` | The core: token edits, tree-sitter identities, same-change groups, chains, their graphs, and the chain hierarchy. Uses `core.js`. |
+| 6 | `node analyze.js <repo> <head> diff.json defs.json model.json base:<base-worktree>:defs_old_base.json [since:<mid-worktree>:defs_old_since.json] [calls=calls.json] [supers=supers.json]` | The core: token edits, tree-sitter identities, same-change groups, chains, their graphs, and the chain hierarchy. Uses `core.js`. |
 | 7 | `node stats.js model.json` | Prints the numbers quoted in `../01-ux-proposal.md`. |
 | 7b | `node diag_standalone.js <head> model.json defs.json` | Explains why each change outside every chain stayed outside. |
 | 8 | `python3 build.py <dir> page.html` | Inlines the model, `core.js`, `viewer.js` and `analyze.js` (as text) into `template.html`. |

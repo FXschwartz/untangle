@@ -110,7 +110,7 @@ test is now a change of its own.
 | #168 | 387 → 580 | 65 → 54 | 93% → 95% | 28 → 30 | 1 → 0 | 0 |
 | #157 | 52 → 102 | 13 → 11 | 85% → 97% | 8 → 3 | 1 → 0 | 6 |
 | #166 | 58 → 123 | 12 → 14 | 74% → 91% | 15 → 11 | 2 → 0 | 0 |
-| #162 | 64 → 104 | 5 → 10 | 83% → 92% | 11 → 8 | 0 | 0 |
+| #162 | 64 → 104 | 5 → 12 | 83% → 94% | 11 → 6 | 0 | 0 |
 
 1. **Call sites.** A changed call links to the function it calls when that signature
    changed: a positional argument joins the parameter in the same position, and the called
@@ -141,6 +141,8 @@ Two rules had to be narrowed after the first try, both found by these runs:
   together; a local now only links inside its own member, and a new function's parameters
   don't ripple.
 
-**Still open:** the two overrides of `Database.watch` in #162 (the real one and a test
-double) aren't linked (Q6 in the proposal). Moves are detected for whole declarations
-only, and only in Dart.
+**Overrides (Q6, decided after these runs):** changed methods that override the same
+method join one chain. In #162 the real database's `watch` and the benchmark's query
+counter are now one chain, `overrides Database.watch`, and so are their `unsafeWatch`.
+
+**Still open:** moves are detected for whole declarations only, and only in Dart.
