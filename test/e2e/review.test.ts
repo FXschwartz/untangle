@@ -70,6 +70,18 @@ async function chain(page: Browser, name: string): Promise<void> {
   await page.until(`(document.querySelector('.crumbs')?.textContent || '').includes(${JSON.stringify(name)})`);
 }
 
+/** Opens Jump to on Everything. A previous jump can leave the list on Symbols. */
+async function jump(page: Browser, query: string): Promise<void> {
+  await page.key('k', { ctrl: true });
+  await page.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
+  for (let i = 0; i < 5; i += 1) {
+    if (await read(page, `document.querySelector('.pal-scope')?.textContent ?? ''`) === 'Everything') break;
+    await page.key('Tab');
+  }
+  await page.until(`document.querySelector('.pal-scope')?.textContent === 'Everything'`);
+  if (query) await page.type(query);
+}
+
 async function openFile(page: Browser, file: string): Promise<void> {
   await page.click('[data-tab="files"]');
   await page.until(`!!document.querySelector(${JSON.stringify(`[data-open="${file}"]`)})`);
@@ -714,6 +726,281 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
 
     it('then the page does not scroll sideways.', () => {
       assert.equal(fit, 'fits');
+    });
+  });
+
+  describe('when a few letters are typed for a symbol, ', () => {
+    let opened: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.key('k', { ctrl: true });
+      await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
+      await page!.key('Tab');
+      await page!.key('Tab');
+      await page!.key('Tab');
+      await page!.until(`document.querySelector('.pal-scope')?.textContent === 'Symbols'`);
+      await page!.type('gre');
+      await page!.until(`[...document.querySelectorAll('.pal-r')].some((el) => (el.textContent || '').includes('greet') && (el.textContent || '').includes('app.dart'))`);
+      const id = await read(page!, `[...document.querySelectorAll('.pal-r')].find((el) => (el.textContent || '').includes('greet') && (el.textContent || '').includes('app.dart'))?.id ?? ''`);
+      await page!.click(`#${id}`);
+      await page!.until(`(document.querySelector('.code')?.textContent || '').includes('void greet(String name)')`);
+      opened = await read(page!, `(document.querySelector('.code')?.textContent || '').includes('void greet(String name)') ? 'void greet(String name)' : (document.querySelector('.crumbs')?.textContent ?? '')`);
+    });
+
+    it('then the declaration in the repository opens.', () => {
+      assert.equal(opened, 'void greet(String name)');
+    });
+  });
+
+  describe('when changed lines are searched, ', () => {
+    let found: string;
+
+    before(async () => {
+      await rest(page!);
+      await jump(page!, 'name');
+      await page!.until(`[...document.querySelectorAll('.pal-r')].some((el) => (el.textContent || '').includes('Changed lines'))`);
+      const id = await read(page!, `[...document.querySelectorAll('.pal-r')].find((el) => (el.textContent || '').includes('Changed lines'))?.id ?? ''`);
+      await page!.click(`#${id}`);
+      await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('name') && !!document.querySelector('.code mark')`);
+      found = await read(page!, `[document.querySelector('.crumbs')?.textContent ?? '', document.querySelector('.code .inst-file')?.textContent ?? '', document.querySelector('.code mark')?.textContent ?? ''].join('\\n')`);
+    });
+
+    it('then the changed lines that contain it are listed.', () => {
+      assert.equal(found.includes('name') && found.includes('lib/app.dart') && found.includes('name'), true);
+    });
+  });
+
+  describe('when the repository is searched at the head, ', () => {
+    let found: string;
+
+    before(async () => {
+      await rest(page!);
+      await jump(page!, 'ada');
+      await page!.until(`[...document.querySelectorAll('.pal-r')].some((el) => (el.textContent || '').includes('The repository'))`);
+      const id = await read(page!, `[...document.querySelectorAll('.pal-r')].find((el) => (el.textContent || '').includes('The repository'))?.id ?? ''`);
+      await page!.click(`#${id}`);
+      await page!.until(`(document.querySelector('.fv-head')?.textContent || '').includes('after them') && !!document.querySelector('.code mark')`);
+      found = await read(page!, `[document.querySelector('.fv-head')?.textContent ?? '', document.querySelector('.code .inst-file')?.textContent ?? '', document.querySelector('.code mark')?.textContent ?? ''].join('\\n')`);
+    });
+
+    it('then the head lists the line.', () => {
+      assert.equal(found.includes('after them') && found.includes('lib/app.dart') && found.includes('ada'), true);
+    });
+  });
+
+  describe('when the repository is searched before these changes, ', () => {
+    let found: string;
+
+    before(async () => {
+      await rest(page!);
+      await jump(page!, 'hi');
+      await page!.until(`[...document.querySelectorAll('.pal-r')].some((el) => (el.textContent || '').includes('The repository'))`);
+      const id = await read(page!, `[...document.querySelectorAll('.pal-r')].find((el) => (el.textContent || '').includes('The repository'))?.id ?? ''`);
+      await page!.click(`#${id}`);
+      await page!.until(`!!document.querySelector('[data-scope="repo-base"]')`);
+      await page!.until(`!!document.querySelector('.code mark') || ((document.querySelector('.empty')?.textContent || '') !== '' && (document.querySelector('.empty')?.textContent || '') !== 'Searching…')`);
+      await page!.click('[data-scope="repo-base"]');
+      try {
+        await page!.until(`document.querySelector('[data-scope="repo-base"]')?.getAttribute('aria-pressed') === 'true'`, 5_000);
+      } catch {
+        await page!.click('[data-scope="repo-base"]');
+        await page!.until(`document.querySelector('[data-scope="repo-base"]')?.getAttribute('aria-pressed') === 'true'`);
+      }
+      await page!.until(`!!document.querySelector('.code mark')`, 20_000);
+      found = await read(page!, `[document.querySelector('.facts')?.textContent ?? '', document.querySelector('.code .inst-file')?.textContent ?? '', document.querySelector('.code mark')?.textContent ?? ''].join('\\n')`);
+    });
+
+    it('then the base lists the old line.', () => {
+      assert.equal(found.replace(/· [0-9a-f]{7}/, '· sha'), '1 line in the repository, before these changes · sha\nlib/app.dart\nhi');
+    });
+  });
+
+  describe('when Ctrl B is pressed, ', () => {
+    let hidden: string;
+    let shown: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.key('b', { ctrl: true });
+      await page!.until(`document.querySelector('#viewer')?.classList.contains('side-off')`);
+      hidden = await read(page!, `document.querySelector('#viewer')?.classList.contains('side-off') ? 'hidden' : 'shown'`);
+      await page!.key('b', { ctrl: true });
+      await page!.until(`!document.querySelector('#viewer')?.classList.contains('side-off')`);
+      shown = await read(page!, `document.querySelector('#viewer')?.classList.contains('side-off') ? 'hidden' : 'shown'`);
+    });
+
+    it('then the sidebar hides and shows again.', () => {
+      assert.equal(`${hidden}\n${shown}`, 'hidden\nshown');
+    });
+  });
+
+  describe('when the header arrows are used, ', () => {
+    let walked: string;
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      const total = Number(await read(page!, `(document.querySelector('.pill-n')?.textContent || '').match(/of (\\d+)/)?.[1] || '0'`));
+      const at = () => read(page!, `document.querySelector('.pill-n b')?.textContent ?? ''`);
+      // The first press lands on the change already on screen, the same way j does.
+      const move = async (selector: string, before: string) => {
+        await page!.click(selector);
+        try {
+          await page!.until(`document.querySelector('.pill-n b')?.textContent !== ${JSON.stringify(before)}`, 2_000);
+        } catch {
+          await page!.click(selector);
+          await page!.until(`document.querySelector('.pill-n b')?.textContent !== ${JSON.stringify(before)}`);
+        }
+        return at();
+      };
+      const forward = [await at()];
+      while (forward.length < total) forward.push(await move('[data-act="nav"][data-step="1"]', forward[forward.length - 1]));
+      const back: string[] = [];
+      while (back.length < total - 1) back.push(await move('[data-act="nav"][data-step="-1"]', back.length ? back[back.length - 1] : forward[forward.length - 1]));
+      walked = `${forward.join(' ')}\n${back.join(' ')}`;
+    });
+
+    it('then each change is visited down and back up.', () => {
+      const forward = walked.split('\n')[0];
+      const numbers = forward.split(' ');
+      const down = numbers.map((_, index) => String(index + 1)).join(' ');
+      const up = numbers.slice(0, -1).reverse().join(' ');
+      assert.equal(walked, `${down}\n${up}`);
+    });
+  });
+
+  describe('when Side by side is chosen, ', () => {
+    let layout: string;
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="layout"]')`);
+      await page!.click('[data-act="layout"]');
+      await page!.until(`document.querySelector('#viewer')?.classList.contains('split') && !!document.querySelector('.half')`);
+      layout = await read(page!, `document.querySelector('#viewer')?.classList.contains('split') && document.querySelector('.half') ? 'split' : 'unified'`);
+    });
+
+    after(async () => {
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="layout"]')`);
+      const on = await read(page!, `document.querySelector('[data-act="layout"]')?.getAttribute('aria-checked') ?? ''`);
+      if (on === 'true') await page!.click('[data-act="layout"]');
+      else await page!.key('Escape');
+    });
+
+    it('then the change is shown in two columns.', () => {
+      assert.equal(layout, 'split');
+    });
+  });
+
+  describe('when Diffs of reviewed code is chosen, ', () => {
+    let beforeDiff: string;
+    let afterDiff: string;
+
+    before(async () => {
+      await rest(page!);
+      await openFile(page!, 'lib/notes.dart');
+      await page!.click('[data-act="mark-file"]');
+      await page!.until(`!document.querySelector('.code[data-p="lib/notes.dart"] .ln.add')`);
+      beforeDiff = await read(page!, `document.querySelector('.code[data-p="lib/notes.dart"] .ln.add') ? 'diff' : 'plain'`);
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="revdiff"]')`);
+      await page!.click('[data-act="revdiff"]');
+      await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"] .ln.add')`);
+      afterDiff = await read(page!, `document.querySelector('.code[data-p="lib/notes.dart"] .ln.add') ? 'diff' : 'plain'`);
+    });
+
+    after(async () => {
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+    });
+
+    it('then a reviewed change shows its diff again.', () => {
+      assert.equal(`${beforeDiff}\n${afterDiff}`, 'plain\ndiff');
+    });
+  });
+
+  describe('when the minimap is turned off, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await rest(page!);
+      await openFile(page!, 'lib/notes.dart');
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="minimap"]')`);
+      await page!.click('[data-act="minimap"]');
+      await page!.until(`document.querySelector('#vw-mini')?.hidden`);
+      shown = await read(page!, `document.querySelector('#vw-mini')?.hidden ? 'hidden' : 'shown'`);
+    });
+
+    after(async () => {
+      await page!.eval(`localStorage.setItem('untangle:ui', JSON.stringify({ side: 272, sideOff: false, minimap: true, graph: true, filesList: false }))`);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+    });
+
+    it('then the minimap is hidden.', () => {
+      assert.equal(shown, 'hidden');
+    });
+  });
+
+  describe('when the file\'s chains are opened, ', () => {
+    let listed: string;
+
+    before(async () => {
+      await rest(page!);
+      await openFile(page!, 'lib/app.dart');
+      await page!.until(`!!document.querySelector('[data-menu="chains"]')`);
+      const chip = await read(page!, `document.querySelector('[data-menu="chains"]')?.textContent ?? ''`);
+      await page!.click('[data-menu="chains"]');
+      await page!.until(`!!document.querySelector('.menu .mi')`);
+      const names = await read(page!, `[...document.querySelectorAll('.menu .mi')].map((el) => el.textContent).join(', ')`);
+      listed = `${chip}\n${names}`;
+    });
+
+    it('then the menu lists the chains the file is in.', () => {
+      assert.equal(listed.includes('In ') && listed.includes('chain') && listed.includes('greet(name)'), true);
+    });
+  });
+
+  describe('when Open in editor is shown, ', () => {
+    let href: string;
+    let stayed: string;
+
+    before(async () => {
+      await rest(page!);
+      await openFile(page!, 'lib/app.dart');
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('.menu a[href^="vscode://"]')`);
+      href = await read(page!, `document.querySelector('.menu a[href^="vscode://"]')?.getAttribute('href') ?? ''`);
+      stayed = await read(page!, `location.hostname === '127.0.0.1' ? 'stayed' : location.href`);
+    });
+
+    it('then the link points at the file and the page stays here.', () => {
+      const kind = href.startsWith('vscode://') && href.includes('lib/app.dart') ? 'vscode lib/app.dart' : href;
+      assert.equal(`${kind}\n${stayed}`, 'vscode lib/app.dart\nstayed');
+    });
+  });
+
+  describe('when Open file is chosen on a definition outside the changes, ', () => {
+    let opened: string;
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.clickIn('.ref', 'greet', "greet('ada')");
+      await page!.until(`(document.querySelector('.peek .pk-loc')?.textContent || '').includes('lib/app.dart')`);
+      await page!.clickIn('.peek .ref.live', 'print', 'print(');
+      await page!.until(`(document.querySelector('.peek .pk-loc')?.textContent || '').startsWith('dart:')`);
+      await page!.click('.peek [data-act="open-source"]');
+      await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('Dart SDK') && [...document.querySelectorAll('.code.src .tx')].some((el) => (el.textContent || '').includes('print')) && !!document.querySelector('.code.src .no')`);
+      opened = await read(page!, `[ (document.querySelector('.crumbs')?.textContent || '').includes('Dart SDK') ? 'Dart SDK' : (document.querySelector('.crumbs')?.textContent ?? ''), document.querySelector('.code.src .no') ? 'numbered' : 'unnumbered', [...document.querySelectorAll('.code.src .tx')].some((el) => (el.textContent || '').includes('print')) ? 'print' : '' ].join('\\n')`);
+    });
+
+    it('then that file opens on its own, with its lines.', () => {
+      assert.equal(opened, 'Dart SDK\nnumbered\nprint');
     });
   });
 });

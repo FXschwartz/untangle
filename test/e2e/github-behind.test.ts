@@ -62,6 +62,8 @@ describe('Given a served review that is behind pull request 7, which has a pendi
       },
       { match: ['api', 'graphql'], stdinIncludes: 'statusCheckRollup', stdout: { data: { repository: { pullRequest: { commits: { nodes: [] }, reviews: { nodes: [] }, timelineItems: { nodes: [] } } } } } },
       { match: ['api', 'graphql'], stdinIncludes: pendingLookup, stdout: pendingAnswer('REVIEW_PENDING') },
+      { match: ['api', 'graphql'], stdinIncludes: 'addPullRequestReviewThreadReply', stdout: conversationOf(spec) },
+      { match: ['api', 'graphql'], stdinIncludes: 'submitPullRequestReview', stdout: conversationOf(spec) },
       { match: ['api', 'graphql'], stdinIncludes: 'deletePullRequestReview', stdout: conversationOf({ ...spec, pending: null, threads: [] }) },
       { match: ['api', 'graphql'], stdout: conversationOf(spec) },
     ]);
@@ -101,6 +103,51 @@ describe('Given a served review that is behind pull request 7, which has a pendi
 
     it('then comments on lines wait until the review is on GitHub\'s head.', () => {
       assert.equal(`${warning}\n${plus}`, `GitHub has newer commits (${behind.slice(0, 7)}). Comments on lines wait for this review to be on them. Refresh\nhidden`);
+    });
+  });
+
+  describe('when a reply is posted while the review is behind, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="files"]');
+      await page!.click('[data-open="lib/app.dart"]');
+      await page!.until(`!!document.querySelector('[data-act="away-toggle"]')`);
+      await page!.click('[data-act="away-toggle"]');
+      await page!.until(`!!document.querySelector('[data-act="reply-open"]')`);
+      await page!.click('[data-act="reply-open"]');
+      await page!.until(`!!document.querySelector('.cmp-ta')`);
+      await page!.click('.cmp-ta');
+      await page!.type('Still reading.');
+      await page!.until(`document.querySelector('.cmp-ta')?.value === 'Still reading.'`);
+      await page!.click('[data-act="gh-reply"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Reply added to your pending review'`);
+      sent = posted(gh!, 'addPullRequestReviewThreadReply');
+    });
+
+    it('then GitHub is asked to add the reply.', () => {
+      assert.equal(sent, '{"pullRequestReviewThreadId":"THREAD_1","body":"Still reading."}');
+    });
+  });
+
+  describe('when a review is submitted while the review is behind, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('.rv-btn');
+      await page!.until(`!!document.querySelector('[data-act="gh-submit"]')`);
+      await page!.click('textarea[data-draft="review"]');
+      await page!.type('Looks fine.');
+      await page!.until(`document.querySelector('textarea[data-draft="review"]')?.value === 'Looks fine.'`);
+      await page!.click('[data-act="gh-submit"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Review submitted'`);
+      sent = posted(gh!, 'submitPullRequestReview');
+    });
+
+    it('then GitHub is asked to submit it.', () => {
+      assert.equal(sent, '{"pullRequestReviewId":"REVIEW_PENDING","event":"COMMENT","body":"Looks fine."}');
     });
   });
 

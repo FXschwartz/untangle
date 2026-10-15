@@ -9,6 +9,8 @@ export interface UntangleRun {
   url: string;
   /** Ends the process untangle started, and the processes it started. */
   stop(): Promise<void>;
+  /** Everything untangle has printed so far. */
+  output(): string;
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -84,14 +86,17 @@ function leading(base: string | null | undefined): string[] {
 }
 
 /** Serves the directory with `-port 0 -no-open` and resolves with the printed URL. */
-export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[] }): Promise<UntangleRun> {
+export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; quiet?: boolean }): Promise<UntangleRun> {
   const { gh, release } = ownedGh(opts.gh);
-  const child = spawnUntangle([...leading(opts.base), '-no-open', '-port', '0', '-quiet', ...(opts.args ?? []), dir], opts.cacheDir, gh);
+  const quiet = opts.quiet === false ? [] : ['-quiet'];
+  const child = spawnUntangle([...leading(opts.base), '-no-open', '-port', '0', ...quiet, ...(opts.args ?? []), dir], opts.cacheDir, gh);
   const text = collect(child);
+  const output = () => `${text.out()}\n${text.err()}`;
   try {
     const url = await waitForUrl(child, text);
     return {
       url,
+      output,
       stop: async () => {
         await stopProcess(child);
         release();
@@ -135,10 +140,11 @@ function waitForUrl(child: ChildProcess, text: { out: () => string; err: () => s
     };
     const timer = setTimeout(() => finish(new Error(`untangle did not print a URL\n${text.err()}\n${text.out()}`)), 60_000);
     const look = () => {
-      const match = /^http:\/\/127\.0\.0\.1:\d+\/\S*/m.exec(text.out());
+      const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(`${text.out()}\n${text.err()}`);
       if (match) finish(null, match[0].trim());
     };
     child.stdout?.on('data', look);
+    child.stderr?.on('data', look);
     child.once('error', (error) => finish(error));
     child.once('exit', (code) => {
       look();

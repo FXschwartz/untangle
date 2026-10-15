@@ -41,11 +41,13 @@ async function fill(page: Browser, selector: string, text: string): Promise<void
   const want = JSON.stringify(text);
   const ready = `document.querySelector(${JSON.stringify(selector)})?.value === ${want}`;
   await page.click(selector);
+  await page.key('a', { ctrl: true });
   await page.type(text);
   try {
     await page.until(ready, 5_000);
   } catch {
     await page.click(selector);
+    await page.key('a', { ctrl: true });
     await page.type(text);
     await page.until(ready);
   }
@@ -106,7 +108,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       { match: ['api', 'graphql'], stdinIncludes: 'resolveReviewThread', stdout: conversationOf({ ...baseSpec, threads: [{ id: 'THREAD_1', path: 'lib/app.dart', line: callLine, body: 'Why this name?', resolved: true }, { id: 'THREAD_2', path: 'lib/app.dart', line: printLine, body: 'Ship the name.', resolved: true }] }) },
       { match: ['api', 'graphql'], stdinIncludes: 'addPullRequestReviewThread', stdout: conversationOf({ ...baseSpec, pending: { id: 'REVIEW_PENDING', comments: 1 }, threads: [...baseSpec.threads!, { id: 'THREAD_3', path: 'lib/app.dart', line: callLine, body: 'Please rename it.', pending: true }] }) },
       { match: ['api', 'graphql'], stdinIncludes: 'addPullRequestReview', stdout: conversationOf({ ...baseSpec, reviews: [{ id: 'REVIEW_1', state: 'COMMENTED', body: 'Looks good.' }], threads: [...baseSpec.threads!, { id: 'THREAD_3', path: 'lib/app.dart', line: callLine, body: 'Looks good.' }] }) },
-      { match: ['api', 'markdown'], stdout: '<p>ok</p>' },
+      { match: ['api', 'markdown'], stdout: '<p><strong>hello</strong></p>' },
+      { match: ['api', 'graphql'], stdinIncludes: 'updatePullRequestReviewComment', stdout: conversationOf(baseSpec) },
+      { match: ['api', 'graphql'], stdinIncludes: 'deletePullRequestReviewComment', stdout: conversationOf(baseSpec) },
+      { match: ['api', 'graphql'], stdinIncludes: 'addReaction', stdout: conversationOf(baseSpec) },
       { match: ['api', 'graphql'], stdout: conversationOf(baseSpec) },
     ]);
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
@@ -439,6 +444,165 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     it('then GitHub is asked to comment.', () => {
       assert.equal(sent, `{"pullRequestId":"PR_1","commitOID":"${head}","event":"COMMENT","body":"A note."}`);
+    });
+  });
+
+  describe('when c is pressed, ', () => {
+    let where: string;
+
+    before(async () => {
+      await fresh();
+      await page!.key('j');
+      await page!.key('c');
+      await page!.until(`(document.querySelector('.th.new b')?.textContent || '').startsWith('Comment on line ')`);
+      where = await read(page!, `(() => {
+        const heading = document.querySelector('.th.new b')?.textContent || '';
+        const match = heading.match(/([+−-])(\\d+)$/);
+        const side = match && match[1] === '+' ? 'R' : 'L';
+        const row = match ? document.querySelector('[data-c="' + side + ':' + match[2] + '"]') : null;
+        return row ? heading : heading + ' missing';
+      })()`);
+    });
+
+    it('then a comment opens on the line you are on.', () => {
+      assert.equal(where, 'Comment on line −6');
+    });
+  });
+
+  describe('when Preview is chosen, ', () => {
+    let preview: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.cmp-ta')`);
+      await fill(page!, '.cmp-ta', '**hello**');
+      await page!.click('[data-act="cmp-pane"][data-pane="preview"]');
+      await page!.until(`document.querySelector('.cmp-pre strong')?.textContent === 'hello'`);
+      preview = await read(page!, `document.querySelector('.cmp-pre strong')?.textContent ?? ''`);
+    });
+
+    it('then the comment is shown rendered.', () => {
+      assert.equal(preview, 'hello');
+    });
+  });
+
+  describe('when Ctrl Enter is pressed in a comment, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.cmp-ta')`);
+      await fill(page!, '.cmp-ta', 'Ship it.');
+      await page!.click('.cmp-ta');
+      await page!.key('Enter', { ctrl: true });
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Added to your pending review'`);
+      sent = posted(gh!, 'addPullRequestReviewThread');
+    });
+
+    it('then the comment is posted into a review.', () => {
+      assert.equal(sent, `{"pullRequestId":"PR_1","path":"lib/app.dart","body":"Ship it.","subjectType":"LINE","line":${callLine},"side":"RIGHT"}`);
+    });
+  });
+
+  describe('when a change is suggested on a new line, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('[data-act="cmp-suggest"]')`);
+      await page!.click('[data-act="cmp-suggest"]');
+      await page!.until(`(document.querySelector('.cmp-ta')?.value || '').includes('\`\`\`suggestion')`);
+      await page!.click('[data-act="gh-thread"][data-mode="single"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Comment posted'`);
+      sent = posted(gh!, 'addPullRequestReview');
+    });
+
+    it('then the posted comment contains a suggestion block.', () => {
+      const body = sent.includes('```suggestion') && sent.includes("greet('ada')") ? 'suggestion greet(\'ada\')' : sent;
+      assert.equal(body, 'suggestion greet(\'ada\')');
+    });
+  });
+
+  describe('when your own comment is edited, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await fresh();
+      await page!.click('[data-act="edit-open"][data-id="THREAD_1_C"]');
+      await page!.until(`!!document.querySelector('[data-draft="edit:THREAD_1_C"]')`);
+      await page!.click('[data-draft="edit:THREAD_1_C"]');
+      await page!.key('a', { ctrl: true });
+      await page!.type('A better question.');
+      await page!.until(`document.querySelector('[data-draft="edit:THREAD_1_C"]')?.value === 'A better question.'`);
+      await page!.click('[data-act="gh-edit"]');
+      await page!.until(`!document.querySelector('[data-draft="edit:THREAD_1_C"]')`);
+      sent = posted(gh!, 'updatePullRequestReviewComment');
+    });
+
+    it('then GitHub is asked to update it.', () => {
+      assert.equal(sent, '{"pullRequestReviewCommentId":"THREAD_1_C","body":"A better question."}');
+    });
+  });
+
+  describe('when your own comment is deleted, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await fresh();
+      await page!.click('[data-act="gh-delete"][data-id="THREAD_1_C"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Comment deleted'`);
+      sent = posted(gh!, 'deletePullRequestReviewComment');
+    });
+
+    it('then GitHub is asked to delete it.', () => {
+      assert.equal(sent, '{"id":"THREAD_1_C"}');
+    });
+  });
+
+  describe('when a reaction is added, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await fresh();
+      await page!.click('[data-act="react-open"][data-subject="THREAD_1_C"]');
+      await page!.until(`!!document.querySelector('[data-act="gh-react"][data-content="THUMBS_UP"]')`);
+      await page!.click('[data-act="gh-react"][data-content="THUMBS_UP"]');
+      await page!.until(`!!document.querySelector('.cm-rx')`);
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline && ![...gh!.calls()].some((call) => call.stdin.includes('addReaction(input:'))) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      sent = posted(gh!, 'addReaction');
+    });
+
+    it('then GitHub is asked for that reaction.', () => {
+      assert.equal(sent, '{"subjectId":"THREAD_1_C","content":"THUMBS_UP"}');
+    });
+  });
+
+  describe('when a comment is written on the file, ', () => {
+    let sent: string;
+
+    before(async () => {
+      await fresh();
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="file-comment"]')`);
+      await page!.click('[data-act="file-comment"]');
+      await page!.until(`!!document.querySelector('[data-draft="file:lib/app.dart"]')`);
+      await fill(page!, '[data-draft="file:lib/app.dart"]', 'On the whole file.');
+      await page!.click('.th.new [data-act="gh-thread"][data-mode="single"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Comment posted'`);
+      sent = posted(gh!, 'addPullRequestReview');
+    });
+
+    it('then GitHub is asked to comment on the file.', () => {
+      assert.equal(sent, `{"pullRequestId":"PR_1","commitOID":"${head}","event":"COMMENT","threads":[{"path":"lib/app.dart","body":"On the whole file."}]}`);
     });
   });
 });

@@ -170,8 +170,9 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       text: key.length === 1 ? key : undefined,
     };
     const modifiers = ((opts.shift || known.shift) ? 8 : 0) + (opts.ctrl ? 2 : 0);
+    const commands = opts.ctrl && key.toLowerCase() === 'a' ? ['selectAll'] : undefined;
     const base = { key, code: known.code, windowsVirtualKeyCode: known.vk, modifiers };
-    await session('Input.dispatchKeyEvent', { ...base, type: 'keyDown' });
+    await session('Input.dispatchKeyEvent', { ...base, type: 'keyDown', commands });
     if (known.text && !opts.ctrl) await session('Input.dispatchKeyEvent', { ...base, type: 'char', text: known.text });
     await session('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
   };

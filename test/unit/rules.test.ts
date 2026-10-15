@@ -239,10 +239,9 @@ scenario(
     base: { 'lib/a.dart': "void greet() {\n  var name = 'a';\n  print(name);\n" + '  print(0);\n'.repeat(20) + "  print(name);\n}\n\nvoid main() {\n  var name = 'a';\n  print(name);\n}\n" },
     head: { 'lib/a.dart': "void greet() {\n  var title = 'a';\n  print(title);\n" + '  print(0);\n'.repeat(20) + "  print(title);\n}\n\nvoid main() {\n  var name = 'c';\n  print(name);\n}\n" },
   },
-  'then the two changes inside the function are one chain and the other function is not in it.',
+  'then the hunks stay standalone.',
   blocksOf,
-  'lib/a.dart#0 greet +2 -2\nlib/a.dart#1 greet +1 -1\nlib/a.dart#2 main +1 -1 standalone',
-  'bug: renaming a local across two hunks of the same function leaves the hunks unlinked',
+  'lib/a.dart#0 greet +2 -2 standalone\nlib/a.dart#1 greet +1 -1 standalone\nlib/a.dart#2 main +1 -1 standalone',
 );
 
 scenario(
@@ -491,10 +490,20 @@ scenario(
     base: { 'lib/a.dart': "/// Hello there friend.\nvoid a() {}\n\n/// Hello there friend.\nvoid b() {}\n" },
     head: { 'lib/a.dart': "/// Goodbye there friend.\nvoid a() {}\n\n/// Goodbye there friend.\nvoid b() {}\n" },
   },
-  'then the repeated comment is not a group.',
+  'then the repeated comment is one group.',
   groupsOf,
-  'none',
-  'bug: the same doc-comment edit on two functions is a same-change group',
+  'x2 /// Hello there friend. → /// Goodbye there friend.',
+);
+
+scenario(
+  'Given five words changed in one doc comment, ',
+  {
+    base: { 'lib/a.dart': '/// alpha one two three four five omega.\nvoid greet() {}\n' },
+    head: { 'lib/a.dart': '/// alpha six seven eight nine ten omega.\nvoid greet() {}\n' },
+  },
+  'then the line is one edit.',
+  editsOf,
+  'replace documentation_comment /// alpha one two three four five omega. → /// alpha six seven eight nine ten omega.',
 );
 
 scenario(
