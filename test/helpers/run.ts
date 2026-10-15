@@ -1,6 +1,8 @@
 // Starts untangle on a fixture and stops only that process. The review's cache is the
 // directory the caller passes, never the user's. -port 0 picks a free port.
 import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stubGh, type GhStub } from './gh.ts';
@@ -15,6 +17,27 @@ export interface UntangleRun {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = path.join(repoRoot, 'dist/cli.js');
+
+// Stand-ins, first on untangle's PATH, for every command that opens the default browser (wslview,
+// xdg-open and open, and from WSL Windows' powershell.exe and cmd.exe): a review whose opener
+// falls through to them opens nothing real. Each one notes its call in browsers.log.
+let guard = '';
+function browserGuard(): string {
+  if (guard) return guard;
+  guard = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-guard-'));
+  for (const name of ['wslview', 'xdg-open', 'open', 'powershell.exe', 'cmd.exe']) {
+    fs.writeFileSync(path.join(guard, name), `#!/bin/sh\necho "${name} $*" >> ${JSON.stringify(path.join(guard, 'browsers.log'))}\n`, { mode: 0o755 });
+  }
+  const dir = guard;
+  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  return guard;
+}
+
+/** The browsers that reviews of this test process tried to open, one call per line. */
+export function browsersOpened(): string {
+  const log = path.join(browserGuard(), 'browsers.log');
+  return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '';
+}
 
 function untangleEnv(cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, UNTANGLE_CACHE: cacheDir, ...gh.env };
@@ -32,7 +55,9 @@ function untangleEnv(cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): N
   for (const key of Object.keys(env)) {
     if (key.startsWith('ORCA_')) delete env[key];
   }
-  return extra ? { ...env, ...extra } : env;
+  const merged = extra ? { ...env, ...extra } : env;
+  merged.PATH = `${browserGuard()}${path.delimiter}${merged.PATH ?? ''}`;
+  return merged;
 }
 
 function signal(child: ChildProcess, name: NodeJS.Signals): void {

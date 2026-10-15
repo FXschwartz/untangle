@@ -1,13 +1,12 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { after, describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import { stubGh, type GhStub } from '../helpers/gh.ts';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
-import { startUntangle, type UntangleRun } from '../helpers/run.ts';
+import { browsersOpened, startUntangle, type UntangleRun } from '../helpers/run.ts';
 
 const ada: Person = { name: 'Ada Review', email: 'ada@example.com', date: '2020-06-01T00:00:00Z' };
 
@@ -26,6 +25,16 @@ function packageRepo(): TempRepo {
   return repo;
 }
 
+/** Waits until untangle has printed a line, and fails with what it printed if it never does. */
+async function said(run: UntangleRun, line: string): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (run.output().split('\n').some((printed) => printed.trim() === line)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`untangle never said "${line}"\n${run.output()}`);
+}
+
 async function opened(log: string): Promise<string> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -35,77 +44,113 @@ async function opened(log: string): Promise<string> {
   return '';
 }
 
-describe('Given a review started without -no-open and BROWSER set to a stub, ', () => {
+describe('Given a repository, and BROWSER set to a stub, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let run: UntangleRun | undefined;
   let cache = '';
   let dir = '';
-  let recorded = '';
+  let log = '';
+  let stub = '';
 
-  after(async () => {
-    await run?.stop();
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-browser-'));
+    log = path.join(dir, 'opened.txt');
+    stub = path.join(dir, 'browser');
+    script(stub, log);
+    repo = packageRepo();
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+  });
+
+  after(() => {
     gh?.remove();
     repo?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it(
-    'when the review is served, '
-    + 'then the stub is asked to open the review’s URL.',
-    async () => {
-      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-browser-'));
-      const log = path.join(dir, 'opened.txt');
-      const stub = path.join(dir, 'browser');
-      script(stub, log);
-      repo = packageRepo();
-      gh = stubGh();
-      cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-      run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh, open: true, env: { BROWSER: stub } });
+  describe('when it is reviewed without -no-open, ', () => {
+    let run: UntangleRun | undefined;
+    let recorded = '';
+    let others = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh, open: true, quiet: false, args: ['-verbose'], env: { BROWSER: stub } });
       recorded = await opened(log);
-      assert.equal(recorded, run.url);
-    },
-  );
+      await said(run, 'opened in the browser');
+      others = browsersOpened();
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the stub is asked to open the review’s URL.', () => {
+      assert.equal(recorded, run!.url);
+    });
+
+    it('then no other browser is opened.', () => {
+      assert.equal(others, '');
+    });
+  });
 });
 
-describe('Given a review started inside Orca, whose CLI is a stub, ', () => {
+describe('Given a repository, in an Orca terminal whose CLI is a stub, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let run: UntangleRun | undefined;
   let cache = '';
   let dir = '';
-  let recorded = '';
+  let log = '';
+  let stub = '';
 
-  after(async () => {
-    await run?.stop();
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-orca-'));
+    log = path.join(dir, 'opened.txt');
+    stub = path.join(dir, 'orca');
+    script(stub, log);
+    repo = packageRepo();
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+  });
+
+  after(() => {
     gh?.remove();
     repo?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it(
-    'when the review is served, '
-    + 'then Orca is asked for a tab in this worktree.',
-    async () => {
-      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-orca-'));
-      const log = path.join(dir, 'opened.txt');
-      const stub = path.join(dir, 'orca');
-      script(stub, log);
-      execFileSync('which', [stub], { stdio: 'ignore' });
-      repo = packageRepo();
-      gh = stubGh();
-      cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-      run = await startUntangle(repo.dir, {
+  describe('when it is reviewed without -no-open, ', () => {
+    let run: UntangleRun | undefined;
+    let recorded = '';
+    let others = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, {
         base: 'main',
         cacheDir: cache,
         gh,
         open: true,
+        quiet: false,
+        args: ['-verbose'],
         env: { ORCA_CLI_COMMAND: stub, ORCA_WORKTREE_ID: 'wt-9' },
       });
       recorded = await opened(log);
-      assert.equal(recorded, `tab\ncreate\n--url\n${run.url}\n--worktree\nid:wt-9`);
-    },
-  );
+      // Only once untangle has heard back from Orca: stopping it sooner can end the stub first.
+      await said(run, 'opened in Orca’s browser');
+      others = browsersOpened();
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then Orca is asked for a tab in this worktree.', () => {
+      assert.equal(recorded, `tab\ncreate\n--url\n${run!.url}\n--worktree\nid:wt-9`);
+    });
+
+    it('then no other browser is opened.', () => {
+      assert.equal(others, '');
+    });
+  });
 });
