@@ -154,6 +154,24 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
   const session = (method: string, params: Record<string, unknown> = {}) => send(method, params, sessionId);
   await session('Page.enable');
   await session('Runtime.enable');
+  // With UNTANGLE_VIEWER_COV, the page's code coverage (npm run test:coverage): taken before each
+  // navigation, when the page reloads itself, and at close.
+  const covDir = process.env.UNTANGLE_VIEWER_COV;
+  const takeCoverage = async () => {
+    if (!covDir) return;
+    try {
+      const taken = await session('Profiler.takePreciseCoverage');
+      const scripts = ((taken.result as { result?: Array<{ url: string }> } | undefined)?.result ?? []).filter((x) => x.url.startsWith('http'));
+      if (scripts.length) fs.writeFileSync(path.join(covDir, `page-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`), JSON.stringify(scripts));
+    } catch {
+      // The page is gone.
+    }
+  };
+  if (covDir) {
+    await session('Profiler.enable');
+    await session('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
+    onEvent('Page.frameStartedLoading', () => { void takeCoverage(); });
+  }
   await session('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
 
   const evaluate = async (expression: string): Promise<unknown> => {
@@ -202,6 +220,7 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
   let closed = false;
   const close = async () => {
     if (closed) return;
+    await takeCoverage();
     closed = true;
     try { ws.close(); } catch { /* already closed */ }
     if (child.pid != null && child.exitCode == null) {
@@ -228,6 +247,7 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
 
   return {
     async goto(url: string) {
+      await takeCoverage();
       // The document already up is complete, so readyState alone can succeed
       // before this navigation commits. Mark it, and accept the page only once
       // the loader Page.navigate returns has committed and loaded. A token URL

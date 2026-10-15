@@ -18,7 +18,8 @@
     "check": "tsc -p . --emitDeclarationOnly && tsc -p test --noEmit",
     "test": "npm run build && node --test --test-force-exit \"test/unit/**/*.test.ts\" \"test/server/**/*.test.ts\"",
     "test:e2e": "npm run build && node --test --test-force-exit \"test/e2e/**/*.test.ts\"",
-    "test:all": "npm run build && node --test --test-force-exit \"test/unit/**/*.test.ts\" \"test/server/**/*.test.ts\" \"test/e2e/**/*.test.ts\""
+    "test:all": "npm run build && node --test --test-force-exit \"test/unit/**/*.test.ts\" \"test/server/**/*.test.ts\" \"test/e2e/**/*.test.ts\"",
+    "test:coverage": "npm run build && rm -rf .coverage && mkdir -p .coverage/node .coverage/page && NODE_V8_COVERAGE=$PWD/.coverage/node UNTANGLE_VIEWER_COV=$PWD/.coverage/page node --test --test-force-exit \"test/unit/**/*.test.ts\" \"test/server/**/*.test.ts\" \"test/e2e/**/*.test.ts\"; node test/coverage.ts .coverage/node .coverage/page 3"
   },
   "engines": {
     "node": ">=22"
