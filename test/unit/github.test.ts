@@ -9,7 +9,7 @@ const afterSha = 'c'.repeat(40);
 const ada = { login: 'ada', avatarUrl: 'https://example.test/ada', url: 'https://github.com/ada' };
 const grace = { login: 'grace', avatarUrl: 'https://example.test/grace', url: 'https://github.com/grace' };
 
-const page = { hasNextPage: false, endCursor: null };
+const page: { hasNextPage: boolean; endCursor: string | null } = { hasNextPage: false, endCursor: null };
 
 function comment(id: string, body: string, author: typeof ada) {
   return {
@@ -206,4 +206,157 @@ describe('Given a pull request, ', () => {
       assert.equal(mutation(gh!.calls(), 'addPullRequestReview'), `{"pullRequestId":"PR_1","commitOID":"${head}","event":"APPROVE","body":"Ship it."}`);
     },
   );
+});
+
+describe('Given a pull request whose comments and a thread continue on a second page, ', () => {
+  let gh: GhStub | undefined;
+  let restore = () => {};
+
+  before(() => {
+    const first = conversation();
+    const pr = first.data.repository.pullRequest;
+    pr.comments = { pageInfo: { hasNextPage: true, endCursor: 'C1' }, nodes: [comment('ISSUE_1', 'First comment.', ada)] };
+    pr.reviewThreads.nodes[0].comments = { pageInfo: { hasNextPage: true, endCursor: 'T1' }, nodes: [comment('COMMENT_1', 'First thread note.', grace)] };
+    const second = { data: { node: { comments: { pageInfo: page, nodes: [comment('PAGE_2', 'Second page.', ada)] } } } };
+    gh = stubGh([
+      { match: ['api', 'graphql'], stdinIncludes: 'after: $after', stdout: second },
+      { match: ['api', 'graphql'], stdout: first },
+    ]);
+    restore = useStub(gh);
+  });
+
+  after(() => {
+    restore();
+    gh?.remove();
+  });
+
+  it(
+    'when the conversation is read, '
+    + 'then both pages of comments and of the thread are listed.',
+    async () => {
+      const loaded = await new PullRequestConversation({ owner: 'acme', repo: 'sample', number: 7 }, head).load();
+      assert.equal(shown(loaded), [
+        '#7 Add a greeting',
+        'thread lib/a.dart:2 First thread note. / Second page.',
+        'comment First comment.; Second page.',
+        'review APPROVED ada Ship it.',
+      ].join('\n'));
+    },
+  );
+});
+
+describe('Given a pull request with people and an organization team, ', () => {
+  let gh: GhStub | undefined;
+  let restore = () => {};
+
+  before(() => {
+    gh = stubGh([
+      {
+        match: ['api', 'graphql'],
+        stdinIncludes: 'mentionableUsers',
+        stdout: { data: { repository: { mentionableUsers: { nodes: [{ login: 'grace', name: 'Grace Commit', avatarUrl: 'https://example.test/grace' }] } } } },
+      },
+      {
+        match: ['api', 'graphql'],
+        stdinIncludes: 'organization(login:',
+        stdout: { data: { organization: { teams: { nodes: [{ combinedSlug: 'acme/eng', name: 'Engineering', avatarUrl: 'https://example.test/eng' }] } } } },
+      },
+      { match: ['api', 'graphql'], stdout: conversation() },
+    ]);
+    restore = useStub(gh);
+  });
+
+  after(() => {
+    restore();
+    gh?.remove();
+  });
+
+  it(
+    'when @ is asked for, '
+    + 'then the person and the team are suggested.',
+    async () => {
+      const github = new PullRequestConversation({ owner: 'acme', repo: 'sample', number: 7 }, head);
+      const answer = await github.act({ action: 'suggest', kind: '@', query: 'g' });
+      const items = 'items' in answer ? answer.items.map((item) => `${item.kind} ${item.value}`).join('\n') : '';
+      assert.equal(items, 'user grace\nteam acme/eng');
+    },
+  );
+});
+
+describe('Given a pull request with a conversation comment, ', () => {
+  let gh: GhStub | undefined;
+  let restore = () => {};
+  let github: PullRequestConversation;
+
+  before(async () => {
+    gh = stubGh([
+      { match: ['api', 'graphql'], stdinIncludes: 'deleteIssueComment', stdout: { data: { deleteIssueComment: { clientMutationId: 'x' } } } },
+      { match: ['api', 'graphql'], stdout: conversation() },
+    ]);
+    restore = useStub(gh);
+    github = new PullRequestConversation({ owner: 'acme', repo: 'sample', number: 7 }, head);
+    await github.load();
+  });
+
+  after(() => {
+    restore();
+    gh?.remove();
+  });
+
+  it(
+    'when the conversation comment is deleted, '
+    + 'then GitHub is asked to delete that comment.',
+    async () => {
+      await github.act({ action: 'delete', kind: 'issue', id: 'ISSUE_1' });
+      assert.equal(mutation(gh!.calls(), 'deleteIssueComment'), '{"id":"ISSUE_1"}');
+    },
+  );
+});
+
+describe('Given a new thread GitHub rejects after starting an empty pending review, ', () => {
+  let gh: GhStub | undefined;
+  let restore = () => {};
+  let github: PullRequestConversation;
+
+  before(async () => {
+    const emptyPending = {
+      data: {
+        repository: {
+          pullRequest: {
+            reviews: { nodes: [{ id: 'PEND', body: '', comments: { totalCount: 0 } }] },
+          },
+        },
+      },
+    };
+    gh = stubGh([
+      { match: ['api', 'graphql'], stdinIncludes: 'addPullRequestReviewThread', code: 1, stderr: 'rejected\n' },
+      { match: ['api', 'graphql'], stdinIncludes: 'pullRequest(number: $number) { reviews(states: PENDING', stdout: emptyPending },
+      { match: ['api', 'graphql'], stdinIncludes: 'deletePullRequestReview', stdout: { data: { deletePullRequestReview: { clientMutationId: 'x' } } } },
+      { match: ['api', 'graphql'], stdout: conversation() },
+    ]);
+    restore = useStub(gh);
+    github = new PullRequestConversation({ owner: 'acme', repo: 'sample', number: 7 }, head);
+    await github.load();
+  });
+
+  after(() => {
+    restore();
+    gh?.remove();
+  });
+
+  describe('when the thread is sent, ', () => {
+    let error = '';
+
+    before(async () => {
+      try {
+        await github.act({ action: 'thread', mode: 'review', draft: { path: 'lib/a.dart', body: 'No.', line: 2, side: 'RIGHT' } });
+      } catch (e) {
+        error = (e as Error).message;
+      }
+    });
+
+    it('then the empty pending review is dropped and the rejection stands.', () => {
+      assert.equal(`${mutation(gh!.calls(), 'deletePullRequestReview')}\n${error.includes('rejected') ? 'rejected' : error}`, '{"pullRequestReviewId":"PEND"}\nrejected');
+    });
+  });
 });

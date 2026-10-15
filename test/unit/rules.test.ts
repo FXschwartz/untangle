@@ -929,3 +929,197 @@ describe('Given the same bang inserted in two calls, ', { skip: skipDart }, () =
     });
   });
 });
+
+describe('Given a call whose argument changes many lines below the function name, ', { skip: skipDart }, () => {
+  const call = ['  greet(', "    'a',", "    'b',", "    'c',", "    'd',", "    'e',", "    'f',", "    'g',", "    'h',", "    'i',", "    'j',", "    'k',", '  );'].join('\n');
+  const files = {
+    base: { 'lib/a.dart': `void main() {\n${call}\n}\n\nvoid greet(String a, String b, String c, String d, String e, String f, String g, String h, String i, String j, String k) {}\n` },
+    head: { 'lib/a.dart': `void main() {\n${call.replace("'k'", "'kept'")}\n}\n\nvoid greet(String a, String b, String c, String d, String e, String f, String g, String h, String i, String j, String kept) {}\n` },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the call joins the parameter it passes.', () => {
+      assert.equal(chainsOf(review!), [
+        'ripple greet(kept) +2 -2 depth 0',
+        'lib/a.dart#0, lib/a.dart#1',
+        'L0 greet, L1 main',
+        'main → greet [kept]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a constructor call whose positional argument changes, ', { skip: skipDart }, () => {
+  const files = {
+    base: { 'lib/a.dart': "class Box {\n  const Box(this.value);\n  final String value;\n}\n\nvoid main() {\n  const box = const Box('a');\n  print(box);\n}\n" },
+    head: { 'lib/a.dart': "class Box {\n  const Box(this.title);\n  final String title;\n}\n\nvoid main() {\n  const box = const Box('b');\n  print(box);\n}\n" },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the call joins the constructor parameter.', () => {
+      assert.equal(chainsOf(review!), [
+        'ripple Box(title) +3 -3 depth 0',
+        'lib/a.dart#0, lib/a.dart#1',
+        'L0 Box.Box, L1 main',
+        'main → Box.Box [title]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a protobuf message, its generated getter and a use of that getter, ', { skip: skipDart }, () => {
+  const files = {
+    base: {
+      'proto/user.proto': 'syntax = "proto3";\nmessage User {\n  string display_name = 1;\n}\n',
+      'lib/user.pb.dart': 'class User {\n  String get displayName => \'\';\n}\n',
+      'lib/app.dart': "import 'user.pb.dart';\n\nvoid main() {\n  print(User().displayName);\n}\n",
+    },
+    head: {
+      'proto/user.proto': 'syntax = "proto3";\nmessage User {\n  string display_name = 1;\n  string given_name = 2;\n}\n',
+      'lib/user.pb.dart': 'class User {\n  String get displayName => \'\';\n  String get givenName => \'\';\n}\n',
+      'lib/app.dart': "import 'user.pb.dart';\n\nvoid main() {\n  print(User().givenName);\n}\n",
+    },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the getter maps to the protobuf field.', () => {
+      assert.equal(chainsOf(review!), [
+        'member User.given_name +2 -1 depth 0',
+        'lib/app.dart#0, proto/user.proto#0',
+        'L0 (top), L1 main',
+        'main → (top) [given_name]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a part file whose generated constructor changes with the library field, ', { skip: skipDart }, () => {
+  const files = {
+    base: {
+      'lib/user.dart': "class User {\n  User({this.name});\n  final String? name;\n  factory User.fromJson(Map json) => _$UserFromJson(json);\n}\npart 'user.g.dart';\n",
+      'lib/user.g.dart': "part of 'user.dart';\n\nUser _$UserFromJson(Map json) => User(name: json['name'] as String);\n",
+    },
+    head: {
+      'lib/user.dart': "class User {\n  User({this.name, this.title});\n  final String? name;\n  final String? title;\n  factory User.fromJson(Map json) => _$UserFromJson(json);\n}\npart 'user.g.dart';\n",
+      'lib/user.g.dart': "part of 'user.dart';\n\nUser _$UserFromJson(Map json) => User(name: json['name'] as String, title: json['title'] as String);\n",
+    },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the generated part is set aside and the field stays on the constructor.', () => {
+      assert.equal(`${chainsOf(review!)}\n${generatedOf(review!)}`, [
+        'member User() +2 -1 depth 0',
+        'lib/user.dart#0, lib/user.dart#1',
+        'L0 User.title, L1 User.User',
+        'User.User → User.title [title]',
+        'uses none, shares none, family 0',
+        'lib/user.g.dart',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a Serverpod model whose doc comment changes above a field, ', { skip: skipDart }, () => {
+  const files = {
+    base: {
+      'lib/user.spy.yaml': 'class: User\nfields:\n  name: String\n  title: String\n',
+      'lib/generated/user.dart': 'class UserTable {\n  String name = \'\';\n  String title = \'\';\n}\n',
+      'lib/app.dart': "import 'generated/user.dart';\n\nvoid main() {\n  print(1);\n}\n",
+    },
+    head: {
+      'lib/user.spy.yaml': 'class: User\nfields:\n  name: String\n  ## The heading.\n  title: String\n',
+      'lib/generated/user.dart': 'class UserTable {\n  String name = \'\';\n  String title = \'\';\n}\n',
+      'lib/app.dart': "import 'generated/user.dart';\n\nvoid main() {\n  final table = UserTable();\n  print(table.title);\n}\n",
+    },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the comment belongs to the field below it.', () => {
+      assert.equal(chainsOf(review!), [
+        'member User.title +3 -1 depth 0',
+        'lib/app.dart#0, lib/user.spy.yaml#0',
+        'L0 (top), L1 main',
+        'main → (top) [title]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a Markdown change that names a changed member in backticks, ', { skip: skipDart }, () => {
+  const files = {
+    base: {
+      'lib/a.dart': "void greet() {\n  print('hi');\n}\n",
+      'README.md': 'See greet.\n',
+    },
+    head: {
+      'lib/a.dart': "void greetName() {\n  print('hi');\n}\n",
+      'README.md': 'See `greetName`.\n',
+    },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the note joins that member\'s chain.', () => {
+      assert.equal(`${chainsOf(review!)}\n${blocksOf(review!)}`, [
+        'member greetName +2 -2 depth 0',
+        'README.md#0, lib/a.dart#0',
+        'L0 greetName, L1 (top)',
+        '(top) → greetName [greetName]',
+        'uses none, shares none, family 0',
+        'README.md#0 (top) +1 -1',
+        'lib/a.dart#0 greetName +1 -1',
+      ].join('\n'));
+    });
+  });
+});

@@ -606,6 +606,89 @@ describe('Given a served review of pull request 7, with an open thread on the ca
     });
   });
 
+  describe('when Down and Enter choose a mention, ', () => {
+    let value: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await fill(page!, '.th.new textarea.cmp-ta', '@g');
+      await page!.until(`(document.querySelector('.mn-pop')?.textContent || '').includes('grace')`);
+      await page!.key('ArrowDown');
+      await page!.key('Enter');
+      await page!.until(`(document.querySelector('.th.new textarea.cmp-ta')?.value || '').includes('@grace')`);
+      value = await read(page!, `document.querySelector('.th.new textarea.cmp-ta')?.value ?? ''`);
+    });
+
+    it('then @grace is inserted.', () => {
+      assert.equal(value, '@grace ');
+    });
+  });
+
+  describe('when Down and Tab choose an issue, ', () => {
+    let value: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await fill(page!, '.th.new textarea.cmp-ta', '#12');
+      await page!.until(`(document.querySelector('.mn-pop')?.textContent || '').includes('The name')`);
+      await page!.key('ArrowDown');
+      await page!.key('Tab');
+      await page!.until(`(document.querySelector('.th.new textarea.cmp-ta')?.value || '').includes('#12')`);
+      value = await read(page!, `document.querySelector('.th.new textarea.cmp-ta')?.value ?? ''`);
+    });
+
+    it('then #12 is inserted.', () => {
+      assert.equal(value, '#12 ');
+    });
+  });
+
+  describe('when Escape is pressed on the mention list, ', () => {
+    let list: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await fill(page!, '.th.new textarea.cmp-ta', '@');
+      await page!.until(`document.querySelector('.mn-pop') && !document.querySelector('.mn-pop').hidden`);
+      await page!.key('Escape');
+      await page!.until(`document.querySelector('.mn-pop').hidden`);
+      list = await read(page!, `document.querySelector('.mn-pop').hidden ? 'closed' : 'open'`);
+    });
+
+    it('then the list closes.', () => {
+      assert.equal(list, 'closed');
+    });
+  });
+
+  describe('when a thread is chosen in Jump to, ', () => {
+    let opened: string;
+
+    before(async () => {
+      await fresh();
+      await page!.key('k', { ctrl: true });
+      await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
+      for (let i = 0; i < 6; i += 1) {
+        if (await read(page!, `document.querySelector('.pal-scope')?.textContent ?? ''`) === 'Threads') break;
+        await page!.key('Tab');
+      }
+      await page!.until(`document.querySelector('.pal-scope')?.textContent === 'Threads'`);
+      await page!.type('Why this name');
+      await page!.until(`(document.querySelector('.pal')?.textContent || '').includes('Why this name')`);
+      await page!.key('Enter');
+      await page!.until(`!!document.querySelector('[data-thread="THREAD_1"]')`);
+      opened = await read(page!, `document.querySelector('[data-thread="THREAD_1"]') ? 'open' : 'closed'`);
+    });
+
+    it('then the thread opens on its file.', () => {
+      assert.equal(opened, 'open');
+    });
+  });
+
   describe('when the page reloads right after a reply is sent, ', () => {
     let box: string;
 

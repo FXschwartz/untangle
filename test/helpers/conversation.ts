@@ -30,6 +30,8 @@ export interface ConversationSpec {
   reviews?: ReviewSpec[];
   /** Set when a review is waiting to be finished. */
   pending?: { id: string; comments: number } | null;
+  /** The description as GitHub rendered it, when a test needs particular HTML. */
+  html?: string;
 }
 
 function reacts() {
@@ -57,7 +59,7 @@ export function pullRequest(spec: ConversationSpec) {
     headRefOid: spec.head,
     createdAt: '2020-06-01T15:00:00Z',
     body: 'Please look.',
-    bodyHTML: '<p>Please look.</p>',
+    bodyHTML: spec.html ?? '<p>Please look.</p>',
     viewerDidAuthor: false,
     reviewDecision: 'REVIEW_REQUIRED',
     author: grace,

@@ -16,7 +16,7 @@ export interface UntangleRun {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = path.join(repoRoot, 'dist/cli.js');
 
-function untangleEnv(cacheDir: string, gh: GhStub): NodeJS.ProcessEnv {
+function untangleEnv(cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, UNTANGLE_CACHE: cacheDir, ...gh.env };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
@@ -27,7 +27,12 @@ function untangleEnv(cacheDir: string, gh: GhStub): NodeJS.ProcessEnv {
   env.GIT_CONFIG_NOSYSTEM = '1';
   env.GIT_CONFIG_COUNT = '0';
   env.GIT_TERMINAL_PROMPT = '0';
-  return env;
+  // These tests run inside Orca. A review must not open the person's browser or a real Orca tab.
+  delete env.BROWSER;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('ORCA_')) delete env[key];
+  }
+  return extra ? { ...env, ...extra } : env;
 }
 
 function signal(child: ChildProcess, name: NodeJS.Signals): void {
@@ -58,10 +63,10 @@ function stopProcess(child: ChildProcess): Promise<void> {
   });
 }
 
-function spawnUntangle(args: string[], cacheDir: string, gh: GhStub): ChildProcess {
+function spawnUntangle(args: string[], cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): ChildProcess {
   return spawn(process.execPath, [cli, ...args], {
     detached: true,
-    env: untangleEnv(cacheDir, gh),
+    env: untangleEnv(cacheDir, gh, extra),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -86,10 +91,12 @@ function leading(base: string | null | undefined): string[] {
 }
 
 /** Serves the directory with `-port 0 -no-open` and resolves with the printed URL. */
-export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; quiet?: boolean }): Promise<UntangleRun> {
+export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; quiet?: boolean; open?: boolean; port?: number | null; env?: NodeJS.ProcessEnv }): Promise<UntangleRun> {
   const { gh, release } = ownedGh(opts.gh);
   const quiet = opts.quiet === false ? [] : ['-quiet'];
-  const child = spawnUntangle([...leading(opts.base), '-no-open', '-port', '0', ...quiet, ...(opts.args ?? []), dir], opts.cacheDir, gh);
+  const open = opts.open ? [] : ['-no-open'];
+  const port = opts.port === null ? [] : ['-port', String(opts.port ?? 0)];
+  const child = spawnUntangle([...leading(opts.base), ...open, ...port, ...quiet, ...(opts.args ?? []), dir], opts.cacheDir, gh, opts.env);
   const text = collect(child);
   const output = () => `${text.out()}\n${text.err()}`;
   try {
