@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
-import { PullRequestConversation, type CommitFacts, type Conversation } from '../../dist/github.js';
+import { GitHubError, PullRequestConversation, type CommitFacts, type Conversation } from '../../dist/github.js';
 import { stubGh, useStub, type GhCall, type GhStub } from '../helpers/gh.ts';
 
 const head = 'a'.repeat(40);
@@ -357,6 +357,38 @@ describe('Given a new thread GitHub rejects after starting an empty pending revi
 
     it('then the empty pending review is dropped and the rejection stands.', () => {
       assert.equal(`${mutation(gh!.calls(), 'deletePullRequestReview')}\n${error.includes('rejected') ? 'rejected' : error}`, '{"pullRequestReviewId":"PEND"}\nrejected');
+    });
+  });
+});
+
+describe('Given GitHub refusing the API, ', () => {
+  let gh: GhStub | undefined;
+  let restore = () => {};
+
+  before(() => {
+    gh = stubGh([{ match: ['api', 'graphql'], code: 1, stderr: 'GitHub is down\n' }]);
+    restore = useStub(gh);
+  });
+
+  after(() => {
+    restore();
+    gh?.remove();
+  });
+
+  describe('when the conversation is loaded, ', () => {
+    let message = '';
+
+    before(async () => {
+      try {
+        await new PullRequestConversation({ owner: 'acme', repo: 'sample', number: 7 }, head).load();
+        message = 'loaded';
+      } catch (error) {
+        message = error instanceof GitHubError ? error.message : String(error);
+      }
+    });
+
+    it('then the error is the message gh printed.', () => {
+      assert.equal(message, 'GitHub is down');
     });
   });
 });

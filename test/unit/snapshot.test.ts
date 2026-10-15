@@ -365,3 +365,56 @@ describe('Given reviewed marks whose base changes the same line, and mergiraf le
     });
   });
 });
+
+function failingMergiraf(): { path: string; remove(): void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-mergiraf-'));
+  fs.writeFileSync(path.join(dir, 'mergiraf'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  return { path: `${dir}${path.delimiter}${gitOnly}`, remove: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+describe('Given reviewed marks whose base gains a line above the change, and mergiraf fails, ', () => {
+  let repo: TempRepo | undefined;
+  let head: string;
+  let moved: string;
+  let model: ModelCompare;
+  let mergiraf: ReturnType<typeof failingMergiraf> | undefined;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write(file, 'alpha\nold\nomega\n');
+    const oldBase = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write(file, 'alpha\nnew\nomega\n');
+    head = repo.commit({ subject: 'change', author: ada, committer: ada });
+    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    repo.checkout('main');
+    repo.write(file, 'prefix\nalpha\nold\nomega\n');
+    moved = repo.commit({ subject: 'move the base', author: ada, committer: ada });
+    repo.checkout('feature');
+    const hunks = hunksOf(repo.dir, moved, head);
+    model = compare(repo.dir, moved, head, [block(hunks, 'new', 'the-change')]);
+    mergiraf = failingMergiraf();
+  });
+
+  after(() => {
+    mergiraf?.remove();
+    repo?.remove();
+  });
+
+  describe('when the marks are replayed onto the new base, ', () => {
+    let reviewed: string;
+    let restore = () => {};
+
+    before(() => {
+      restore = usePath(mergiraf!.path);
+      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      reviewed = [...loaded.reviewed].sort().join(' ') || 'none';
+    });
+
+    after(() => restore());
+
+    it('then the change stays reviewed.', () => {
+      assert.equal(reviewed, 'the-change');
+    });
+  });
+});
