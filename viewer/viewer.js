@@ -2547,13 +2547,15 @@
       return { p, s, a, d, from: from != null ? HISTORY.paths[from] : null, f: files.get(p) || null, gen: gen.has(p), total: total.get(p) || 0, open: open.get(p) || 0 };
     });
   }
-  // The first line a commit wrote in a file, at the head (a removed line's: the line after it).
+  // The first line a commit wrote in a file, at the head (a removed line's: the line after it, or
+  // the line before it when the file ends there).
   function firstLineOf(f, ci) {
     for (let hi = 0; hi < f.hunks.length; hi++) {
       const h = f.hunks[hi];
       for (let ri = 0; ri < h.rows.length; ri++) {
         if (h.rows[ri][0] === ' ' || rowCommit(f, hi, ri) !== ci) continue;
         for (let k = ri; k < h.meta.length; k++) if (h.meta[k].n != null) return h.meta[k].n;
+        for (let k = ri - 1; k >= 0; k--) if (h.meta[k].n != null) return h.meta[k].n;
         return null;
       }
     }
