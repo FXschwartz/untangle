@@ -160,9 +160,13 @@ describe('Given a served review of one change, ', { skip: skipDart }, () => {
       text = git(review!.repo.dir, ['show', 'untangle/feature:lib/a.dart']);
     });
 
-    it('then the marks branch names this head and holds the new line.', () => {
-      const head = (jsonScript(review!.html, 'd-config') as { head: string }).head;
-      assert.equal(message.includes(`Untangle-Head: ${head}`) && text.includes("print('hi')"), true);
+    it('then the marks branch\'s commit names this base and head.', () => {
+      const config = jsonScript(review!.html, 'd-config') as { head: string; base: string };
+      assert.equal(message, `Review: 1 of 1 change reviewed\n\nUntangle-Base: ${config.base}\nUntangle-Head: ${config.head}\n`);
+    });
+
+    it('then the marks branch holds the file as it is at the head.', () => {
+      assert.equal(text, "void greet() {\n  print('hi');\n}\n");
     });
   });
 });
@@ -193,7 +197,7 @@ describe('Given a served review whose change was marked reviewed, ', { skip: ski
     });
 
     it('then the branch holds the line from before the change.', () => {
-      assert.equal(text.includes("print('hello')") && !text.includes("print('hi')"), true);
+      assert.equal(text, "void greet() {\n  print('hello');\n}\n");
     });
   });
 });

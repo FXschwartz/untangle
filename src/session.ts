@@ -188,7 +188,7 @@ export class ReviewSession {
     const reviewed = new Set([...this.blocks.values()].filter((b) => b.edits.length && b.edits.every((e) => rev.has(e))).map((b) => b.id));
     if (this.snapshot.differs(reviewed)) {
       const total = [...this.blocks.values()].filter((b) => b.edits.length).length;
-      const saved = this.snapshot.save(reviewed, `Review: ${reviewed.size} of ${total} changes reviewed`);
+      const saved = this.snapshot.save(reviewed, `Review: ${reviewed.size} of ${total} change${total === 1 ? '' : 's'} reviewed`);
       this.snapshotInfo = { ...this.snapshotInfo, commit: saved.commit };
       this.reviewed = reviewed;
     }
