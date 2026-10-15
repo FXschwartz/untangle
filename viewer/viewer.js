@@ -2403,7 +2403,7 @@
     const title = gh.here ? `The head before${gh.actor ? ' this force push' : ''}: ${shortSha(gh.sha)}. Click for what changed since.` : 'GitHub no longer has this head';
     const inner = cls === 'lp-row' ? `${laneSvg(vm, g, dotSvg('ghost'))}<code>${shortSha(gh.sha)}</code><span class="lp-s">${who}</span><span class="cm-n"></span>`
       : `${laneSvg(vm, g, dotSvg('ghost'))}<span class="${cls === 'cm-row' ? 'cm-s' : 'hs-s'}">${who}</span><span class="${cls === 'cm-row' ? 'cm-m' : 'hs-m'}">${meta}</span>${cls === 'cm-row' ? '<span class="cm-n"></span>' : ''}`;
-    return `<button type="button" class="${cls} ghost${on ? ' in' : ''}" data-act="lens-ghost" data-sha="${gh.sha}" data-why="${gh.yours ? 'review' : 'push'}" aria-pressed="${on}"${gh.here ? '' : ' disabled'} title="${esc(title)}">${inner}</button>`;
+    return `<button type="button" class="${cls} old-head${on ? ' in' : ''}" data-act="lens-ghost" data-sha="${gh.sha}" data-why="${gh.yours ? 'review' : 'push'}" aria-pressed="${on}"${gh.here ? '' : ' disabled'} title="${esc(title)}">${inner}</button>`;
   }
   function flagRowHtml(vm, g, cls) {
     const rv = reviewInBranch();
@@ -2485,7 +2485,7 @@
   const REVIEW_WORD = { APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes', COMMENTED: 'commented', DISMISSED: 'dismissed' };
   function histRowHtml(vm, g) {
     const it = vm.item;
-    if (it.ghost) return `<div class="hs-row ghost${state.lens && state.lens.kind === 'since' && state.lens.from === it.ghost.sha ? ' in' : ''}">${ghostRowHtml(vm, g, 'hs-main')}</div>`;
+    if (it.ghost) return `<div class="hs-row old-head${state.lens && state.lens.kind === 'since' && state.lens.from === it.ghost.sha ? ' in' : ''}">${ghostRowHtml(vm, g, 'hs-main')}</div>`;
     const c = it.c, st = commitState(it.i), sub = subjectOf(c), on = commitInLens(it.i), m = M();
     const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
     // The chains it touched, the most first.
