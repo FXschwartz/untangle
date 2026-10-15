@@ -18,32 +18,63 @@ function quote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function signal(child: ReturnType<typeof spawn>, name: NodeJS.Signals): void {
+  if (child.pid == null) return;
+  try {
+    process.kill(-child.pid, name);
+  } catch {
+    try { child.kill(name); } catch { /* Already gone. */ }
+  }
+}
+
+/** SIGTERM, then SIGKILL if it is still up, resolving only after the process has exited. */
+function stopProcess(child: ReturnType<typeof spawn>): Promise<void> {
+  return new Promise((resolve) => {
+    if (child.exitCode != null || child.signalCode != null) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => signal(child, 'SIGKILL'), 2_000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    signal(child, 'SIGTERM');
+  });
+}
+
 /** Runs untangle under a pseudo-terminal until the review is ready, then stops it. */
 function runTerminal(args: string[], env: NodeJS.ProcessEnv): Promise<string> {
   const command = [process.execPath, cli, ...args].map(quote).join(' ');
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/script', ['-qfc', command, '/dev/null'], { env, detached: true });
     let out = '';
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (child.pid != null) {
-        try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
-      }
-      if (error) reject(error);
-      else resolve(out);
-    };
-    const timer = setTimeout(() => finish(new Error(`untangle did not become ready\n${out}`)), 120_000);
+    let stopping = false;
+    const timer = setTimeout(() => {
+      stopping = true;
+      void stopProcess(child).then(() => reject(new Error(`untangle did not become ready\n${out}`)));
+    }, 120_000);
     const take = (chunk: Buffer) => {
       out += chunk.toString('utf8');
-      if (out.includes('Review at ')) finish();
+      if (!stopping && out.includes('Review at ')) {
+        stopping = true;
+        clearTimeout(timer);
+        void stopProcess(child).then(() => resolve(out));
+      }
     };
     child.stdout?.on('data', take);
     child.stderr?.on('data', take);
-    child.once('error', finish);
-    child.once('exit', () => { if (!settled) finish(new Error(`untangle exited before it was ready\n${out}`)); });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', () => {
+      if (!stopping) {
+        stopping = true;
+        clearTimeout(timer);
+        reject(new Error(`untangle exited before it was ready\n${out}`));
+      }
+    });
   });
 }
 
