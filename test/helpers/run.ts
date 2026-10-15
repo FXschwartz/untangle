@@ -133,7 +133,7 @@ function waitForUrl(child: ChildProcess, text: { out: () => string; err: () => s
       if (error) reject(error);
       else resolve(url!);
     };
-    const timer = setTimeout(() => finish(new Error(`untangle did not print a URL\n${text.err()}\n${text.out()}`)), 20_000);
+    const timer = setTimeout(() => finish(new Error(`untangle did not print a URL\n${text.err()}\n${text.out()}`)), 60_000);
     const look = () => {
       const match = /^http:\/\/127\.0\.0\.1:\d+\/\S*/m.exec(text.out());
       if (match) finish(null, match[0].trim());

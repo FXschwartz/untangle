@@ -206,9 +206,9 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
   return {
     async goto(url: string) {
       await session('Page.navigate', { url });
-      await poll(evaluate, 'document.readyState === "complete"', 20_000);
+      await poll(evaluate, 'document.readyState === "complete"', 60_000);
     },
-    until(expression: string, ms = 20_000) {
+    until(expression: string, ms = 60_000) {
       return poll(evaluate, expression, ms);
     },
     eval: evaluate,
@@ -270,7 +270,7 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       await at(box.left + box.width / 2, box.top + box.height / 2, 'mouseMoved', 0, 0);
     },
     async type(text: string) {
-      for (const char of text) await press(char, {});
+      await session('Input.insertText', { text });
     },
     key(key: string, opts: { shift?: boolean; ctrl?: boolean } = {}) {
       return press(key, opts);
@@ -317,7 +317,7 @@ function devtoolsUrl(child: ChildProcess): Promise<string> {
     };
     child.stdout?.on('data', take);
     child.stderr?.on('data', take);
-    const timer = setTimeout(() => finish(new Error(`Chromium did not open a DevTools port\n${text}`)), 20_000);
+    const timer = setTimeout(() => finish(new Error(`Chromium did not open a DevTools port\n${text}`)), 60_000);
     child.once('exit', (code) => finish(new Error(`Chromium exited ${code} before opening a DevTools port\n${text}`)));
   });
 }

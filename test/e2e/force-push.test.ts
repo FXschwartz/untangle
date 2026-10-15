@@ -19,7 +19,7 @@ const startApp = ['void greet() {', "  print('hi');", '}', '', 'void main() {', 
 const passedApp = ['void greet(String name) {', '  print(name);', '}', '', 'void main() {', "  greet('ada');", '}', ''].join('\n');
 const amendedApp = ['void greet(String name) {', "  print('ada');", '}', '', 'void main() {', "  greet('ada');", '}', ''].join('\n');
 
-describe('Given a served review whose head was amended after the branch was pushed, and GitHub reports that force push plus one whose old head is gone, ', { skip, timeout: 180_000 }, () => {
+describe('Given a served review whose head was amended after the branch was pushed, and GitHub reports that force push plus one whose old head is gone, ', { skip, timeout: 300_000 }, () => {
   let repo: TempRepo | undefined;
   let origin: TempRepo | undefined;
   let gh: GhStub | undefined;

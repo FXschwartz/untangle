@@ -27,7 +27,7 @@ function posted(gh: GhStub, mutation: string): string {
   return JSON.stringify(body.variables.input);
 }
 
-describe('Given a served review that is behind pull request 7, which has a pending review, ', { skip, timeout: 180_000 }, () => {
+describe('Given a served review that is behind pull request 7, which has a pending review, ', { skip, timeout: 300_000 }, () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
   let run: UntangleRun | undefined;

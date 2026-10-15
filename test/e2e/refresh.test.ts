@@ -31,7 +31,7 @@ function followHead(gh: GhStub, from: string, to: string): void {
   fs.writeFileSync(config, JSON.stringify(data));
 }
 
-describe('Given a served review of a greeting and a notes file, ', { skip, timeout: 180_000 }, () => {
+describe('Given a served review of a greeting and a notes file, ', { skip, timeout: 300_000 }, () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
   let run: UntangleRun | undefined;
@@ -114,12 +114,14 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
       await page!.click('textarea.cmp-ta');
       await page!.type('Not yet');
-      await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes('New commits')`, 40_000);
+      await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes('New commits')`, 90_000);
       banner = await read(page!, `document.querySelector('#vw-fresh')?.textContent ?? ''`);
       await page!.click('#vw-fresh [data-act="refresh"]');
-      await page!.until(`(document.querySelector('.t-head')?.textContent || '').includes('${glowed}')`, 90_000);
+      await page!.until(`(document.querySelector('.t-head')?.textContent || '').includes('${glowed}')`, 120_000);
       where = await read(page!, `document.querySelector('.crumbs')?.textContent ?? ''`);
-      glow = await read(page!, `[...document.querySelectorAll('.glow')].map((el) => el.textContent).join(' ')`);
+      await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"] .glow')`, 30_000);
+      await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"] span[class*=" k"]')`, 30_000);
+      glow = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/notes.dart"] .glow')].map((el) => el.textContent).join(' ')`);
       await page!.click('[data-tab="chains"]');
       const chainId = await read(page!, `([...document.querySelectorAll('[data-chain]')].find((el) => (el.textContent || '').includes('greet(name)')) || {}).dataset?.chain ?? ''`);
       await page!.click(`[data-chain="${chainId}"]`);

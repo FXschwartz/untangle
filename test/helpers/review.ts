@@ -1,4 +1,5 @@
 // A tiny Dart package reviewed through the real pipeline, offline, in its own cache.
+import { type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,6 +39,20 @@ export async function buildDartReview(files: { base: Record<string, string>; hea
     repo.remove();
     gh.remove();
     fs.rmSync(cacheDir, { recursive: true, force: true });
+    // A language server that has already been asked to stop can leave its handle referenced.
+    const handles = (process as unknown as { _getActiveHandles(): ChildProcess[] })._getActiveHandles();
+    for (const child of handles) {
+      if (child.constructor?.name !== 'ChildProcess') continue;
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.stdin?.destroy();
+      child.unref();
+    }
   };
   try {
     repo.write('pubspec.yaml', pubspec);

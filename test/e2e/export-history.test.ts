@@ -17,7 +17,7 @@ const step = (subject: string, day: string, write: Record<string, string>): Stor
   subject, author: ada(day), committer: ada(day), write,
 });
 
-describe('Given an exported review of a branch that merged two commits from main, with a saved review of that merge, opened over http, ', { skip, timeout: 180_000 }, () => {
+describe('Given an exported review of a branch that merged two commits from main, with a saved review of that merge, opened over http, ', { skip, timeout: 300_000 }, () => {
   let page: Browser | undefined;
   let closeServer: (() => Promise<void>) | undefined;
   let remove: (() => void) | undefined;

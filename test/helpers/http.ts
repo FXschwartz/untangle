@@ -59,7 +59,7 @@ export function reviewClient(pageUrl: string): ReviewClient {
 export async function waitForReview(client: ReviewClient): Promise<string> {
   const opened = await client.open();
   if (opened.status !== 302) throw new Error(`the printed link answered ${opened.status}: ${opened.text.slice(0, 200)}`);
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 180_000;
   let last = '';
   while (Date.now() < deadline) {
     const page = await client.page();

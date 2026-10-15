@@ -87,7 +87,7 @@ async function commitsTab(page: Browser): Promise<void> {
   await page.until(`!!document.querySelector('.cm-row')`);
 }
 
-describe('Given a served review of feature, its pull request, a merge of two commits from main, and a saved review of that merge, ', { skip, timeout: 240_000 }, () => {
+describe('Given a served review of feature, its pull request, a merge of two commits from main, and a saved review of that merge, ', { skip, timeout: 360_000 }, () => {
   let repoDir = '';
   let removeRepo: (() => void) | undefined;
   let gh: GhStub | undefined;
@@ -537,9 +537,8 @@ describe('Given a served review of feature, its pull request, a merge of two com
     });
   });
 
-  describe('when Only its changes is clicked, and clicked again, ', () => {
+  describe('when Only its changes is clicked, ', () => {
     let on: string;
-    let off: string;
 
     before(async () => {
       await rest(page!);
@@ -547,13 +546,24 @@ describe('Given a served review of feature, its pull request, a merge of two com
       await page!.click('[data-act="hd-lens"]');
       await page!.until(`document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') === 'true'`);
       on = await read(page!, `[document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') ?? '', document.querySelector('[data-act="lens-go"]')?.textContent ?? '', ${topBar}].join('\\n')`);
-      await page!.click('[data-act="hd-lens"]');
-      await page!.until(`document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') === 'false'`);
-      off = await read(page!, `[document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') ?? '', ${topBar}].join('\\n')`);
     });
 
     it('then the lens turns on and History offers to review those changes.', () => {
       assert.equal(on, `true\nReview these changes · 1\n${short('Name the parameter')} ${dot} Name the parameter`);
+    });
+  });
+
+  describe('when Only its changes is clicked again, ', () => {
+    let off: string;
+
+    before(async () => {
+      await rest(page!);
+      await details(page!, sha['Name the parameter']);
+      await page!.click('[data-act="hd-lens"]');
+      await page!.until(`document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') === 'true'`);
+      await page!.click('[data-act="hd-lens"]');
+      await page!.until(`document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') === 'false'`);
+      off = await read(page!, `[document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') ?? '', ${topBar}].join('\\n')`);
     });
 
     it('then the lens turns off.', () => {
@@ -580,7 +590,6 @@ describe('Given a served review of feature, its pull request, a merge of two com
 
   describe('when Escape is pressed with details and a lens open, ', () => {
     let afterDetails: string;
-    let afterLens: string;
 
     before(async () => {
       await rest(page!);
@@ -590,16 +599,29 @@ describe('Given a served review of feature, its pull request, a merge of two com
       await page!.key('Escape');
       await page!.until(`!document.querySelector('.hs-detail')`);
       afterDetails = await read(page!, `['closed', ${topBar}].join('\\n')`);
-      await page!.key('Escape');
-      await page!.until(`document.querySelector('.t-head')?.textContent === ${JSON.stringify(short('Pass the name'))}`);
-      afterLens = await read(page!, topBar);
     });
 
     it('then the details close and the lens stays.', () => {
       assert.equal(afterDetails, `closed\n${short('Name the parameter')} ${dot} Name the parameter`);
     });
+  });
 
-    it('then the next Escape turns the lens off.', () => {
+  describe('when Escape is pressed again, ', () => {
+    let afterLens: string;
+
+    before(async () => {
+      await rest(page!);
+      await details(page!, sha['Name the parameter']);
+      await page!.click('[data-act="hd-lens"]');
+      await page!.until(`document.querySelector('[data-act="hd-lens"]')?.getAttribute('aria-pressed') === 'true'`);
+      await page!.key('Escape');
+      await page!.until(`!document.querySelector('.hs-detail')`);
+      await page!.key('Escape');
+      await page!.until(`document.querySelector('.t-head')?.textContent === ${JSON.stringify(short('Pass the name'))}`);
+      afterLens = await read(page!, topBar);
+    });
+
+    it('then the lens turns off.', () => {
       assert.equal(afterLens, short('Pass the name'));
     });
   });

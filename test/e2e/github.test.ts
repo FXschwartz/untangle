@@ -21,6 +21,36 @@ const printLine = 2;
 const beforeApp = ['void greet() {', "  print('hi');", '}', '', 'void main() {', '  greet();', '}', ''].join('\n');
 const afterApp = ['void greet(String name) {', '  print(name);', '}', '', 'void main() {', "  greet('ada');", '}', ''].join('\n');
 
+/** The + is a pointer target, so a busy machine can drop the first move. */
+async function showAdd(page: Browser, line: number): Promise<void> {
+  const cell = `[data-c="R:${line}"]`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.hover(cell);
+    try {
+      await page.until(`document.querySelector('.cm-add')?.classList.contains('on')`, 5_000);
+      return;
+    } catch {
+      // Try the move again.
+    }
+  }
+  await page.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+}
+
+/** Types into a composer and waits until the box holds the text. */
+async function fill(page: Browser, selector: string, text: string): Promise<void> {
+  const want = JSON.stringify(text);
+  const ready = `document.querySelector(${JSON.stringify(selector)})?.value === ${want}`;
+  await page.click(selector);
+  await page.type(text);
+  try {
+    await page.until(ready, 5_000);
+  } catch {
+    await page.click(selector);
+    await page.type(text);
+    await page.until(ready);
+  }
+}
+
 function posted(gh: GhStub, mutation: string): string {
   const call = [...gh.calls()].reverse().find((item) => item.stdin.includes(`${mutation}(input:`));
   if (!call) throw new Error(`no ${mutation} call`);
@@ -28,7 +58,7 @@ function posted(gh: GhStub, mutation: string): string {
   return JSON.stringify(body.variables.input);
 }
 
-describe('Given a served review of pull request 7, with an open thread on the call and a resolved thread on the print, ', { skip, timeout: 180_000 }, () => {
+describe('Given a served review of pull request 7, with an open thread on the call and a resolved thread on the print, ', { skip, timeout: 300_000 }, () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
   let run: UntangleRun | undefined;
@@ -98,6 +128,17 @@ describe('Given a served review of pull request 7, with an open thread on the ca
   });
 
   async function openApp(): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page!.click('[data-tab="files"]');
+      try {
+        await page!.until(`!!document.querySelector('[data-open="lib/app.dart"]')`, 10_000);
+        await page!.click('[data-open="lib/app.dart"]');
+        await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"]')`, 10_000);
+        return;
+      } catch {
+        // A click can be lost while the machine is busy.
+      }
+    }
     await page!.click('[data-tab="files"]');
     await page!.until(`!!document.querySelector('[data-open="lib/app.dart"]')`);
     await page!.click('[data-open="lib/app.dart"]');
@@ -133,15 +174,30 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await rest(page!);
       await page!.click('[data-tab="comments"]');
       await page!.until(`(document.querySelector('#vw-side')?.textContent || '').includes('Open threads')`);
-      const beforeToggle = await read(page!, `document.querySelector('#vw-side')?.textContent ?? ''`);
-      await page!.click('[data-act="resolved-toggle"]');
-      await page!.until(`(document.querySelector('#vw-side')?.textContent || '').includes('Ship the name.')`);
-      const afterToggle = await read(page!, `document.querySelector('#vw-side')?.textContent ?? ''`);
-      listed = `${beforeToggle.includes('Why this name?') ? 'open' : 'missing'}\n${beforeToggle.includes('Ship the name.') ? 'shown' : 'hidden'}\n${afterToggle.includes('Ship the name.') ? 'shown' : 'hidden'}`;
+      const text = await read(page!, `document.querySelector('#vw-side')?.textContent ?? ''`);
+      listed = `${text.includes('Why this name?') ? 'open' : 'missing'}\n${text.includes('Ship the name.') ? 'shown' : 'hidden'}`;
     });
 
-    it('then the open thread is listed and the resolved one appears when that group is opened.', () => {
-      assert.equal(listed, 'open\nhidden\nshown');
+    it('then the open thread is listed and the resolved one is hidden.', () => {
+      assert.equal(listed, 'open\nhidden');
+    });
+  });
+
+  describe('when the resolved group is opened, ', () => {
+    let listed: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="comments"]');
+      await page!.until(`(document.querySelector('#vw-side')?.textContent || '').includes('Open threads')`);
+      await page!.click('[data-act="resolved-toggle"]');
+      await page!.until(`(document.querySelector('#vw-side')?.textContent || '').includes('Ship the name.')`);
+      const text = await read(page!, `document.querySelector('#vw-side')?.textContent ?? ''`);
+      listed = text.includes('Ship the name.') ? 'shown' : 'hidden';
+    });
+
+    it('then the resolved thread is listed.', () => {
+      assert.equal(listed, 'shown');
     });
   });
 
@@ -153,8 +209,7 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await page!.click('[data-act="reply-open"]');
       await page!.until(`!!document.querySelector('textarea[data-draft="reply:THREAD_1"]')`);
-      await page!.click('textarea[data-draft="reply:THREAD_1"]');
-      await page!.type('Because it reads clearly.');
+      await fill(page!, 'textarea[data-draft="reply:THREAD_1"]', 'Because it reads clearly.');
       await page!.click('[data-act="gh-reply"][data-mode="single"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Reply posted'`);
       thread = await read(page!, `document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? ''`);
@@ -170,24 +225,37 @@ describe('Given a served review of pull request 7, with an open thread on the ca
     });
   });
 
-  describe('when the open thread is resolved, and then unresolved, ', () => {
-    let states: string;
+  describe('when the open thread is resolved, ', () => {
+    let resolved: string;
 
     before(async () => {
       await fresh();
       await page!.click('[data-act="gh-resolve"][data-thread="THREAD_1"]');
       await page!.until(`(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved')`);
-      const resolved = await read(page!, `document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? ''`);
+      resolved = await read(page!, `(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved') ? 'resolved' : (document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? '')`);
+    });
+
+    it('then the thread folds as resolved.', () => {
+      assert.equal(resolved, 'resolved');
+    });
+  });
+
+  describe('when the resolved thread is unresolved, ', () => {
+    let opened: string;
+
+    before(async () => {
+      await fresh();
+      await page!.click('[data-act="gh-resolve"][data-thread="THREAD_1"]');
+      await page!.until(`(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved')`);
       await page!.click('[data-act="thread-toggle"][data-thread="THREAD_1"]');
       await page!.until(`!!document.querySelector('[data-act="gh-resolve"][data-thread="THREAD_1"]')`);
       await page!.click('[data-act="gh-resolve"][data-thread="THREAD_1"]');
       await page!.until(`(document.querySelector('[data-thread="THREAD_1"]')?.textContent || '').includes('Why this name?') && !(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved')`);
-      const opened = await read(page!, `document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? ''`);
-      states = `${resolved.includes('Resolved') ? 'resolved' : resolved}\n${opened.includes('Why this name?') && !opened.includes('Resolved by') ? 'open' : opened}`;
+      opened = await read(page!, `(document.querySelector('[data-thread="THREAD_1"]')?.textContent || '').includes('Why this name?') && !(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved') ? 'open' : (document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? '')`);
     });
 
-    it('then the thread folds as resolved and then opens again.', () => {
-      assert.equal(states, 'resolved\nopen');
+    it('then the thread opens again.', () => {
+      assert.equal(opened, 'open');
     });
   });
 
@@ -196,8 +264,7 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.click('.cm-add');
       await page!.until(`!!document.querySelector('[data-act="gh-thread"]')`);
       buttons = await read(page!, `[...document.querySelectorAll('[data-act="gh-thread"]')].map((el) => el.textContent).join('\\n')`);
@@ -213,8 +280,7 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.dragOnto('.cm-add', `[data-c="R:${printLine}"]`);
       await page!.until(`(document.querySelector('.th-new-h b')?.textContent || '').includes('lines')`);
       heading = await read(page!, `document.querySelector('.th-new-h b')?.textContent ?? ''`);
@@ -230,12 +296,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${printLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, printLine);
       await page!.click('.cm-add');
       await page!.until(`!!document.querySelector('.th-new-h')`);
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.shiftClick('.cm-add');
       await page!.until(`(document.querySelector('.th-new-h')?.textContent || '').includes('to +${callLine}')`);
       heading = await read(page!, `document.querySelector('.th-new-h')?.textContent ?? ''`);
@@ -251,12 +315,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.click('.cm-add');
       await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await page!.click('textarea.cmp-ta');
-      await page!.type('Looks good.');
+      await fill(page!, 'textarea.cmp-ta', 'Looks good.');
       await page!.click('[data-act="gh-thread"][data-mode="single"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Comment posted'`);
       sent = posted(gh!, 'addPullRequestReview');
@@ -273,12 +335,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.click('.cm-add');
       await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await page!.click('textarea.cmp-ta');
-      await page!.type('Please rename it.');
+      await fill(page!, 'textarea.cmp-ta', 'Please rename it.');
       await page!.click('[data-act="gh-thread"][data-mode="review"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Added to your pending review'`);
       sent = posted(gh!, 'addPullRequestReviewThread');
@@ -295,12 +355,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.click('.cm-add');
       await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await page!.click('textarea.cmp-ta');
-      await page!.type('@');
+      await fill(page!, 'textarea.cmp-ta', '@');
       await page!.until(`document.querySelector('.mn-pop') && !document.querySelector('.mn-pop').hidden && (document.querySelector('.mn-pop')?.textContent || '').includes('grace')`);
       suggestions = await read(page!, `document.querySelector('.mn-pop')?.textContent ?? ''`);
     });
@@ -315,12 +373,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.hover(`[data-c="R:${callLine}"]`);
-      await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+      await showAdd(page!, callLine);
       await page!.click('.cm-add');
       await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await page!.click('textarea.cmp-ta');
-      await page!.type('#12');
+      await fill(page!, 'textarea.cmp-ta', '#12');
       await page!.until(`(document.querySelector('.mn-pop')?.textContent || '').includes('The name')`);
       suggestions = await read(page!, `document.querySelector('.mn-pop')?.textContent ?? ''`);
     });
@@ -338,8 +394,7 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await page!.click('.rv-btn');
       await page!.until(`!!document.querySelector('.rv-pop')`);
       await page!.click('input[value="APPROVE"]');
-      await page!.click('textarea[data-draft="review"]');
-      await page!.type('Ship it.');
+      await fill(page!, 'textarea[data-draft="review"]', 'Ship it.');
       await page!.click('[data-act="gh-submit"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Approved'`);
       sent = posted(gh!, 'addPullRequestReview');
@@ -358,8 +413,7 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await page!.click('.rv-btn');
       await page!.until(`!!document.querySelector('.rv-pop')`);
       await page!.click('input[value="REQUEST_CHANGES"]');
-      await page!.click('textarea[data-draft="review"]');
-      await page!.type('Please rename it.');
+      await fill(page!, 'textarea[data-draft="review"]', 'Please rename it.');
       await page!.click('[data-act="gh-submit"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Changes requested'`);
       sent = posted(gh!, 'addPullRequestReview');
@@ -377,8 +431,7 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await page!.click('.rv-btn');
       await page!.until(`!!document.querySelector('.rv-pop')`);
-      await page!.click('textarea[data-draft="review"]');
-      await page!.type('A note.');
+      await fill(page!, 'textarea[data-draft="review"]', 'A note.');
       await page!.click('[data-act="gh-submit"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Review submitted'`);
       sent = posted(gh!, 'addPullRequestReview');

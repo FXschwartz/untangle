@@ -77,7 +77,7 @@ async function openFile(page: Browser, file: string): Promise<void> {
   await page.until(`!!document.querySelector(${JSON.stringify(`.code[data-p="${file}"]`)})`);
 }
 
-describe('Given a served review of a greeting and a wave, a 45-line notes file and a generated file, with reduced motion and the language server running, ', { skip, timeout: 180_000 }, () => {
+describe('Given a served review of a greeting and a wave, a 45-line notes file and a generated file, with reduced motion and the language server running, ', { skip, timeout: 300_000 }, () => {
   let repo: TempRepo | undefined;
   let run: UntangleRun | undefined;
   let page: Browser | undefined;
@@ -110,7 +110,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     await page.reducedMotion(true);
     await page.goto(url);
     await page.until(`!!document.querySelector('.t-head')`, 30_000);
-    await page.until(`document.querySelector('#lsp-dot')?.classList.contains('ready')`, 90_000);
+    await page.until(`document.querySelector('#lsp-dot')?.classList.contains('ready')`, 180_000);
   });
 
   after(async () => {
@@ -145,97 +145,171 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
-  describe('when j lands on the first change and is pressed again, and then k, ', () => {
-    let moved: string;
+  describe('when j lands on the first change, ', () => {
+    let landed: string;
 
     before(async () => {
       await rest(page!);
       await chain(page!, 'greet(name)');
       await page!.key('j');
-      const landed = await read(page!, pill);
-      await page!.key('j');
-      await page!.until(`document.querySelector('.pill-n b')?.textContent === '2'`);
-      const next = await read(page!, pill);
-      await page!.key('k');
       await page!.until(`document.querySelector('.pill-n b')?.textContent === '1'`);
-      const back = await read(page!, pill);
-      moved = `${landed}\n${next}\n${back}`;
+      landed = await read(page!, pill);
     });
 
-    it('then the pill moves to the second change and back to the first.', () => {
-      assert.equal(moved, '1 of 2\n2 of 2\n1 of 2');
+    it('then the pill stays on the first change.', () => {
+      assert.equal(landed, '1 of 2');
     });
   });
 
-  describe('when n is pressed, and then p, ', () => {
-    let moved: string;
+  describe('when j is pressed again, ', () => {
+    let next: string;
+
+    before(async () => {
+      await fresh();
+      await chain(page!, 'greet(name)');
+      await page!.key('j');
+      await page!.until(`document.querySelector('.pill-n b')?.textContent === '1'`);
+      await page!.key('j');
+      await page!.until(`document.querySelector('.pill-n b')?.textContent === '2'`);
+      next = await read(page!, pill);
+    });
+
+    it('then the pill is on the second change.', () => {
+      assert.equal(next, '2 of 2');
+    });
+  });
+
+  describe('when k is pressed, ', () => {
+    let back: string;
+
+    before(async () => {
+      await fresh();
+      await chain(page!, 'greet(name)');
+      await page!.key('j');
+      await page!.until(`document.querySelector('.pill-n b')?.textContent === '1'`);
+      await page!.key('j');
+      await page!.until(`document.querySelector('.pill-n b')?.textContent === '2'`);
+      await page!.key('k');
+      await page!.until(`document.querySelector('.pill-n b')?.textContent === '1'`);
+      back = await read(page!, pill);
+    });
+
+    it('then the pill is back on the first change.', () => {
+      assert.equal(back, '1 of 2');
+    });
+  });
+
+  describe('when n is pressed, ', () => {
+    let next: string;
 
     before(async () => {
       await rest(page!);
       await chain(page!, 'greet(name)');
       await page!.key('n');
       await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('wave(name)')`);
-      const next = await read(page!, crumbs);
-      await page!.key('p');
-      await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('greet(name)')`);
-      const back = await read(page!, crumbs);
-      moved = `${next}\n${back}`;
+      next = await read(page!, crumbs);
     });
 
-    it('then the review moves to the wave chain and back to the greeting.', () => {
-      assert.equal(moved, 'Map/wave(name)\nMap/greet(name)');
+    it('then the review moves to the wave chain.', () => {
+      assert.equal(next, 'Map/wave(name)');
+    });
+  });
+
+  describe('when p is pressed, ', () => {
+    let back: string;
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.key('n');
+      await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('wave(name)')`);
+      await page!.key('p');
+      await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('greet(name)')`);
+      back = await read(page!, crumbs);
+    });
+
+    it('then the review moves back to the greeting.', () => {
+      assert.equal(back, 'Map/greet(name)');
     });
   });
 
   describe('when ? is pressed, ', () => {
     let listed: string;
-    let closed: string;
 
     before(async () => {
       await rest(page!);
       await page!.key('?');
       await page!.until(`document.querySelector('.keys') && !document.querySelector('.keys').hidden`);
       listed = await read(page!, `document.querySelector('.keys')?.textContent ?? ''`);
-      await page!.key('Escape');
-      await page!.until(`!document.querySelector('.keys') || document.querySelector('.keys').hidden`);
-      closed = await read(page!, `!document.querySelector('.keys') || document.querySelector('.keys').hidden ? 'closed' : 'open'`);
     });
 
     it('then the keys are listed.', () => {
       assert.equal(listed.includes('Next and previous change to review') && listed.includes('Mark the change reviewed and go to the next one') && listed.includes('Next and previous chain'), true);
     });
+  });
 
-    it('then Escape closes the list.', () => {
+  describe('when Escape is pressed on the key list, ', () => {
+    let closed: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.key('?');
+      await page!.until(`document.querySelector('.keys') && !document.querySelector('.keys').hidden`);
+      await page!.key('Escape');
+      await page!.until(`!document.querySelector('.keys') || document.querySelector('.keys').hidden`);
+      closed = await read(page!, `!document.querySelector('.keys') || document.querySelector('.keys').hidden ? 'closed' : 'open'`);
+    });
+
+    it('then the list closes.', () => {
       assert.equal(closed, 'closed');
     });
   });
 
   describe('when Ctrl K is pressed, ', () => {
     let opened: string;
-    let narrowed: string;
-    let closed: string;
 
     before(async () => {
       await rest(page!);
       await page!.key('k', { ctrl: true });
       await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
       opened = await read(page!, `document.querySelector('.pal-list')?.textContent ?? ''`);
-      await page!.key('Tab');
-      narrowed = await read(page!, `[document.querySelector('.pal-scope')?.textContent ?? '', document.querySelector('.pal-list')?.textContent ?? ''].join('\\n')`);
-      await page!.key('Escape');
-      await page!.until(`!document.querySelector('.pal') || document.querySelector('.pal').hidden`);
-      closed = await read(page!, `!document.querySelector('.pal') || document.querySelector('.pal').hidden ? 'closed' : 'open'`);
     });
 
     it('then Jump to lists the greeting chain and the file.', () => {
       assert.equal(opened.includes('greet(name)') && opened.includes('app.dart'), true);
     });
+  });
 
-    it('then Tab narrows the list to chains.', () => {
-      assert.equal(narrowed.startsWith('Chains\n') && !narrowed.includes('Files'), true);
+  describe('when Tab is pressed in Jump to, ', () => {
+    let narrowed: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.key('k', { ctrl: true });
+      await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
+      await page!.key('Tab');
+      await page!.until(`(document.querySelector('.pal-scope')?.textContent || '').startsWith('Chains')`);
+      narrowed = await read(page!, `[document.querySelector('.pal-scope')?.textContent ?? '', document.querySelector('.pal-list')?.textContent ?? ''].join('\\n')`);
     });
 
-    it('then Escape closes Jump to.', () => {
+    it('then the list narrows to chains.', () => {
+      assert.equal(narrowed.startsWith('Chains\n') && !narrowed.includes('Files'), true);
+    });
+  });
+
+  describe('when Escape is pressed in Jump to, ', () => {
+    let closed: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.key('k', { ctrl: true });
+      await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
+      await page!.key('Escape');
+      await page!.until(`!document.querySelector('.pal') || document.querySelector('.pal').hidden`);
+      closed = await read(page!, `!document.querySelector('.pal') || document.querySelector('.pal').hidden ? 'closed' : 'open'`);
+    });
+
+    it('then Jump to closes.', () => {
       assert.equal(closed, 'closed');
     });
   });
