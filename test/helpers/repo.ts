@@ -114,6 +114,11 @@ export class TempRepo {
     runGit(this.dir, ['checkout', name]);
   }
 
+  /** Points `name` at `rev` and switches to it, as a rebase that starts the branch over from `rev`. */
+  resetBranch(name: string, rev: string): void {
+    runGit(this.dir, ['checkout', '-B', name, rev]);
+  }
+
   /** Merges `ref` with a merge commit even when git could fast-forward. */
   merge(opts: { ref: string; subject: string; author: Person; committer: Person }): string {
     runGit(this.dir, ['merge', '--no-ff', '-m', opts.subject, opts.ref], { env: identityEnv(opts.author, opts.committer) });

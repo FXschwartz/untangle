@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { reviewClient, type ReviewClient } from '../helpers/http.ts';
+import { jsonScript, reviewClient, waitForReview, type ReviewClient } from '../helpers/http.ts';
 import { stubGh, type GhStub } from '../helpers/gh.ts';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
@@ -143,6 +143,96 @@ describe('Given a pull request URL whose repository is a local bare repo, ', () 
 
     it('then the review offers those new commits.', () => {
       assert.equal(offered, 'offered');
+    });
+  });
+});
+
+describe('Given a merged pull request whose recorded base commit is not an ancestor of its head, ', () => {
+  let work: TempRepo | undefined;
+  let mirror = '';
+  let cache = '';
+  let gh: GhStub | undefined;
+  let baseCommit = '';
+  let fork = '';
+
+  before(() => {
+    mirror = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-mirror-'));
+    const bare = path.join(mirror, 'acme', 'sample.git');
+    fs.mkdirSync(path.dirname(bare), { recursive: true });
+    execFileSync('git', ['init', '--bare', '-b', 'main', bare], { stdio: 'ignore' });
+    execFileSync('git', ['-C', bare, 'config', 'uploadpack.allowReachableSHA1InWant', 'true'], { stdio: 'ignore' });
+    work = TempRepo.create();
+    work.write('pubspec.yaml', pubspec);
+    work.write('lib/a.dart', "void greet() {\n  print('hi');\n}\n");
+    fork = work.commit({ subject: 'start', author: ada, committer: ada });
+    work.branch('side');
+    work.write('lib/a.dart', "void greet() {\n  print('base');\n}\n");
+    baseCommit = work.commit({ subject: 'the recorded base', author: later, committer: later });
+    work.checkout('main');
+    work.branch('feature');
+    work.write('lib/a.dart', "void greet() {\n  print('hello');\n}\n");
+    const head = work.commit({ subject: 'change', author: newest, committer: newest });
+    work.remoteAdd('origin', bare);
+    work.push('origin', 'main');
+    work.push('origin', 'side');
+    execFileSync('git', ['-C', work.dir, 'push', 'origin', `HEAD:refs/pull/7/head`], { stdio: 'ignore' });
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    gh = stubGh([{
+      match: ['pr', 'view'],
+      stdout: { ...view(7, baseCommit, head), state: 'MERGED' },
+    }]);
+  });
+
+  after(() => {
+    gh?.remove();
+    work?.remove();
+    if (mirror) fs.rmSync(mirror, { recursive: true, force: true });
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when the pull request is reviewed, ', () => {
+    let run: UntangleRun | undefined;
+    let fetched = '';
+    let notes = '';
+    let base = '';
+
+    before(async () => {
+      run = await startUntangle('https://github.com/acme/sample/pull/7', {
+        cacheDir: cache,
+        gh,
+        quiet: false,
+        env: {
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: `url.file://${mirror}/.insteadOf`,
+          GIT_CONFIG_VALUE_0: 'https://github.com/',
+        },
+      });
+      const html = await waitForReview(reviewClient(run.url));
+      base = (jsonScript(html, 'd-model') as { compares: { base: { left: string } } }).compares.base.left;
+      const clone = path.join(cache, 'repos', 'github.com', 'acme', 'sample.git');
+      try {
+        execFileSync('git', ['-C', clone, 'cat-file', '-e', `${baseCommit}^{commit}`], { stdio: 'ignore' });
+        fetched = 'in the clone';
+      } catch {
+        fetched = 'missing';
+      }
+      notes = run.output().split('\n').filter((line) => line.includes('#7 is merged')).map((line) => line.trim()).join('\n');
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the recorded base commit is fetched into the clone.', () => {
+      assert.equal(fetched, 'in the clone');
+    });
+
+    it('then the progress says it compares with main as it was then.', () => {
+      assert.equal(notes, '#7 is merged: comparing with main as it was then');
+    });
+
+    it('then the comparison starts where the two histories meet.', () => {
+      assert.equal(base, fork.slice(0, 7));
     });
   });
 });

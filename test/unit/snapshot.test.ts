@@ -188,6 +188,48 @@ describe('Given reviewed marks whose base then changes the same line, ', () => {
   });
 });
 
+describe('Given reviewed marks on a file the new base deletes, ', () => {
+  let repo: TempRepo | undefined;
+  let head: string;
+  let moved: string;
+  let model: ModelCompare;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write(file, 'alpha\nold\nomega\n');
+    const oldBase = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write(file, 'alpha\nnew\nomega\n');
+    head = repo.commit({ subject: 'change', author: ada, committer: ada });
+    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    repo.checkout('main');
+    repo.delete(file);
+    moved = repo.commit({ subject: 'delete the file', author: ada, committer: ada });
+    repo.checkout('feature');
+    const hunks = hunksOf(repo.dir, moved, head);
+    model = compare(repo.dir, moved, head, [block(hunks, 'new', 'the-change')]);
+  });
+
+  after(() => repo?.remove());
+
+  describe('when the marks are replayed onto the new base, ', () => {
+    let result: string;
+    let restore = () => {};
+
+    before(() => {
+      restore = usePath(gitOnly);
+      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${loaded.replayed?.conflicts.join(' ') || 'none'}`;
+    });
+
+    after(() => restore());
+
+    it('then the file conflicts and its change goes back to unreviewed.', () => {
+      assert.equal(result, 'reviewed none\nconflicts lib/a.dart');
+    });
+  });
+});
+
 describe('Given reviewed marks whose base gains a line above the change, ', () => {
   let repo: TempRepo | undefined;
   let head: string;

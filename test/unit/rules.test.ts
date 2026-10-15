@@ -1123,3 +1123,68 @@ describe('Given a Markdown change that names a changed member in backticks, ', {
     });
   });
 });
+
+describe('Given a generated part whose new field a caller reads, ', { skip: skipDart }, () => {
+  const files = {
+    base: {
+      'lib/user.dart': "part 'user.g.dart';\n\nabstract class User with _\$User {\n  const factory User({required String name}) = _User;\n}\n",
+      'lib/user.g.dart': "part of 'user.dart';\n\nmixin _\$User {\n  String get name;\n}\n\nclass _User implements User {\n  const _User({required this.name});\n  @override\n  final String name;\n}\n",
+      'lib/main.dart': "import 'user.dart';\n\nconst user = User(name: 'a');\n\nvoid main() {\n  print(user.name);\n}\n",
+    },
+    head: {
+      'lib/user.dart': "part 'user.g.dart';\n\nabstract class User with _\$User {\n  const factory User({required String name, String? title}) = _User;\n}\n",
+      'lib/user.g.dart': "part of 'user.dart';\n\nmixin _\$User {\n  String get name;\n  String? get title;\n}\n\nclass _User implements User {\n  const _User({required this.name, this.title});\n  @override\n  final String name;\n  @override\n  final String? title;\n}\n",
+      'lib/main.dart': "import 'user.dart';\n\nconst user = User(name: 'a');\n\nvoid main() {\n  print(user.title);\n}\n",
+    },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the caller joins the factory parameter and the part is set aside.', () => {
+      assert.equal(`${chainsOf(review!)}\n${generatedOf(review!)}`, [
+        'ripple User(title) +2 -2 depth 0',
+        'lib/main.dart#0, lib/user.dart#0',
+        'L0 User.User, L1 main',
+        'main → User.User [title]',
+        'uses none, shares none, family 0',
+        'lib/user.g.dart',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a const constructor call whose second argument changes below the name, ', { skip: skipDart }, () => {
+  const call = ['  const Point(', '    1,', '    2,', '  );'].join('\n');
+  const changed = ['  const Point(', '    1,', '    3,', '  );'].join('\n');
+  const files = {
+    base: { 'lib/a.dart': `class Point {\n  const Point(this.x, this.y);\n  final int x;\n  final int y;\n}\n\nvoid main() {\n${call}\n}\n` },
+    head: { 'lib/a.dart': `class Point {\n  const Point(this.x, this.title);\n  final int x;\n  final int title;\n}\n\nvoid main() {\n${changed}\n}\n` },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the call joins that parameter.', () => {
+      assert.equal(chainsOf(review!), [
+        'ripple Point() +3 -3 depth 0',
+        'lib/a.dart#0, lib/a.dart#1, lib/a.dart#2',
+        'L0 Point.Point, L1 Point.title, L1 main',
+        'Point.Point → Point.title [title], main → Point.Point [title]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});

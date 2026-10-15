@@ -88,6 +88,16 @@ describe('Given flags for a quiet review written to a file, ', () => {
   );
 });
 
+describe('Given -- before a value that starts with a dash, ', () => {
+  it(
+    'when the flags are read, '
+    + 'then the value is the directory.',
+    () => {
+      assert.equal(parseArgs(['--', '-nope']).target, '-nope');
+    },
+  );
+});
+
 describe('Given an unknown flag, ', () => {
   it(
     'when the flags are read, '

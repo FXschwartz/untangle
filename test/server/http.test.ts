@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -313,6 +314,78 @@ describe('Given a served review that then gains a commit, ', { skip: skipDart },
 
     it('then it names the head that was reviewed.', () => {
       assert.equal(history, JSON.stringify(oldHead));
+    });
+  });
+});
+
+function postRaw(pageUrl: string, cookie: string, body: Buffer): Promise<{ status: number; text: string }> {
+  const url = new URL(pageUrl);
+  const base = url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`;
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: `${base}api/state`,
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', 'content-length': body.length },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+describe('Given a served review, ', { skip: skipDart }, () => {
+  let review: OpenReview | undefined;
+
+  before(async () => {
+    review = await serve((repo) => {
+      repo.write('lib/a.dart', "void greet() {\n  print('hi');\n}\n");
+      repo.commit({ subject: 'start', author: ada, committer: ada });
+      repo.branch('feature');
+      repo.write('lib/a.dart', "void greet() {\n  print('hello');\n}\n");
+      repo.commit({ subject: 'change', author: later, committer: later });
+    });
+  });
+
+  after(() => review?.stop());
+
+  describe('when the body is not JSON, ', () => {
+    let answer: string;
+
+    before(async () => {
+      const opened = await review!.client.open();
+      const raw = await postRaw(review!.run.url, opened.cookie ?? '', Buffer.from('hello'));
+      answer = `${raw.status} ${raw.text}`;
+    });
+
+    it('then the server answers 400 not JSON.', () => {
+      assert.equal(answer, '400 {"error":"not JSON"}');
+    });
+  });
+
+  describe('when the body is over the size limit, ', () => {
+    let answer: string;
+    let next: string;
+
+    before(async () => {
+      const opened = await review!.client.open();
+      try {
+        const raw = await postRaw(review!.run.url, opened.cookie ?? '', Buffer.alloc((32 << 20) + 1, 0x61));
+        answer = `${raw.status} ${raw.text}`;
+      } catch (error) {
+        const failed = error as NodeJS.ErrnoException;
+        answer = failed.code ? `reset ${failed.code}` : failed.message ?? '';
+      }
+      const status = await review!.client.call('status');
+      next = status.status === 200 ? 'serving' : String(status.status);
+    });
+
+    it('then the server refuses that body and still answers the next request.', () => {
+      assert.equal(`${answer}\n${next}`, 'reset ECONNRESET\nserving');
     });
   });
 });

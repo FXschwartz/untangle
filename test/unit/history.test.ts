@@ -814,6 +814,39 @@ describe('Given a branch that removes a line and then merges main, which did not
   );
 });
 
+describe('Given a branch that removes a line and then merges main, which added lines above and below it, ', () => {
+  let repo: TempRepo | undefined;
+  let mainTip: string;
+  let head: string;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('lib/a.dart', 'top\na\nkeep\ngone\nb\nend\n');
+    repo.commit({ subject: 'start', author: dated('2020-07-01T00:00:00Z'), committer: dated('2020-07-01T00:00:00Z') });
+    repo.branch('feature');
+    repo.write('lib/a.dart', 'top\na\nkeep\nb\nend\n');
+    repo.commit({ subject: 'remove the line', author: dated('2020-07-02T00:00:00Z'), committer: dated('2020-07-02T00:00:00Z') });
+    repo.checkout('main');
+    repo.write('lib/a.dart', 'header\ntop\na\nkeep\ngone\nb\nend\nfooter\n');
+    mainTip = repo.commit({ subject: 'add a header and a footer', author: dated('2020-07-03T00:00:00Z'), committer: dated('2020-07-03T00:00:00Z') });
+    repo.checkout('feature');
+    head = repo.merge({ ref: 'main', subject: 'merge main', author: dated('2020-07-04T00:00:00Z'), committer: dated('2020-07-04T00:00:00Z') });
+  });
+
+  after(() => repo?.remove());
+
+  it(
+    'when the history against main\'s tip is read, '
+    + 'then the removed line still names the commit that removed it.',
+    async () => {
+      const files = reviewFiles(repo!.dir, mainTip, head).filter((file) => file.p === 'lib/a.dart');
+      const history = await readHistory(repo!.dir, mainTip, head, files, null);
+      const gone = attributed(files, history).split('\n').find((line) => line.startsWith('-gone '));
+      assert.equal(gone, '-gone [remove the line]');
+    },
+  );
+});
+
 describe('Given a branch that deletes a file and then merges main, which did not touch that file, ', () => {
   let repo: TempRepo | undefined;
   let mainTip: string;

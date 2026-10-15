@@ -114,42 +114,113 @@ describe('Given a review opened again from the cache, ', () => {
 describe('Given reviewed marks whose base then gains a commit, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let run: UntangleRun | undefined;
   let cache = '';
-  let note = '';
+  let base = '';
 
   before(async () => {
     const built = dartRepo();
     repo = built.repo;
     gh = stubGh();
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
-    const client = reviewClient(run.url);
-    const html = await waitForReview(client);
-    const model = jsonScript(html, 'd-model') as Model;
-    const edits = model.compares.base.files.flatMap((file) => file.blocks.flatMap((block) => block.edits));
-    await client.call('state', { method: 'PUT', body: { rev: { base: edits } } });
-    await run.stop();
-    run = undefined;
+    const first = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
+    try {
+      const client = reviewClient(first.url);
+      const model = jsonScript(await waitForReview(client), 'd-model') as Model;
+      const edits = model.compares.base.files.flatMap((file) => file.blocks.flatMap((block) => block.edits));
+      await client.call('state', { method: 'PUT', body: { rev: { base: edits } } });
+    } finally {
+      await first.stop();
+    }
     repo.checkout('main');
     repo.write('lib/note.dart', 'void note() {}\n');
-    repo.commit({ subject: 'note', author: ada('2020-06-03T00:00:00Z'), committer: ada('2020-06-03T00:00:00Z') });
+    base = repo.commit({ subject: 'note', author: ada('2020-06-03T00:00:00Z'), committer: ada('2020-06-03T00:00:00Z') });
     repo.checkout('feature');
     repo.merge({ ref: 'main', subject: 'merge main', author: ada('2020-06-04T00:00:00Z'), committer: ada('2020-06-04T00:00:00Z') });
-    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
-    const again = await waitForReview(reviewClient(run.url));
-    note = again.includes('replayed onto') ? 'replayed' : 'missing';
   });
 
-  after(async () => {
-    await run?.stop();
+  after(() => {
     gh?.remove();
     repo?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
-  it('then the marks panel says the review was replayed onto the new base.', () => {
-    assert.equal(note, 'replayed');
+  describe('when untangle opens the review again, ', () => {
+    let run: UntangleRun | undefined;
+    let note = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh });
+      const config = jsonScript(await waitForReview(reviewClient(run.url)), 'd-config') as { snapshot: { note: string | null } };
+      note = config.snapshot.note ?? 'no note';
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the marks panel says the review was replayed onto the new base.', () => {
+      assert.equal(note, `replayed onto ${base.slice(0, 7)}`);
+    });
+  });
+});
+
+describe('Given reviewed marks on a file the new base deletes, and the branch rebased to add it back, ', () => {
+  let repo: TempRepo | undefined;
+  let gh: GhStub | undefined;
+  let cache = '';
+  let base = '';
+
+  before(async () => {
+    const built = dartRepo();
+    repo = built.repo;
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    const first = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
+    try {
+      const client = reviewClient(first.url);
+      const model = jsonScript(await waitForReview(client), 'd-model') as Model;
+      const edits = model.compares.base.files.flatMap((file) => file.blocks.flatMap((block) => block.edits));
+      await client.call('state', { method: 'PUT', body: { rev: { base: edits } } });
+    } finally {
+      await first.stop();
+    }
+    repo.checkout('main');
+    repo.delete('lib/a.dart');
+    base = repo.commit({ subject: 'delete the file', author: ada('2020-06-03T00:00:00Z'), committer: ada('2020-06-03T00:00:00Z') });
+    repo.resetBranch('feature', base);
+    repo.write('lib/a.dart', "void greet() {\n  print('hello');\n}\n");
+    repo.commit({ subject: 'change', author: ada('2020-06-04T00:00:00Z'), committer: ada('2020-06-04T00:00:00Z') });
+  });
+
+  after(() => {
+    gh?.remove();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when untangle opens the review again, ', () => {
+    let run: UntangleRun | undefined;
+    let note = '';
+    let reviewed = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh });
+      const config = jsonScript(await waitForReview(reviewClient(run.url)), 'd-config') as { snapshot: { note: string | null }; state: { rev: { base: number[] } } };
+      note = config.snapshot.note ?? 'no note';
+      reviewed = config.state.rev.base.join(' ') || 'nothing';
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the marks panel says the file conflicted and went back to unreviewed.', () => {
+      assert.equal(note, `replayed onto ${base.slice(0, 7)}; 1 file conflicted and went back to unreviewed`);
+    });
+
+    it('then nothing is reviewed.', () => {
+      assert.equal(reviewed, 'nothing');
+    });
   });
 });
 
@@ -230,5 +301,44 @@ describe('Given a package whose dependency cannot be resolved, ', () => {
 
   it('then the progress says pub get failed and the review is still served.', () => {
     assert.equal(progress, 'failed and served');
+  });
+});
+
+describe('Given a served review whose branch has not moved, ', () => {
+  let repo: TempRepo | undefined;
+  let gh: GhStub | undefined;
+  let run: UntangleRun | undefined;
+  let cache = '';
+  let client: ReviewClient | undefined;
+
+  before(async () => {
+    const built = dartRepo();
+    repo = built.repo;
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh, quiet: false });
+    client = reviewClient(run.url);
+    await waitForReview(client);
+  });
+
+  after(async () => {
+    await run?.stop();
+    gh?.remove();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when it is refreshed, ', () => {
+    let answer: string;
+
+    before(async () => {
+      const refresh = await client!.call('refresh', { method: 'POST' });
+      const data = refresh.data as { state?: string };
+      answer = `${data.state ?? JSON.stringify(refresh.data)}\n${run!.output().includes('up to date') ? 'up to date' : run!.output()}`;
+    });
+
+    it('then it answers current and the progress says up to date.', () => {
+      assert.equal(answer, 'current\nup to date');
+    });
   });
 });

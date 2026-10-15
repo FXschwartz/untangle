@@ -1010,6 +1010,44 @@ describe('Given a served review of feature, its pull request, a merge of two com
     });
   });
 
+  describe('when the function change is unmarked under the second commit\'s lens, ', () => {
+    let tick: string;
+    let dots: string;
+
+    before(async () => {
+      await rest(page!);
+      await history(page!);
+      await details(page!, sha['Name the parameter']);
+      await page!.click('[data-act="hd-review"]');
+      await page!.until(`!!document.querySelector('.sec:not(.lens-out) .tick:not(.lens-out)')`);
+      await page!.click('.sec:not(.lens-out) .tick:not(.lens-out)');
+      await waitForSave(page!);
+      await page!.key('Escape');
+      await page!.until(`!(document.querySelector('.t-head')?.textContent || '').includes('Name the parameter')`);
+      await history(page!);
+      await details(page!, sha['Pass the name']);
+      await page!.click('[data-act="hd-review"]');
+      await page!.until(`!!document.querySelector('.sec')`);
+      const id = await read(page!, `([...document.querySelectorAll('.sec')].find((el) => (el.textContent || '').includes('void greet(String name)')) || {}).id ?? ''`);
+      await page!.click(`#${id} .tick:not(.lens-out)`);
+      await waitForSave(page!);
+      await page!.click(`#${id} .sec-h [data-act="mark-blocks"]`);
+      await waitForSave(page!);
+      tick = await read(page!, functionTick);
+      await page!.key('Escape');
+      await history(page!);
+      dots = await read(page!, historyDots);
+    });
+
+    after(async () => {
+      await resetMarks();
+    });
+
+    it('then the change is open again and the first commit stays reviewed.', () => {
+      assert.equal(`${tick}\n${dotOf(dots, 'Name the parameter')}\n${dotOf(dots, 'Pass the name')}`, 'false\ndone\nleft');
+    });
+  });
+
   describe('when the function change is marked under Since your review, ', () => {
     let pressed: string;
 
