@@ -107,6 +107,12 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       banner = await read(page!, `document.querySelector('#vw-fresh')?.textContent ?? ''`);
     });
 
+    // Back on the branch's head: a review left behind GitHub takes no comments on lines.
+    after(async () => {
+      await page!.click('#vw-fresh [data-act="refresh"]');
+      await page!.until(`(document.querySelector('.t-head')?.textContent || '').includes(${JSON.stringify(landed.slice(0, 7))})`, 120_000);
+    });
+
     it('then a banner names the new commit and offers to refresh.', () => {
       assert.equal(banner, `New commits: ${landed.slice(0, 7)}Refresh`);
     });
@@ -119,7 +125,6 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
     let draft: string;
 
     before(async () => {
-      glowed = land('lib/notes.dart', ['// edited', '// pad 1', '// glowed'], 'Glow a line', '04').slice(0, 7);
       await rest(page!);
       await page!.click('[data-tab="chains"]');
       await page!.until(`!!document.querySelector('[data-chain]')`);
@@ -138,7 +143,8 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
       await page!.click('.th.new textarea.cmp-ta');
       await page!.type('Not yet');
-      await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes('New commits')`, 90_000);
+      glowed = land('lib/notes.dart', ['// edited', '// pad 1', '// glowed'], 'Glow a line', '04').slice(0, 7);
+      await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes(${JSON.stringify(glowed)})`, 90_000);
       await page!.click('#vw-fresh [data-act="refresh"]');
       await page!.until(`(document.querySelector('.t-head')?.textContent || '').includes('${glowed}')`, 120_000);
       where = await read(page!, `document.querySelector('.crumbs')?.textContent ?? ''`);
