@@ -2860,6 +2860,20 @@
   // going to a change scrolls there and pulses it. With "reduce motion" set, all of it is instant.
   const REDUCE = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
   const moving = () => !REDUCE.matches && typeof Element.prototype.animate === 'function';
+  // The lines a refresh's new commits changed, while they glow. The renders that follow the reload
+  // (the highlighter's, GitHub's) draw the code anew: each draws them glowing again, from where
+  // the glow had got to.
+  const GLOW_MS = 1800;
+  let glow = null;
+  function glowRows() {
+    if (!glow) return;
+    const t = Date.now() - glow.at;
+    if (t > GLOW_MS) { glow = null; return; }
+    main.querySelectorAll('.code[data-p]').forEach((code) => {
+      const ranges = glow.files[code.dataset.p];
+      if (ranges) code.querySelectorAll('[data-n]').forEach((row) => { const n = Number(row.dataset.n); if (n && ranges.some(([a, b]) => n >= a && n <= b)) { row.classList.add('glow'); row.style.animationDelay = `-${t}ms`; } });
+    });
+  }
   const EASE = 'cubic-bezier(.2, 0, 0, 1)';
   const easeOut = (p) => 1 - Math.pow(1 - p, 4);
   // What the next render is for: { mark: [block ids] } (changes marked or unmarked, sections
@@ -3119,6 +3133,7 @@
     }
     main.classList.toggle('scrolled', main.scrollTop > 2);
     motionAfter(snap);
+    glowRows();
     commentsMotion();
     if (MENU.open) renderMenu();
     renderPill();
@@ -4421,10 +4436,8 @@
   if (glowFrom && CONFIG.served) {
     api('changed?from=' + encodeURIComponent(glowFrom)).then((r) => r.json()).then((j) => {
       if (!j.files || !moving()) return;
-      main.querySelectorAll('.code[data-p]').forEach((code) => {
-        const ranges = j.files[code.dataset.p];
-        if (ranges) code.querySelectorAll('[data-n]').forEach((row) => { const n = Number(row.dataset.n); if (n && ranges.some(([a, b]) => n >= a && n <= b)) row.classList.add('glow'); });
-      });
+      glow = { files: j.files, at: Date.now() };
+      glowRows();
     }).catch(() => {});
   }
   if (SHIKI) SHIKI.load().then(() => { if (typeof SHIKI.fg === 'function') shikiFg = SHIKI.fg(); shikiOn = true; render(); }).catch(() => {});
