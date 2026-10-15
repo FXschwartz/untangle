@@ -328,14 +328,18 @@ From the review of v11:
   so the graph stays under the pointer; the names its arrows stand for show then, in the gaps
   between rows of nodes.
 - **The commits** (v15, decided in v16): a Commits tab in the sidebar draws them as a graph,
-  newest on top, opened from the head commit in the top bar; a History view shows each in full,
-  with what it touched, its checks and its reviews from GitHub, and the commits a merge brought
-  from the base under it. Picking a commit, a range, "Since your review" or a force-pushed head
-  turns on a lens: lines outside it fade (nothing is hidden), counts and keys follow it, and
-  under a commit's lens a mark covers that commit's lines, so a change is done when all its
-  commits are. Blame over the pull request's commits attributes each changed line, once per
-  review (0.1 s on #5864, 0.3 s on #5630); "since" a head is a diff from it. The lanes follow VS
-  Code's Source Control Graph (`scmHistory.ts`, MIT).
+  newest on top; the head commit in the top bar opens it as a popover too ("Changes from": the
+  presets, then a line per commit). A History view shows each with what it touched, its checks
+  and its reviews from GitHub, and the commits a merge brought from the base under it; a
+  commit clicked there opens its details under it, as Git Graph shows them: parents, author,
+  committer, dates, message, and its files as a tree or a list, each opening with the commit
+  as the lens. Picking a commit, a range, "Since your review" or a force-pushed head turns on a
+  lens, named on the head commit in the top bar: lines outside it fade (nothing is hidden),
+  counts and keys follow it, and under a commit's lens a mark covers that commit's lines, so a
+  change is done when all its commits are. Blame over the pull request's commits attributes
+  each changed line, and git log lists each commit's files, once per review (0.2 s on #5864,
+  0.7 s on #5630); "since" a head is a diff from it. The lanes follow VS Code's Source Control
+  Graph (`scmHistory.ts`, MIT).
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. Keys `n` and `p` walk the same order.
 - **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
@@ -615,6 +619,9 @@ through the page.
     covers that commit's lines; newest on top; main's commits listed in the History view; dots
     show state; lanes from VS Code's code. Later: a commit's files and lines in the History view.
   - Asked: build it as designed. Done.
+  - Asked: a commit's details in the History view, as Git Graph shows them; the lens named only
+    in the top bar, without the chip in the view's header; and B's popover on the head commit.
+    Done.
 
 ## References
 

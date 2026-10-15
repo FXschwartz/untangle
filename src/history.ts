@@ -25,7 +25,21 @@ export interface HistoryCommit {
   email: string;
   /** Author time, in seconds. */
   at: number;
+  committer: string;
+  cemail: string;
+  /** Commit time, in seconds. */
+  cat: number;
+  /** The files it changed against its first parent (a merge's: what it brought in). */
+  files: CommitFile[];
+  /** How many more files it changed than are listed. */
+  more: number;
 }
+
+/**
+ * A file a commit changed: its path (an index into History.paths), its status (A, M, D, R, C or
+ * T), the lines added and removed (-1 for a binary file), and the path a rename or copy came from.
+ */
+export type CommitFile = [number, string, number, number] | [number, string, number, number, number];
 
 export interface History {
   version: string;
@@ -33,6 +47,8 @@ export interface History {
   head: string;
   /** Newest first, in topological order. */
   commits: HistoryCommit[];
+  /** The paths the commits' files name. */
+  paths: string[];
   /**
    * For each file of the review (by index), each hunk's rows: the commit (an index into
    * commits) that wrote an added line or removed a line, -1 for context and the unknown.
@@ -48,6 +64,7 @@ interface ModelFile {
 
 const VERSION = crypto.createHash('sha256').update(fs.readFileSync(fileURLToPath(import.meta.url))).digest('hex').slice(0, 12);
 const BODY_MAX = 4000;
+const FILES_MAX = 1000;
 const WIDTH = 6;
 
 async function pool<T>(items: T[], width: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -68,13 +85,16 @@ function blameLines(out: string): Map<number, string> {
 
 /** The commits of base..head, newest first. */
 async function readCommits(repo: string, base: string, head: string): Promise<HistoryCommit[]> {
-  const out = await gitAsync(repo, ['log', '--topo-order', '--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b%x1e', `${base}..${head}`]);
+  const out = await gitAsync(repo, ['log', '--topo-order', '--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x1e', `${base}..${head}`]);
   const list = out.split('\x1e').map((r) => r.replace(/^\n/, '')).filter((r) => r.trim()).map((r) => {
-    const [sha, parents, author, email, at, subject, body] = r.split('\x00');
-    return { sha, all: parents.split(' ').filter(Boolean), author, email, at: Number(at), subject, body: (body || '').trim().slice(0, BODY_MAX) };
+    const [sha, parents, author, email, at, committer, cemail, cat, subject, body] = r.split('\x00');
+    return { sha, all: parents.split(' ').filter(Boolean), author, email, at: Number(at), committer, cemail, cat: Number(cat), subject, body: (body || '').trim().slice(0, BODY_MAX) };
   });
   const inRange = new Set(list.map((c) => c.sha));
-  const commits = list.map((c) => ({ sha: c.sha, parents: c.all.filter((p) => inRange.has(p)), outside: c.all.filter((p) => !inRange.has(p)), brought: 0, subject: c.subject, body: c.body, author: c.author, email: c.email, at: c.at }));
+  const commits: HistoryCommit[] = list.map((c) => ({
+    sha: c.sha, parents: c.all.filter((p) => inRange.has(p)), outside: c.all.filter((p) => !inRange.has(p)), brought: 0,
+    subject: c.subject, body: c.body, author: c.author, email: c.email, at: c.at, committer: c.committer, cemail: c.cemail, cat: c.cat, files: [], more: 0,
+  }));
   // A merge from outside: the commits its other parents brought that its first parent didn't have.
   await Promise.all(commits.map(async (c, i) => {
     const all = list[i].all;
@@ -85,6 +105,50 @@ async function readCommits(repo: string, base: string, head: string): Promise<Hi
     c.brought = counts.reduce((a, b) => a + b, 0);
   }));
   return commits;
+}
+
+/**
+ * The files each commit changed, against its first parent, into each commit's `files`; returns
+ * the paths they name. git's -z output: a commit's raw lines (":modes shas status", then its path,
+ * or a rename's two), then its numstat lines ("added\tremoved\tpath", or "added\tremoved\t" and a
+ * rename's two paths).
+ */
+async function readFiles(repo: string, base: string, head: string, commits: HistoryCommit[]): Promise<string[]> {
+  const args = ['log', '--topo-order', '--format=%x1e%H', '--raw', '--numstat', '-M', '--no-abbrev', '-z'];
+  // A git before 2.31 has no --diff-merges: its merges list no files.
+  const out = await gitAsync(repo, [...args, '--diff-merges=first-parent', `${base}..${head}`])
+    .catch(() => gitAsync(repo, [...args, `${base}..${head}`])).catch(() => '');
+  const paths: string[] = [], index = new Map<string, number>();
+  const at = (p: string) => { let i = index.get(p); if (i == null) { i = paths.length; paths.push(p); index.set(p, i); } return i; };
+  const bySha = new Map(commits.map((c) => [c.sha, c]));
+  for (const chunk of out.split('\x1e')) {
+    const nul = chunk.indexOf('\0');
+    const c = nul > 0 ? bySha.get(chunk.slice(0, nul).trim()) : undefined;
+    if (!c) continue;
+    const toks = chunk.slice(nul + 1).replace(/^\n/, '').split('\0');
+    const order: string[] = [], status = new Map<string, [string, string | null]>(), lines = new Map<string, [number, number]>();
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i];
+      if (t.startsWith(':')) {
+        const s = t.slice(t.lastIndexOf(' ') + 1).charAt(0);
+        const from = s === 'R' || s === 'C' ? toks[++i] : null, p = toks[++i];
+        if (p == null) break;
+        order.push(p);
+        status.set(p, [s, from]);
+        continue;
+      }
+      const m = /^(-|\d+)\t(-|\d+)\t([^]*)$/.exec(t);
+      if (!m) continue;
+      const p = m[3] || toks[(i += 2)];
+      lines.set(p, [m[1] === '-' ? -1 : Number(m[1]), m[2] === '-' ? -1 : Number(m[2])]);
+    }
+    c.files = order.slice(0, FILES_MAX).map((p): CommitFile => {
+      const [s, from] = status.get(p)!, [a, d] = lines.get(p) || [0, 0];
+      return from != null ? [at(p), s, a, d, at(from)] : [at(p), s, a, d];
+    });
+    c.more = Math.max(0, order.length - FILES_MAX);
+  }
+  return paths;
 }
 
 /** Which commit wrote each added and removed line of the review's diff. */
@@ -150,8 +214,8 @@ export async function readHistory(repo: string, base: string, head: string, file
     }
   }
   const commits = await readCommits(repo, base, head);
-  const rows = await attribute(repo, base, head, commits, files);
-  const history: History = { version: VERSION, base, head, commits, rows };
+  const [rows, paths] = await Promise.all([attribute(repo, base, head, commits, files), readFiles(repo, base, head, commits)]);
+  const history: History = { version: VERSION, base, head, commits, paths, rows };
   if (file) {
     try {
       fs.writeFileSync(file, JSON.stringify(history));

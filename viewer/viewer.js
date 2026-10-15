@@ -64,6 +64,8 @@
     sidebar: path1('M2 1L1 2V14L2 15H14L15 14V2L14 1H2ZM14 14H7V2H14V14Z'),
     minimap: svg('<path d="M2 2h7v1H2zM2 4.5h9v1H2zM2 7h5v1H2zM2 9.5h8v1H2zM2 12h6v1H2z"/><path d="M12 1h3v14h-3z" opacity=".55"/>'),
     close: path1('M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.707.708L7.293 8l-3.646 3.646.707.708L8 8.707z'),
+    listTree: path1('M1 2h12v1H1zM2.5 3h1v6.5h-1zM3.5 5.5H15v1H3.5zM3.5 9H15v1H3.5zM1 12.5h12v1H1z'),
+    listFlat: path1('M1 2h14v1H1zM1 5.5h14v1H1zM1 9h14v1H1zM1 12.5h14v1H1z'),
     history: path1('M13.507 12.324a7 7 0 0 0 .065-8.56A7 7 0 0 0 2 4.393V2H1v3.5l.5.5H5V5H2.811a6.008 6.008 0 1 1-.135 5.77l-.887.462a7 7 0 0 0 11.718 1.092zm-3.361-.97l.708-.707L8 7.792V4H7v4l.146.354 3 3z'),
   };
   // An icon button: its tooltip says what a click does; a toggle keeps one name and says whether it's on.
@@ -131,9 +133,10 @@
     try { localStorage.setItem(STORE, data); } catch (e) { /* storage unavailable */ }
   }
   window.addEventListener('pagehide', flushSave);
-  // This browser's layout: the sidebar's width and whether it shows, the minimap.
+  // This browser's layout: the sidebar's width and whether it shows, the minimap, and a commit's
+  // files as a tree or a list.
   const UI_KEY = 'untangle:ui';
-  const UI = { side: 272, sideOff: false, minimap: true, graph: true };
+  const UI = { side: 272, sideOff: false, minimap: true, graph: true, filesList: false };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
@@ -207,7 +210,7 @@
   // lens, marking a change marks the lines that commit wrote; since a head, the whole change.
   // state.lens: { kind: 'commits', shas } or { kind: 'since', from, why: 'review' | 'push' }.
   const HX = HISTORY && HISTORY.commits && HISTORY.commits.length
-    ? { index: new Map(HISTORY.commits.map((c, i) => [c.sha, i])), live: null, liveAt: 0, loading: null, since: new Map(), brought: new Map(), open: new Set() }
+    ? { index: new Map(HISTORY.commits.map((c, i) => [c.sha, i])), live: null, liveAt: 0, loading: null, since: new Map(), brought: new Map(), open: new Set(), detail: null, closed: new Set() }
     : null;
   let lensMemo = null;
   const lensOn = () => !!state.lens;
@@ -1153,9 +1156,10 @@
   }
   const editorItem = (loc) => { const t = editorTarget(loc); return t ? { label: 'Open in editor', icon: ICON.goToFile, href: t.href, title: t.title, data: t.data } : null; };
 
-  // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains. One at a time, under the
-  // button that opened it; items are the page's usual buttons (data-act, data-chain, …).
-  const MENU = { open: null, el: null };
+  // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains, the head commit's "Changes
+  // from". One at a time, under the button that opened it; items are the page's usual buttons
+  // (data-act, data-chain, …).
+  const MENU = { open: null, el: null, html: '' };
   const chainItem = (c) => { const st = stats(blocksOf(c.blocks)); const n = splitName(c.name); return { label: n.name, own: n.own, mono: true, icon: ICON.chain, data: { chain: c.id }, key: st.open ? `${st.open} to review` : 'reviewed' }; };
   // What a view's ⋯ holds: how it shows the code, and where else to go from it.
   function viewMenuItems() {
@@ -1229,31 +1233,47 @@
     }).join('');
   }
   // Draws the open menu under its button (found again after each render), or closes it when the
-  // button is gone.
+  // button is gone. Drawn again only when it changed: what has the focus, and the commits' list
+  // scrolled, stay.
   function renderMenu() {
     if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); }
-    const el = MENU.el;
-    // The marks' panel says something and has one button: a dialog, not a menu.
-    el.setAttribute('role', MENU.open === 'side' ? 'dialog' : 'menu');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'chains' ? 'Chains' : 'More');
+    const el = MENU.el, lens = MENU.open === 'lens';
+    // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
+    el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' ? 'Chains' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
+    el.classList.toggle('lens-pop', lens);
     const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
-    const items = !anchor ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : chainsMenuItems();
-    if (!items.length) { MENU.open = null; el.hidden = true; viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false')); return; }
-    el.innerHTML = menuHtml(items);
+    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : chainsMenuItems();
+    const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
+    if (!html) { MENU.open = null; MENU.html = ''; el.hidden = true; viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false')); return; }
+    if (html !== MENU.html) {
+      const list = el.querySelector('.lp-list'), top = list ? list.scrollTop : 0;
+      el.innerHTML = html;
+      MENU.html = html;
+      const again = el.querySelector('.lp-list');
+      if (again) again.scrollTop = top;
+    }
     el.hidden = false;
     anchor.setAttribute('aria-expanded', 'true');
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
-    const left = MENU.open === 'side' || MENU.open === 'chains' ? r.left : r.right - w;
+    const left = MENU.open === 'side' || MENU.open === 'chains' || lens ? r.left : r.right - w;
     el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - w - 8))}px`;
     el.style.top = `${r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
   }
   function toggleMenu(kind) {
     MENU.open = MENU.open === kind ? null : kind;
+    MENU.html = '';
+    if (MENU.open === 'lens') loadCommits();
     renderMenu();
-    // A menu's first item takes the focus; the marks' panel takes none (its one button resets).
-    const first = MENU.open && MENU.el.querySelector('.mi');
-    if (first) first.focus({ preventScroll: true });
+    // A menu's first item takes the focus, "Changes from" the scope it has; the marks' panel takes
+    // none (its one button resets).
+    const first = MENU.open && (MENU.open === 'lens' ? MENU.el.querySelector('[aria-pressed="true"]') || MENU.el.querySelector('button') : MENU.el.querySelector('.mi'));
+    if (first) {
+      first.focus({ preventScroll: true });
+      const list = first.closest('.lp-list');
+      if (list) list.scrollTop = first.offsetTop - list.clientHeight / 3;
+    }
   }
   function closeMenu() { if (MENU.open) { MENU.open = null; renderMenu(); } }
   const sources = new Map();
@@ -1888,7 +1908,7 @@
   function headerHtml(o) {
     const nav = o.nav ? iconBtn(ICON.up, 'Previous change', 'data-act="nav" data-step="-1"') + iconBtn(ICON.down, 'Next change', 'data-act="nav" data-step="1"') : '';
     const menu = viewMenuItems().length ? `<button type="button" class="ib" data-act="menu" data-menu="view" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="${MENU.open === 'view'}">${ICON.more}</button>` : '';
-    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}${lensChipHtml()}<span class="sp"></span>${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
+    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}${lensOfferHtml()}<span class="sp"></span>${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
   }
   function instancesHtml(g, blocks, key) {
     const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
@@ -2381,8 +2401,9 @@
     const who = gh.actor ? `Force-pushed by ${esc(gh.actor)}` : 'Your review, of a head the branch no longer has';
     const meta = `<code>${shortSha(gh.sha)}</code> · ${dayOf(gh.at)}${gh.replaced ? ` · ${plural(gh.replaced, 'commit')} replaced` : ''}${gh.yours && gh.actor ? ' · your review' : ''}`;
     const title = gh.here ? `The head before${gh.actor ? ' this force push' : ''}: ${shortSha(gh.sha)}. Click for what changed since.` : 'GitHub no longer has this head';
-    const inner = `${laneSvg(vm, g, dotSvg('ghost'))}<span class="${cls === 'cm-row' ? 'cm-s' : 'hs-s'}">${who}</span><span class="${cls === 'cm-row' ? 'cm-m' : 'hs-m'}">${meta}</span>`;
-    return `<button type="button" class="${cls} ghost${on ? ' in' : ''}" data-act="lens-ghost" data-sha="${gh.sha}" data-why="${gh.yours ? 'review' : 'push'}" aria-pressed="${on}"${gh.here ? '' : ' disabled'} title="${esc(title)}">${inner}${cls === 'cm-row' ? '<span class="cm-n"></span>' : ''}</button>`;
+    const inner = cls === 'lp-row' ? `${laneSvg(vm, g, dotSvg('ghost'))}<code>${shortSha(gh.sha)}</code><span class="lp-s">${who}</span><span class="cm-n"></span>`
+      : `${laneSvg(vm, g, dotSvg('ghost'))}<span class="${cls === 'cm-row' ? 'cm-s' : 'hs-s'}">${who}</span><span class="${cls === 'cm-row' ? 'cm-m' : 'hs-m'}">${meta}</span>${cls === 'cm-row' ? '<span class="cm-n"></span>' : ''}`;
+    return `<button type="button" class="${cls} ghost${on ? ' in' : ''}" data-act="lens-ghost" data-sha="${gh.sha}" data-why="${gh.yours ? 'review' : 'push'}" aria-pressed="${on}"${gh.here ? '' : ' disabled'} title="${esc(title)}">${inner}</button>`;
   }
   function flagRowHtml(vm, g, cls) {
     const rv = reviewInBranch();
@@ -2424,12 +2445,47 @@
     return h + '</div>';
   }
 
+  // ---------- "Changes from": the head commit's popover in the top bar. The lens's presets, then
+  // the graph, a line per commit; a click picks one (Shift: a range from the last one picked) and
+  // closes it.
+  function lensPopHtml() {
+    const models = graphItems(), g = laneGeom(models, 12, 30, 10, 24);
+    const rv = HX.live && HX.live.review;
+    const all = withoutLens(() => stats(M().files.flatMap((f) => f.blocks)));
+    const pre = (data, label, sub, n, on, title) => `<button type="button" class="lp-pre"${dataAttrs(data)} aria-pressed="${on}" title="${esc(title)}"><i class="rd"></i><span>${label}${sub ? `<em>${sub}</em>` : ''}</span><b>${n || ''}</b></button>`;
+    let h = `<div class="lp-h"><b>Changes from</b><span>${plural(HISTORY.commits.length, 'commit')} · head <code>${shortSha(HISTORY.commits[0].sha)}</code></span></div><div class="lp-pres">`;
+    h += pre({ act: 'lens-all' }, 'All changes', '', all.open, !state.lens, 'Every change of the pull request');
+    if (rv && rv.here) { const k = HX.index.get(rv.head); h += pre({ act: 'lens-review' }, 'Since your review', `${dayOf(rv.at)}${k ? ' · ' + plural(k, 'commit') : ''}`, sinceOpen(rv.head), isReviewLens(), `What changed since the head of your last review, ${shortSha(rv.head)} (${whenOf(rv.at)})`); }
+    // The branch's own newest commit with changes: not a merge.
+    const last = HISTORY.commits.findIndex((c, i) => c.parents.length + c.outside.length < 2 && commitState(i).total);
+    if (last >= 0) {
+      const c = HISTORY.commits[last], on = !!state.lens && state.lens.kind === 'commits' && state.lens.shas.length === 1 && state.lens.shas[0] === c.sha;
+      h += pre({ commit: c.sha }, 'The last commit with changes', `<code>${shortSha(c.sha)}</code>`, commitState(last).open, on, c.subject);
+    }
+    h += '</div><div class="lp-list" role="group" aria-label="The commits, newest first">';
+    const rvb = reviewInBranch();
+    models.forEach((vm) => {
+      if (rvb && vm.item.id === rvb.head) h += flagRowHtml(vm, g, 'lp-flag');
+      h += popRowHtml(vm, g);
+    });
+    return h + '</div><div class="lp-f"><span>Click a commit for its changes, Shift-click for a range</span><button type="button" class="btn xs" data-act="history-open" title="Every commit in full: its details, checks and reviews">History</button></div>';
+  }
+  function popRowHtml(vm, g) {
+    const it = vm.item;
+    if (it.ghost) return ghostRowHtml(vm, g, 'lp-row');
+    const c = it.c, st = commitState(it.i), on = commitInLens(it.i);
+    const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
+    const cnt = st.state === 'left' ? `<span class="cm-n left">${st.open}</span>` : st.state === 'done' ? `<span class="cm-n ok">${ICON.check}</span>` : '<span class="cm-n">—</span>';
+    const left = st.total ? `${plural(st.total, 'change')}${st.open ? `, ${st.open} to review` : ', all reviewed'}` : 'Nothing of it is left at the head';
+    return `<button type="button" class="lp-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.`)}">${svg}<code>${shortSha(c.sha)}</code><span class="lp-s">${esc(subjectOf(c).text)}</span>${cnt}</button>`;
+  }
+
   // ---------- the History view: each commit in full, what it touched, its checks and reviews
   const CHECK = { SUCCESS: ['ok', 'Checks passed'], FAILURE: ['bad', 'Checks failed'], ERROR: ['bad', 'Checks errored'], PENDING: ['wait', 'Checks running'], EXPECTED: ['wait', 'Checks expected'] };
   const REVIEW_WORD = { APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes', COMMENTED: 'commented', DISMISSED: 'dismissed' };
   function histRowHtml(vm, g) {
     const it = vm.item;
-    if (it.ghost) return `<div class="hs-row ghost">${ghostRowHtml(vm, g, 'hs-main')}</div>`;
+    if (it.ghost) return `<div class="hs-row ghost${state.lens && state.lens.kind === 'since' && state.lens.from === it.ghost.sha ? ' in' : ''}">${ghostRowHtml(vm, g, 'hs-main')}</div>`;
     const c = it.c, st = commitState(it.i), sub = subjectOf(c), on = commitInLens(it.i), m = M();
     const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
     // The chains it touched, the most first.
@@ -2445,9 +2501,9 @@
     const what = c.brought ? `brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : st.total ? `${plural(st.total, 'change')} ${perChain.size ? 'in ' + plural(perChain.size, 'chain') : 'outside chains'}` : 'nothing of it left at the head';
     const meta = `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${esc(c.author)} · ${dayOf(c.at)} · ${what}`;
     const cnt = st.state === 'left' ? `<span class="hs-n left" title="${st.open} of its changes to review">${st.open}</span>` : st.state === 'done' ? `<span class="hs-n ok" title="All of it reviewed">${ICON.check}</span>` : '<span class="hs-n">—</span>';
-    const open = HX.open.has(c.sha);
+    const open = HX.open.has(c.sha), shown = HX.detail === c.sha;
     const more = c.brought && CONFIG.served ? `<button type="button" class="btn xs" data-act="brought" data-sha="${c.sha}" aria-expanded="${open}">${open ? 'Hide them' : 'Show them'}</button>` : '';
-    return `<div class="hs-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}"><button type="button" class="hs-main" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}${c.body ? '\n\n' + c.body : ''}\n\n${shortSha(c.sha)} · ${c.author} <${c.email}> · ${whenOf(c.at)}. Click for its changes; Shift-click for a range.`)}">${svg}<span class="hs-s">${esc(sub.text)}</span><span class="hs-m">${meta}</span></button>`
+    return `<div class="hs-row${on ? ' in' : ''}${shown ? ' open' : ''}${st.state === 'gone' ? ' gone' : ''}"><button type="button" class="hs-main" data-detail="${c.sha}" aria-expanded="${shown}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n\nClick for its details; Shift-click for the changes of the commits from the last one clicked to this one.`)}">${svg}<span class="hs-s">${esc(sub.text)}</span><span class="hs-m">${meta}</span></button>`
       + `<span class="hs-x">${rv}${more}${chips}</span><span class="hs-ci${ck ? ' ' + ck[0] : ''}"${ck ? ` title="${ck[1]}"` : ''}>${ck ? (ck[0] === 'ok' ? ICON.check : ck[0] === 'bad' ? ICON.close : '•') : ''}</span>${cnt}</div>`;
   }
   // The commits a merge brought from the base's branch, under it.
@@ -2458,6 +2514,102 @@
     if (got.error) return `<div class="hs-sub">${lanes}<span class="muted">${esc(got.error)}</span></div>`;
     return got.commits.map((x) => `<div class="hs-sub" title="${esc(x.subject)}">${lanes}<code>${shortSha(x.sha)}</code><span class="hs-sub-s">${esc(x.subject)}</span><span class="muted">${esc(x.author)} · ${dayOf(x.at)}</span></div>`).join('')
       + (got.more ? `<div class="hs-sub">${lanes}<span class="muted">and more: the first ${got.commits.length} are listed</span></div>` : '');
+  }
+  // ---------- a commit's details, under its row, as Git Graph shows them: the commit, its parents,
+  // who wrote and committed it and when, its message, and the files it changed (a tree or a list),
+  // each with what's left to review of the commit there. A file opens with the commit as the lens.
+  const fullWhen = (sec) => new Date(sec * 1000).toLocaleString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZoneName: 'short' });
+  // The repository on GitHub, from the pull request's address: where a message's "#123" points.
+  const repoUrl = () => { const m = /^(https?:\/\/[^/]+\/[^/]+\/[^/]+)\/pull\/\d+/.exec(CONFIG.url || ''); return m ? m[1] : null; };
+  const linkTo = (href, text) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  // A message as text, with `code` as code, and its addresses and "#123"s as links.
+  function messageHtml(text) {
+    const repo = repoUrl();
+    return esc(text).split(/(`[^`\n]+`)/).map((part, i) => (i % 2 ? `<code>${part.slice(1, -1)}</code>`
+      : part.replace(/\bhttps?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]]/g, (u) => linkTo(u, u))
+        .replace(/(^|[\s([])#(\d+)\b/g, (all, pre, n) => (repo ? pre + linkTo(`${repo}/issues/${n}`, '#' + n) : all)))).join('');
+  }
+  // A commit's files, each with its place in the review: the commit's changes there (`total`, and
+  // `open` to review), generated, or not in the review.
+  function commitFilesOf(ci) {
+    const c = HISTORY.commits[ci], m = M();
+    const files = new Map(m.files.map((f) => [f.p, f])), gen = new Set(m.generated.map((f) => f.p));
+    const total = new Map(), open = new Map();
+    commitParts()[ci].forEach((b) => { const p = b.file.p; total.set(p, (total.get(p) || 0) + 1); if (!commitDone(b, ci)) open.set(p, (open.get(p) || 0) + 1); });
+    return (c.files || []).map(([pi, s, a, d, from]) => {
+      const p = HISTORY.paths[pi];
+      return { p, s, a, d, from: from != null ? HISTORY.paths[from] : null, f: files.get(p) || null, gen: gen.has(p), total: total.get(p) || 0, open: open.get(p) || 0 };
+    });
+  }
+  // The first line a commit wrote in a file, at the head (a removed line's: the line after it).
+  function firstLineOf(f, ci) {
+    for (let hi = 0; hi < f.hunks.length; hi++) {
+      const h = f.hunks[hi];
+      for (let ri = 0; ri < h.rows.length; ri++) {
+        if (h.rows[ri][0] === ' ' || rowCommit(f, hi, ri) !== ci) continue;
+        for (let k = ri; k < h.meta.length; k++) if (h.meta[k].n != null) return h.meta[k].n;
+        return null;
+      }
+    }
+    return null;
+  }
+  const FILE_STATUS = { A: 'added', M: 'changed', D: 'deleted', R: 'renamed', C: 'copied', T: 'changed in type' };
+  function detailFileHtml(x, sha, depth, g, flat) {
+    const at = x.p.lastIndexOf('/');
+    const name = flat && at > 0 ? `<span class="own">${esc(x.p.slice(0, at + 1))}</span><span class="fn">${esc(x.p.slice(at + 1))}</span>` : `<span class="fn">${esc(fileName(x.p))}</span>`;
+    const from = x.from ? `<span class="sn">from ${esc(flat || x.from.slice(0, x.from.lastIndexOf('/')) !== x.p.slice(0, at) ? x.from : fileName(x.from))}</span>` : '';
+    const lines = x.a < 0 ? 'binary' : `<span class="a">+${fmt(x.a)}</span><span class="d">−${fmt(x.d)}</span>`;
+    const mark = x.f ? (x.open ? '<i class="mk"></i>' : x.total ? `<i class="mk ok">${ICON.check}</i>` : '<i class="mk out"></i>') : x.gen ? '<i class="mk gen"></i>' : '<i class="mk away"></i>';
+    const where = x.f ? (x.open ? `${plural(x.open, 'change')} of this commit to review` : x.total ? 'this commit’s changes reviewed' : 'nothing of this commit left at the head') : x.gen ? 'generated, not reviewed' : 'not in this review';
+    const title = `${x.p}${x.from ? `, from ${x.from}` : ''}: ${FILE_STATUS[x.s] || x.s}, ${where}`;
+    const inner = `${g}${mark}<span class="nm">${name}${from}</span><span class="cnt">${lines}</span>`;
+    const cls = `sb-row tr s-${x.s.toLowerCase()}${x.gen ? ' gen' : ''}`;
+    if (!x.f && !x.gen) return `<div class="${cls} away" style="--d:${depth}" title="${esc(title)}">${inner}</div>`;
+    return `<button type="button" class="${cls}" data-act="hd-open" data-p="${esc(x.p)}" data-sha="${sha}" style="--d:${depth}" title="${esc(title + (x.total ? '. Click for them, this commit’s lines alone' : '. Click to open it'))}">${inner}</button>`;
+  }
+  // As a tree, folders first; a folder that holds only a folder shows with it, as in the Files tab.
+  function detailFilesHtml(list, sha) {
+    if (UI.filesList) return list.map((x) => detailFileHtml(x, sha, 0, '', true)).join('');
+    const rows = [];
+    const walk = (nd, dp) => {
+      [...nd.dirs.values()].sort((x, y) => byName(x.name, y.name)).forEach((d) => {
+        let name = d.name;
+        while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
+        const key = sha + ':' + d.path, open = !HX.closed.has(key);
+        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir" data-act="hd-dir" data-key="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span><span class="cnt"></span></button>` });
+        if (open) walk(d, dp + 1);
+      });
+      nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((x) => rows.push({ depth: dp, html: (g) => detailFileHtml(x, sha, dp, g, false) }));
+    };
+    walk(fileTree(list), 0);
+    return rows.map((r, k) => r.html(guides(r.depth, k + 1 < rows.length ? rows[k + 1].depth : -1))).join('');
+  }
+  function detailHtml(vm, g) {
+    const c = vm.item.c, ci = vm.item.i, st = commitState(ci), list = commitFilesOf(ci);
+    const merge = c.parents.length + c.outside.length > 1;
+    const lanes = `<span class="lanes-v" style="width:${g.width}px" aria-hidden="true">${vm.output.map((n, i) => `<i class="${n.k}" style="left:${g.pad + i * g.W}px"></i>`).join('')}</span>`;
+    const parent = (p) => `<button type="button" class="linkish" data-act="hd-go" data-sha="${p}" title="${esc(HISTORY.commits[HX.index.get(p)].subject)}: its details"><code>${shortSha(p)}</code></button>`;
+    const away = (p) => `<code title="${esc(p)}">${shortSha(p)}</code> <span class="muted">${merge ? 'from ' + esc(baseName()) : 'where the branch starts'}</span>`;
+    const person = (name, email) => `${esc(name)}${email ? ` <span class="muted">&lt;<a href="mailto:${esc(email)}">${esc(email)}</a>&gt;</span>` : ''}`;
+    const facts = [
+      ['Commit', `<code>${c.sha}</code>`],
+      ['Parents', [...c.parents.map(parent), ...c.outside.map(away)].join(', ') || '<span class="muted">none</span>'],
+      ['Author', person(c.author, c.email)],
+      c.cemail && (c.committer !== c.author || c.cemail !== c.email) ? ['Committer', person(c.committer, c.cemail)] : null,
+      ['Date', esc(fullWhen(c.at))],
+      c.cat && Math.abs(c.cat - c.at) > 60 ? ['Committed', esc(fullWhen(c.cat))] : null,
+    ].filter(Boolean).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    const msg = `<div class="hd-msg"><p class="hd-subj">${messageHtml(c.subject)}</p>${c.body ? `<p class="hd-text">${messageHtml(c.body)}</p>` : ''}</div>`;
+    const only = !!state.lens && state.lens.kind === 'commits' && state.lens.shas.length === 1 && state.lens.shas[0] === c.sha;
+    const acts = st.total
+      ? `<div class="hd-acts">${st.open ? `<button type="button" class="btn primary sm" data-act="hd-review" data-sha="${c.sha}" title="Only this commit’s changes count, from the first chain with some to review">Review its changes · ${st.open}</button>` : ''}<button type="button" class="btn sm" data-act="hd-lens" data-sha="${c.sha}" aria-pressed="${only}" title="${only ? 'Back to every change (Esc)' : 'Only this commit’s changes count, in every view'}">${only ? ICON.check : ''}Only its changes</button></div>`
+      : '<p class="hd-none">None of its lines are left at the head.</p>';
+    const adds = list.reduce((n, x) => n + Math.max(0, x.a), 0), dels = list.reduce((n, x) => n + Math.max(0, x.d), 0);
+    const against = merge && list.length ? ` · against <code>${shortSha(c.parents[0] || c.outside[0])}</code>, its first parent` : '';
+    const fh = `<div class="hd-fh">${plural(list.length + (c.more || 0), 'file')}${list.length && !c.more ? ` · <span class="a">+${fmt(adds)}</span> <span class="d">−${fmt(dels)}</span>` : ''}${against}</div>`;
+    const files = list.length ? detailFilesHtml(list, c.sha) + (c.more ? `<div class="hd-more">and ${fmt(c.more)} more</div>` : '') : '<div class="hd-more">No files changed</div>';
+    const rail = `<div class="hd-rail">${iconBtn(ICON.close, 'Close (Esc)', 'data-act="hd-close"')}${iconBtn(ICON.listTree, 'Files as a tree', 'data-act="hd-view" data-v="tree"', { label: 'Files as a tree', on: !UI.filesList })}${iconBtn(ICON.listFlat, 'Files as a list', 'data-act="hd-view" data-v="list"', { label: 'Files as a list', on: !!UI.filesList })}</div>`;
+    return `<div class="hs-detail" data-detail-of="${c.sha}">${lanes}<div class="hd-in"><div class="hd-info"><dl class="hd-facts">${facts}</dl>${msg}${acts}</div><div class="hd-files">${fh}<div role="group" aria-label="The files it changed">${files}</div></div>${rail}</div></div>`;
   }
   function renderHistory() {
     if (!hxOn()) return headerHtml({ crumbs: '<b class="ui">History</b>' }) + '<div class="empty">git couldn’t tell this review’s commits.</div>';
@@ -2480,6 +2632,7 @@
     models.forEach((vm) => {
       if (rvb && vm.item.id === rvb.head) h += `<div class="hs-row">${flagRowHtml(vm, g, 'hs-flag')}</div>`;
       h += histRowHtml(vm, g);
+      if (vm.item.c && HX.detail === vm.item.c.sha) h += detailHtml(vm, g);
       if (vm.item.c && vm.item.c.brought && HX.open.has(vm.item.c.sha)) h += broughtHtml(vm, g);
     });
     const last = list[list.length - 1];
@@ -2487,7 +2640,7 @@
     return h + '</div>';
   }
 
-  // ---------- the lens: chip, labels, and what turns it on
+  // ---------- the lens: its name, and what turns it on
   function lensLabel() {
     const ln = state.lens;
     if (!ln) return '';
@@ -2499,13 +2652,13 @@
     if (ln.shas.length === 1) { const c = HISTORY.commits[HX.index.get(ln.shas[0])]; return `${shortSha(ln.shas[0])} · ${trunc(subjectOf(c).text, 30)}`; }
     return `${ln.shas.length} commits`;
   }
-  // The header's chip: the lens while one is on, else an offer of what's new since your review.
-  const LENS_VIEWS = new Set(['chain', 'file', 'standalone', 'group', 'map', 'history']);
-  function lensChipHtml() {
-    if (!hxOn() || !LENS_VIEWS.has(state.view.kind)) return '';
-    if (state.lens) return `<span class="lens-chip"><button type="button" data-act="commits-open" title="Only these changes count: the Commits tab">${esc(lensLabel())}</button><button type="button" class="x" data-act="lens-clear" title="Back to every change (Esc)" aria-label="Back to every change">${ICON.close}</button></span>`;
+  // While no lens is on, a view's header offers what's new since your review. The lens, once on,
+  // names itself on the head commit in the top bar.
+  const LENS_VIEWS = new Set(['chain', 'file', 'standalone', 'group', 'map']);
+  function lensOfferHtml() {
+    if (!hxOn() || state.lens || !LENS_VIEWS.has(state.view.kind)) return '';
     const rv = HX.live && HX.live.review;
-    const n = rv && rv.here && state.view.kind !== 'history' ? sinceOpen(rv.head) : 0;
+    const n = rv && rv.here ? sinceOpen(rv.head) : 0;
     return n ? `<button type="button" class="lens-offer" data-act="lens-review" title="Show only what changed since the head of your last review, ${shortSha(rv.head)}">New since your review<i>${n}</i></button>` : '';
   }
   function setLens(lens) {
@@ -2895,6 +3048,16 @@
     if (g) glideTo(g, headH(), 0, () => {});
   }
 
+  // The open commit's row and details on screen, scrolling no more than that takes.
+  function revealDetail() {
+    const panel = main.querySelector('.hs-detail');
+    if (!panel) return;
+    const box = main.getBoundingClientRect(), top = box.top + headH() + 8, bottom = box.bottom - 72;
+    const r0 = (panel.previousElementSibling || panel).getBoundingClientRect(), r1 = panel.getBoundingClientRect();
+    let dy = r1.bottom > bottom ? r1.bottom - bottom : 0;
+    if (r0.top - dy < top) dy = r0.top - top;
+    if (dy) main.scrollTo({ top: main.scrollTop + dy, behavior: moving() ? 'smooth' : 'auto' });
+  }
   // ---------- render
   function render(opts) {
     opts = opts || {};
@@ -2929,6 +3092,7 @@
       if (el) { placeRow(el, headH() + 8); el.classList.add('flash-sec'); }
     } else if (opts.top) main.scrollTop = 0;
     else main.scrollTop = keep;
+    if (opts.reveal) revealDetail();
     const cur = side.querySelector('[aria-current="true"]');
     if (cur && opts.top) {
       if (cur.offsetTop < side.scrollTop || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - side.clientHeight / 3;
@@ -2977,7 +3141,7 @@
     const head = (CONFIG.head || M().raw.right || '').slice(0, 7);
     const h = (CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`)
       + (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
-      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="commits-open" title="${state.lens ? esc(lensLabel()) + ': the Commits tab' : 'The commits: review some of them'}">${state.lens ? esc(lensLabel()) : esc(head)}</button>` : esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
+      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="menu" data-menu="lens" aria-haspopup="dialog" aria-expanded="${MENU.open === 'lens'}" title="${state.lens ? `Only these changes count: ${esc(lensLabel())}. Pick others, or all of them` : 'Changes from every commit: pick some to review only theirs'}"><span>${state.lens ? esc(lensLabel()) : esc(head)}</span>${ICON.chevronDown}</button>` : esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
       + '<span class="t-unsaved" title="untangle doesn’t answer: is it still running?">Marks not saved</span>';
     if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
   }
@@ -3215,7 +3379,7 @@
       keysEl.innerHTML = '<h2>Keys</h2><dl>'
         + [[k('j', 'k'), 'Next and previous change to review'], [k('Space'), 'Mark the change reviewed and go to the next one'], [k('Shift', 'Space'), 'Mark the hunk, or the member in a chain'],
           [k('n', 'p'), 'Next and previous chain with changes to review'], [k(MOD, 'K'), 'Jump to a chain, file, symbol or thread'],
-          [k('c'), 'Comment on the line you’re on'], [k(MOD, 'B'), 'Show or hide the sidebar'], [k('Esc'), 'Close the peek, the palette or a menu; then show every change again (the lens off)'], [k('?'), 'These keys']]
+          [k('c'), 'Comment on the line you’re on'], [k(MOD, 'B'), 'Show or hide the sidebar'], [k('Esc'), 'Close the peek, the palette, a menu or a commit’s details; then show every change again (the lens off)'], [k('?'), 'These keys']]
           .map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('') + '</dl>';
       viewer.appendChild(keysEl);
     }
@@ -3726,7 +3890,7 @@
     if (k != null) { setDraft(k, e.target.value); if (GH.on) mentionUpdate(e.target); }
   });
   viewer.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],.ref');
+    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],[data-detail],.ref');
     if (t && t.closest('.menu')) closeMenu();
     if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
@@ -3781,15 +3945,21 @@
     }
     // A commit: its changes become the lens (Shift: the commits from the last one clicked).
     if (d.commit && !d.act) return lensCommit(d.commit, e.shiftKey);
+    // A commit in the History view: its details (Shift: the lens, as above).
+    if (d.detail && !d.act) {
+      if (e.shiftKey) return lensCommit(d.detail, true);
+      HX.detail = HX.detail === d.detail ? null : d.detail;
+      HX.anchor = HX.index.get(d.detail);
+      return render({ reveal: !!HX.detail });
+    }
     if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); }
     if (d.standalone) { state.view = { kind: 'standalone' }; state.peek = null; return render({ top: true }); }
     if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
     if (act === 'jump') return palOpen();
-    if (act === 'commits-open') { state.tab = 'commits'; if (UI.sideOff) toggleSide(); loadCommits(); return render(); }
     if (act === 'history-open') { state.view = { kind: 'history' }; state.peek = null; state.focus = null; loadCommits(); return render({ top: true }); }
-    if (act === 'lens-all' || act === 'lens-clear') return setLens(null);
+    if (act === 'lens-all') return setLens(null);
     if (act === 'lens-review') { const rv = HX && HX.live && HX.live.review; if (rv) lensSince(rv.head, 'review', d.go === '1'); return; }
     if (act === 'lens-ghost') return lensSince(d.sha, d.why === 'review' ? 'review' : 'push');
     if (act === 'lens-go') return lensGo();
@@ -3798,6 +3968,29 @@
       lensMemo = null; navAt = null; HX.anchor = HX.index.get(d.sha);
       state.view = { kind: 'chain', id: Number(d.chainId) }; state.peek = null; state.focus = null;
       return render({ top: true });
+    }
+    if (act === 'hd-close') { HX.detail = null; return render(); }
+    if (act === 'hd-go') { HX.detail = d.sha; HX.anchor = HX.index.get(d.sha); return render({ reveal: true }); }
+    if (act === 'hd-view') { UI.filesList = d.v === 'list'; saveUI(); return render(); }
+    if (act === 'hd-dir') {
+      HX.closed.has(d.key) ? HX.closed.delete(d.key) : HX.closed.add(d.key);
+      render();
+      const again = [...main.querySelectorAll('[data-act="hd-dir"]')].find((x) => x.dataset.key === d.key);
+      if (again) again.focus({ preventScroll: true });
+      return;
+    }
+    if (act === 'hd-lens') {
+      const cur = state.lens;
+      HX.anchor = HX.index.get(d.sha);
+      return setLens(cur && cur.kind === 'commits' && cur.shas.length === 1 && cur.shas[0] === d.sha ? null : { kind: 'commits', shas: [d.sha] });
+    }
+    if (act === 'hd-review') { state.lens = { kind: 'commits', shas: [d.sha] }; lensMemo = null; navAt = null; HX.anchor = HX.index.get(d.sha); return lensGo(); }
+    // A commit's file: its lines from that commit, the commit as the lens.
+    if (act === 'hd-open') {
+      const ci = HX.index.get(d.sha), f = M().files.find((x) => x.p === d.p);
+      if (!f || ci == null || !commitParts()[ci].some((b) => b.file === f)) return openFile(d.p);
+      state.lens = { kind: 'commits', shas: [d.sha] }; lensMemo = null; navAt = null; HX.anchor = ci;
+      return openFile(d.p, f.s === 'D' ? null : firstLineOf(f, ci));
     }
     if (act === 'brought') {
       const sha = d.sha;
@@ -3924,7 +4117,15 @@
       if (MENU.open) return closeMenu();
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
       if (state.peek) { state.peek = null; return render(); }
+      if (HX && HX.detail && state.view.kind === 'history') { HX.detail = null; return render(); }
       if (state.lens) return setLens(null);
+      return;
+    }
+    // Up and down walk an open menu.
+    if (MENU.open && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && MENU.el.contains(document.activeElement)) {
+      const items = [...MENU.el.querySelectorAll('button:not(:disabled), a[href]')];
+      const next = items[(items.indexOf(document.activeElement) + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+      if (next) { e.preventDefault(); next.focus(); }
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey || typingIn(e.target) || PAL.open) return;
