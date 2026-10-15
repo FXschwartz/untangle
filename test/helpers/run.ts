@@ -140,7 +140,7 @@ function waitForUrl(child: ChildProcess, text: { out: () => string; err: () => s
     };
     const timer = setTimeout(() => finish(new Error(`untangle did not print a URL\n${text.err()}\n${text.out()}`)), 60_000);
     const look = () => {
-      const match = /http:\/\/127\.0\.0\.1:\d+\/\S*/.exec(`${text.out()}\n${text.err()}`);
+      const match = /http:\/\/127\.0\.0\.\d+:\d+\/\S*/.exec(`${text.out()}\n${text.err()}`);
       if (match) finish(null, match[0].trim());
     };
     child.stdout?.on('data', look);

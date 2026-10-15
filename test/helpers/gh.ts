@@ -25,6 +25,8 @@ export interface GhStub {
   /** PATH, the call log and the reply config for the process under test. */
   readonly env: NodeJS.ProcessEnv;
   calls(): GhCall[];
+  /** Later calls answer these replies. The stub reads the file on every call. */
+  setReplies(next: GhReply[]): void;
   remove(): void;
 }
 
@@ -60,6 +62,18 @@ export function stubGh(replies: GhReply[] = []): GhStub {
     calls() {
       if (!fs.existsSync(log)) return [];
       return fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as GhCall);
+    },
+    /** Later calls answer these replies. The stub reads the file on every call. */
+    setReplies(next: GhReply[]) {
+      fs.writeFileSync(config, JSON.stringify({
+        replies: next.map((reply) => ({
+          match: reply.match,
+          stdinIncludes: reply.stdinIncludes,
+          stdout: stdoutOf(reply.stdout),
+          stderr: reply.stderr,
+          code: reply.code,
+        })),
+      }));
     },
     remove() {
       fs.rmSync(binDir, { recursive: true, force: true });

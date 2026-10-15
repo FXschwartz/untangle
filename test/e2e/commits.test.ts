@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1038,4 +1039,51 @@ describe('Given a served review of feature, its pull request, a merge of two com
       assert.equal(pressed, 'reviewed');
     });
   });
+
+  describe('when each commit\'s lens is opened on the greeting, ', () => {
+    let named: string;
+    let passed: string;
+
+    before(async () => {
+      const blamed = blameOf(repoDir);
+      const lines = async (subject: string) => {
+        await rest(page!);
+        await page!.click('[data-tab="commits"]');
+        await page!.until(`!!document.querySelector('.cm-row')`);
+        await page!.click(`.cm-row[data-commit="${sha[subject]}"]`);
+        await page!.until(`(document.querySelector('.t-head')?.textContent || '').includes(${JSON.stringify(subject)})`);
+        await chain(page!);
+        const rows = JSON.parse(String(await page!.eval(`JSON.stringify([...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln.add')].map((el) => ({ n: Number(el.querySelector('.no')?.textContent), faded: el.classList.contains('lens-out') })))`))) as Array<{ n: number; faded: boolean }>;
+        if (!rows.length) throw new Error(`no added lines under ${subject}`);
+        const seen = rows.map((row) => `${row.n} ${row.faded ? 'faded' : 'shown'}`).join(', ');
+        const want = rows.map((row) => `${row.n} ${blamed.get(row.n) === sha[subject] ? 'shown' : 'faded'}`).join(', ');
+        return `${seen}\n${want}`;
+      };
+      named = await lines('Name the parameter');
+      passed = await lines('Pass the name');
+    });
+
+    it('then a line stays only when git blame says that commit wrote it.', () => {
+      const [namedSeen, namedWant] = splitPair(named);
+      const [passedSeen, passedWant] = splitPair(passed);
+      assert.equal(`${namedSeen}\n${passedSeen}`, `${namedWant}\n${passedWant}`);
+    });
+  });
 });
+
+function splitPair(value: string): [string, string] {
+  const at = value.indexOf('\n');
+  return [value.slice(0, at), value.slice(at + 1)];
+}
+
+/** The head commit that wrote each line of lib/app.dart, from git blame. */
+function blameOf(dir: string): Map<number, string> {
+  const out = execFileSync('git', ['-C', dir, 'blame', '-l', '--', 'lib/app.dart'], { encoding: 'utf8' });
+  const lines = new Map<number, string>();
+  for (const line of out.split('\n')) {
+    const sha = /^([0-9a-f]{40}) /.exec(line);
+    const number = / (\d+)\)/.exec(line);
+    if (sha && number) lines.set(Number(number[1]), sha[1]);
+  }
+  return lines;
+}

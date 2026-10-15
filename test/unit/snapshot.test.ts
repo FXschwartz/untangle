@@ -1,9 +1,35 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { fileHunks } from '../../dist/pipeline/diff.js';
 import { Snapshot, type ModelCompare } from '../../dist/snapshot.js';
 import { TempRepo, type Person } from '../helpers/repo.ts';
+
+/** git, and not a mergiraf that happens to be installed for the user. */
+const gitOnly = '/usr/bin:/bin';
+
+function usePath(value: string): () => void {
+  const previous = process.env.PATH;
+  process.env.PATH = value;
+  return () => {
+    if (previous === undefined) delete process.env.PATH;
+    else process.env.PATH = previous;
+  };
+}
+
+/** A mergiraf that records its arguments and writes a clean merge or conflict markers. */
+function stubMergiraf(mode: 'clean' | 'conflict'): { path: string; log: string; remove(): void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-mergiraf-'));
+  const log = path.join(dir, 'calls.log');
+  const source = path.join(path.dirname(fileURLToPath(import.meta.url)), '../helpers/mergiraf-stub.mjs');
+  const script = `#!/usr/bin/env bash\nexport MERGIRAF_LOG=${JSON.stringify(log)}\nexport MERGIRAF_MODE=${mode}\nexec node ${JSON.stringify(source)} "$@"\n`;
+  fs.writeFileSync(path.join(dir, 'mergiraf'), script, { mode: 0o755 });
+  return { path: `${dir}${path.delimiter}${gitOnly}`, log, remove: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
 
 const ada: Person = { name: 'Ada Review', email: 'ada@example.com', date: '2020-06-01T00:00:00Z' };
 const file = 'lib/a.dart';
@@ -146,11 +172,15 @@ describe('Given reviewed marks whose base then changes the same line, ', () => {
 
   describe('when the marks are replayed onto the new base, ', () => {
     let result: string;
+    let restore = () => {};
 
     before(() => {
+      restore = usePath(gitOnly);
       const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
     });
+
+    after(() => restore());
 
     it('then the conflicting file goes back to unreviewed.', () => {
       assert.equal(result, 'reviewed none\nconflicts lib/a.dart');
@@ -184,14 +214,112 @@ describe('Given reviewed marks whose base gains a line above the change, ', () =
 
   describe('when the marks are replayed onto the new base, ', () => {
     let result: string;
+    let restore = () => {};
 
     before(() => {
+      restore = usePath(gitOnly);
       const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].sort().join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
     });
 
+    after(() => restore());
+
     it('then the change stays reviewed and nothing conflicts.', () => {
       assert.equal(result, 'reviewed the-change\nconflicts none');
+    });
+  });
+});
+
+describe('Given reviewed marks whose base changes the same line, and mergiraf is a clean merge, ', () => {
+  let repo: TempRepo | undefined;
+  let head: string;
+  let moved: string;
+  let model: ModelCompare;
+  let mergiraf: ReturnType<typeof stubMergiraf> | undefined;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write(file, 'alpha\nold\nomega\n');
+    const oldBase = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write(file, 'alpha\nnew\nomega\n');
+    head = repo.commit({ subject: 'change', author: ada, committer: ada });
+    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    repo.checkout('main');
+    repo.write(file, 'alpha\nother\nomega\n');
+    moved = repo.commit({ subject: 'rebase', author: ada, committer: ada });
+    repo.checkout('feature');
+    model = compare(repo.dir, moved, head, [block(hunksOf(repo.dir, moved, head), 'new', 'the-change')]);
+    mergiraf = stubMergiraf('clean');
+  });
+
+  after(() => {
+    mergiraf?.remove();
+    repo?.remove();
+  });
+
+  describe('when the marks are replayed onto the new base, ', () => {
+    let result: string;
+    let asked: string;
+    let restore = () => {};
+
+    before(() => {
+      restore = usePath(mergiraf!.path);
+      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
+      asked = fs.readFileSync(mergiraf!.log, 'utf8');
+    });
+
+    after(() => restore());
+
+    it('then mergiraf keeps the mark and is asked about the file.', () => {
+      assert.equal(`${result}\n${asked.includes('lib/a.dart') ? 'lib/a.dart' : asked}`, 'reviewed the-change\nconflicts none\nlib/a.dart');
+    });
+  });
+});
+
+describe('Given reviewed marks whose base changes the same line, and mergiraf leaves conflict markers, ', () => {
+  let repo: TempRepo | undefined;
+  let head: string;
+  let moved: string;
+  let model: ModelCompare;
+  let mergiraf: ReturnType<typeof stubMergiraf> | undefined;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write(file, 'alpha\nold\nomega\n');
+    const oldBase = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write(file, 'alpha\nnew\nomega\n');
+    head = repo.commit({ subject: 'change', author: ada, committer: ada });
+    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    repo.checkout('main');
+    repo.write(file, 'alpha\nother\nomega\n');
+    moved = repo.commit({ subject: 'rebase', author: ada, committer: ada });
+    repo.checkout('feature');
+    model = compare(repo.dir, moved, head, [block(hunksOf(repo.dir, moved, head), 'new', 'the-change')]);
+    mergiraf = stubMergiraf('conflict');
+  });
+
+  after(() => {
+    mergiraf?.remove();
+    repo?.remove();
+  });
+
+  describe('when the marks are replayed onto the new base, ', () => {
+    let result: string;
+    let restore = () => {};
+
+    before(() => {
+      restore = usePath(mergiraf!.path);
+      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
+    });
+
+    after(() => restore());
+
+    it('then the merge falls back to git and the file goes back to unreviewed.', () => {
+      assert.equal(result, 'reviewed none\nconflicts lib/a.dart');
     });
   });
 });

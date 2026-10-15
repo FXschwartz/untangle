@@ -507,6 +507,58 @@ scenario(
 );
 
 scenario(
+  'Given report gains a parameter while it starts mentioning price, and checkout starts passing price a new parameter, ',
+  {
+    base: {
+      'lib/a.dart': [
+        'int price(int a) => a;',
+        '',
+        'int checkout() => price(2);',
+        '',
+        'void report() {',
+        '  print(0);',
+        '}',
+        '',
+        'void main() {',
+        '  report();',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    head: {
+      'lib/a.dart': [
+        'int price(int a, {int tax = 0}) => a + tax;',
+        '',
+        'int checkout() => price(2, tax: 1);',
+        '',
+        'void report({bool short = false}) {',
+        '  print(price);',
+        '}',
+        '',
+        'void main() {',
+        '  report(short: true);',
+        '}',
+        '',
+      ].join('\n'),
+    },
+  },
+  'then report uses price, price sits one level deeper, and they are one family.',
+  chainsOf,
+  [
+    'ripple price +4 -4 depth 1',
+    'lib/a.dart#0, lib/a.dart#1, lib/a.dart#2',
+    'L0 price, L1 checkout, L1 report',
+    'checkout → price [tax], report → price [price]',
+    'uses none, shares 1, family 0',
+    'ripple report(short) +3 -3 depth 0',
+    'lib/a.dart#2, lib/a.dart#3',
+    'L0 report, L1 main',
+    'main → report [short]',
+    'uses 0, shares 0, family 0',
+  ].join('\n'),
+);
+
+scenario(
   'Given the same bang inserted in two calls, ',
   {
     base: { 'lib/a.dart': "void a() {\n  print('hi');\n}\n\nvoid b() {\n  print('hi');\n}\n" },

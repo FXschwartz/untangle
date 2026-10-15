@@ -69,6 +69,10 @@ export interface Browser {
   key(key: string, opts?: { shift?: boolean; ctrl?: boolean }): Promise<void>;
   setViewport(width: number, height: number): Promise<void>;
   reducedMotion(on: boolean): Promise<void>;
+  /** Installs a fake clock before the next document's scripts run. */
+  installClock(): Promise<void>;
+  /** Moves the fake clock and runs the timers that came due. */
+  advance(ms: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -282,9 +286,39 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     async reducedMotion(on: boolean) {
       await session('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: on ? 'reduce' : 'no-preference' }] });
     },
+    async installClock() {
+      await session('Page.addScriptToEvaluateOnNewDocument', { source: CLOCK });
+    },
+    async advance(ms: number) {
+      await evaluate(`window.__advance(${ms})`);
+    },
     close,
   };
 }
+
+// A clock the page's own timers see. Date.now moves only when the test advances it, and the
+// timers scheduled with setTimeout and setInterval fire then.
+const CLOCK = `(() => {
+  const realNow = Date.now.bind(Date);
+  let offset = 0;
+  const timers = [];
+  let next = 1;
+  Date.now = () => realNow() + offset;
+  const drop = (id) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); };
+  window.setTimeout = (fn, ms, ...args) => { const id = next++; timers.push({ id, fn, args, at: Date.now() + (ms || 0), interval: false }); return id; };
+  window.setInterval = (fn, ms, ...args) => { const id = next++; timers.push({ id, fn, args, at: Date.now() + (ms || 0), interval: true, every: ms || 0 }); return id; };
+  window.clearTimeout = drop;
+  window.clearInterval = drop;
+  window.__advance = (ms) => {
+    offset += ms;
+    const due = timers.filter((t) => t.at <= Date.now()).sort((a, b) => a.at - b.at);
+    for (const t of due) {
+      if (t.interval) t.at = Date.now() + t.every;
+      else drop(t.id);
+      t.fn(...t.args);
+    }
+  };
+})();`;
 
 async function poll(evaluate: (expression: string) => Promise<unknown>, expression: string, ms: number): Promise<unknown> {
   const deadline = Date.now() + ms;
