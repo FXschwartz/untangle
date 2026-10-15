@@ -1188,3 +1188,59 @@ describe('Given a const constructor call whose second argument changes below the
     });
   });
 });
+
+describe('Given a new class nothing uses, whose methods call each other in two pairs, ', { skip: skipDart }, () => {
+  const box = 'class Box {\n  int width() => _w();\n\n  int _w() => 1;\n\n  int height() => _h();\n\n  int _h() => 2;\n}\n';
+  const files = {
+    base: { 'lib/a.dart': 'void main() {}\n' },
+    head: { 'lib/a.dart': `void main() {}\n\n${box}` },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the class and its methods are one chain, named after it.', () => {
+      assert.equal(chainsOf(review!), [
+        'member Box +9 -0 depth 0',
+        'lib/a.dart#1, lib/a.dart#2, lib/a.dart#3, lib/a.dart#4, lib/a.dart#5',
+        'L0 Box._w, L1 Box.width, L2 Box, L2 Box._h, L2 Box.height',
+        'Box.width → Box._w [_w], Box.height → Box._h [_h]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a removed class whose methods called each other in two pairs, ', { skip: skipDart }, () => {
+  const box = 'class Box {\n  int width() => _w();\n\n  int _w() => 1;\n\n  int height() => _h();\n\n  int _h() => 2;\n}\n';
+  const files = {
+    base: { 'lib/a.dart': `void main() {}\n\n${box}` },
+    head: { 'lib/a.dart': 'void main() {}\n' },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the class and its methods are one chain, named after it with a minus.', () => {
+      assert.equal(chainsOf(review!), [
+        'member − Box +0 -9 depth 0',
+        'lib/a.dart#1, lib/a.dart#2, lib/a.dart#3, lib/a.dart#4, lib/a.dart#5',
+        'L0 Box._w, L1 Box.width, L2 Box, L2 Box._h, L2 Box.height',
+        'Box.width → Box._w [_w], Box.height → Box._h [_h]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});

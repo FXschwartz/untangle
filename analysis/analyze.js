@@ -1080,13 +1080,13 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     chains = [...byName.values()];
     // A new or removed type is one chain with its members. Chains that never leave a new file
     // are one chain: the file.
-    const newTypes = new Map(), removedTypes = new Map();
+    const newTypes = new Map(), removedTypes = new Map(), typeBlocks = [];
     files.forEach((f) => [[f.newTree, plusRow, newTypes, 'dels'], [f.oldTree, minusRow, removedTypes, 'adds']].forEach(([tree, rows, map, other]) => {
       if (!tree) return;
       for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
         const n = tree.rootNode.namedChild(i), nm = TYPES.has(n.type) && (n.childForFieldName('name') || n.namedChildren.find((x) => x.type === 'identifier'));
         const hit = nm && rows.get(f.p + ':' + (nm.startPosition.row + 1));
-        if (hit && !hit.b[other]) map.set(nm.text, f);
+        if (hit && !hit.b[other]) { map.set(nm.text, f); typeBlocks.push([nm.text, hit.b]); }
       }
     }));
     // A new type declared in a new file folds with that file.
@@ -1121,6 +1121,12 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       keep.name = typeName && !testFile ? (removedTypes.has(typeName) && !newTypes.has(typeName) ? '− ' : '') + typeName : path.basename(k.slice(5));
     });
     chains = chains.filter((c) => !c.folded);
+    // The type's own lines (its name, what it extends) join that chain when nothing linked them.
+    const typed = new Set(chains.flatMap((c) => [...c.blocks]));
+    typeBlocks.forEach(([t, b]) => {
+      const c = !typed.has(b) && chains.find((x) => foldKey(x) === 'type:' + t);
+      if (c) { c.blocks.add(b); typed.add(b); }
+    });
     const namesOf = (c) => {
       const out = new Set();
       c.blocks.forEach((b) => { if (b.member && b.member !== 'main') out.add(b.member.split('.').pop()); });
