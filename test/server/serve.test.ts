@@ -141,6 +141,61 @@ describe('Given a review untangle built once, into its cache, ', () => {
   });
 });
 
+describe('Given reviewed marks, and untangle stopped, ', () => {
+  let repo: TempRepo | undefined;
+  let gh: GhStub | undefined;
+  let cache = '';
+  let marked = '';
+
+  before(async () => {
+    const built = dartRepo();
+    repo = built.repo;
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    const first = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
+    try {
+      const client = reviewClient(first.url);
+      const model = jsonScript(await waitForReview(client), 'd-model') as Model;
+      const edits = model.compares.base.files.flatMap((file) => file.blocks.flatMap((block) => block.edits));
+      await client.call('state', { method: 'PUT', body: { rev: { base: edits } } });
+      marked = edits.join(' ');
+    } finally {
+      await first.stop();
+    }
+  });
+
+  after(() => {
+    gh?.remove();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when untangle opens the review again, with nothing changed, ', () => {
+    let run: UntangleRun | undefined;
+    let reviewed = '';
+    let note = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh });
+      const config = jsonScript(await waitForReview(reviewClient(run.url)), 'd-config') as { state: { rev: { base: number[] } }; snapshot: { note: string | null } };
+      reviewed = config.state.rev.base.join(' ');
+      note = config.snapshot.note ?? 'no note';
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the same changes are reviewed.', () => {
+      assert.equal(reviewed, marked);
+    });
+
+    it('then nothing had to be replayed.', () => {
+      assert.equal(note, 'no note');
+    });
+  });
+});
+
 describe('Given reviewed marks whose base then gains a commit, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
