@@ -36,6 +36,17 @@ npm run build   # the TypeScript, the highlighter (dist/highlight.js) and the fo
 npm link        # puts `untangle` on PATH
 ```
 
+## Tests
+
+```
+npm test         # build, then the unit and server tests
+npm run test:e2e # build, then the browser tests
+npm run test:all # build, then every test
+npm run check    # type-check the program and the tests
+```
+
+The tests use Node's runner (`node:test`) and need Node 22.18 or later, which runs `.ts` files without a flag. They stay offline. A missing `dart` or Chromium skips the tests that need it.
+
 ## What it does
 
 1. **Checkouts.** The base side (the merge base) is a git worktree that shares objects with the

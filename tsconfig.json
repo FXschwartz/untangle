@@ -10,6 +10,7 @@
     "noUnusedParameters": true,
     "skipLibCheck": true,
     "sourceMap": true,
+    "declaration": true,
     "types": ["node"]
   },
   "include": ["src"]
