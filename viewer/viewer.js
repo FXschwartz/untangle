@@ -1418,11 +1418,17 @@
   const drafts = new Map();
   try { Object.entries(JSON.parse(localStorage.getItem(DRAFTS) || '{}')).forEach(([k, v]) => { if (typeof v === 'string') drafts.set(k, v); }); } catch (e) { /* storage unavailable */ }
   let draftTimer = null;
+  const writeDrafts = () => { try { localStorage.setItem(DRAFTS, JSON.stringify(Object.fromEntries(drafts))); } catch (e) { /* storage unavailable */ } };
   function setDraft(key, text) {
     if (text) drafts.set(key, text); else drafts.delete(key);
     clearTimeout(draftTimer);
-    draftTimer = setTimeout(() => { try { localStorage.setItem(DRAFTS, JSON.stringify(Object.fromEntries(drafts))); } catch (e) { /* storage unavailable */ } }, 300);
+    draftTimer = setTimeout(() => { draftTimer = null; writeDrafts(); }, 300);
   }
+  // A write still waiting when the page goes away happens now: the last keys typed stay, and a
+  // comment just sent doesn't come back after a reload.
+  const flushDrafts = () => { if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; writeDrafts(); } };
+  window.addEventListener('pagehide', flushDrafts);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDrafts(); });
   // Whether lines can take new comments: GitHub places them on its head, which must be this review's.
   const canCommentLines = () => GH.on && GH.data && !GH.stale && !GH.data.pr.locked;
 
