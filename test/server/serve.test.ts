@@ -42,7 +42,8 @@ describe('Given a served review and an editor command, ', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-editor-'));
     log = path.join(dir, 'opened.txt');
     const stub = path.join(dir, 'edit');
-    fs.writeFileSync(stub, `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(log)}, process.argv.slice(2).join('\\n'));\n`, { mode: 0o755 });
+    // Written whole, then renamed: the test waits for the file to exist, so it must never see it half-written.
+    fs.writeFileSync(stub, `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(log + '.part')}, process.argv.slice(2).join('\\n'));\nfs.renameSync(${JSON.stringify(log + '.part')}, ${JSON.stringify(log)});\n`, { mode: 0o755 });
     const built = dartRepo();
     repo = built.repo;
     gh = stubGh();
