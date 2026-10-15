@@ -123,4 +123,65 @@ export class TempRepo {
   rev(ref: string): string {
     return runGit(this.dir, ['rev-parse', '--verify', ref]);
   }
+
+  /**
+   * Points `name` at a new commit with the tree of `rev` and `rev` as its parent.
+   * The worktree stays where it is.
+   */
+  commitBranch(name: string, rev: string, opts: CommitOptions): string {
+    const tree = runGit(this.dir, ['rev-parse', `${rev}^{tree}`]);
+    const body = opts.body == null ? '' : opts.body.endsWith('\n') ? opts.body : `${opts.body}\n`;
+    const message = opts.body == null ? `${opts.subject}\n` : `${opts.subject}\n\n${body}`;
+    const commit = runGit(this.dir, ['commit-tree', tree, '-p', rev, '-F', '-'], { env: identityEnv(opts.author, opts.committer), input: message });
+    runGit(this.dir, ['update-ref', `refs/heads/${name}`, commit]);
+    return commit;
+  }
+
+  /** Replaces the tip with a new commit of whatever is staged, including the previous tree. */
+  amend(opts: CommitOptions): string {
+    const body = opts.body == null ? '' : opts.body.endsWith('\n') ? opts.body : `${opts.body}\n`;
+    const message = opts.body == null ? `${opts.subject}\n` : `${opts.subject}\n\n${body}`;
+    runGit(this.dir, ['commit', '--amend', '-F', '-'], { env: identityEnv(opts.author, opts.committer), input: message });
+    return this.rev('HEAD');
+  }
+
+  hasCommit(sha: string): boolean {
+    try {
+      runGit(this.dir, ['cat-file', '-e', `${sha}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  remoteAdd(name: string, url: string): void {
+    runGit(this.dir, ['remote', 'add', name, url]);
+  }
+
+  remoteRemove(name: string): void {
+    runGit(this.dir, ['remote', 'remove', name]);
+  }
+
+  push(remote: string, ref: string): void {
+    runGit(this.dir, ['push', remote, `${ref}:${ref}`]);
+  }
+
+  config(key: string, value: string): void {
+    runGit(this.dir, ['config', key, value]);
+  }
+
+  /** Drops every commit no ref still names, so an amended head is gone until it is fetched. */
+  prune(): void {
+    runGit(this.dir, ['reflog', 'expire', '--expire=now', '--all']);
+    runGit(this.dir, ['gc', '--prune=now']);
+  }
+
+  /** A bare repository, willing to serve a commit by its sha. */
+  static bare(): TempRepo {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-origin-'));
+    execFileSync('git', ['init', '--bare', '-b', 'main', dir], { stdio: 'ignore', env: gitEnv() });
+    const repo = new TempRepo(dir);
+    repo.config('uploadpack.allowReachableSHA1InWant', 'true');
+    return repo;
+  }
 }

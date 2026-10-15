@@ -79,10 +79,14 @@ function collect(child: ChildProcess): { out: () => string; err: () => string } 
   return { out: () => out, err: () => err };
 }
 
+function leading(base: string | null | undefined): string[] {
+  return base ? ['-base', base] : [];
+}
+
 /** Serves the directory with `-port 0 -no-open` and resolves with the printed URL. */
-export async function startUntangle(dir: string, opts: { base: string; cacheDir: string; gh?: GhStub; args?: string[] }): Promise<UntangleRun> {
+export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[] }): Promise<UntangleRun> {
   const { gh, release } = ownedGh(opts.gh);
-  const child = spawnUntangle(['-base', opts.base, '-no-open', '-port', '0', '-quiet', ...(opts.args ?? []), dir], opts.cacheDir, gh);
+  const child = spawnUntangle([...leading(opts.base), '-no-open', '-port', '0', '-quiet', ...(opts.args ?? []), dir], opts.cacheDir, gh);
   const text = collect(child);
   try {
     const url = await waitForUrl(child, text);
@@ -101,9 +105,9 @@ export async function startUntangle(dir: string, opts: { base: string; cacheDir:
 }
 
 /** Writes the review with `-export` and resolves when untangle exits. */
-export async function exportUntangle(dir: string, htmlFile: string, opts: { base: string; cacheDir: string; gh?: GhStub; args?: string[] }): Promise<void> {
+export async function exportUntangle(dir: string, htmlFile: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[] }): Promise<void> {
   const { gh, release } = ownedGh(opts.gh);
-  const child = spawnUntangle(['-base', opts.base, '-no-open', '-export', htmlFile, '-quiet', ...(opts.args ?? []), dir], opts.cacheDir, gh);
+  const child = spawnUntangle([...leading(opts.base), '-no-open', '-export', htmlFile, '-quiet', ...(opts.args ?? []), dir], opts.cacheDir, gh);
   const text = collect(child);
   const timer = setTimeout(() => signal(child, 'SIGKILL'), 180_000);
   try {
