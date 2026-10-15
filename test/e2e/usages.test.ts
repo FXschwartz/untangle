@@ -130,8 +130,42 @@ describe('Given a served review of a renamed parameter and its caller, with the 
     });
   });
 
+  describe('when Open file is clicked in the peek of print, on a changed line, ', () => {
+    let peekHead: string;
+    let view: string;
+    let defined: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openApp();
+      await page!.clickIn('.code[data-p="lib/app.dart"] .ref', 'print', 'print(title)');
+      await page!.until(`!!document.querySelector('.peek [data-act="open-def"]')`);
+      peekHead = await read(page!, `[...document.querySelectorAll('.peek .pk-h > *')].map((el) => el.textContent).filter(Boolean).join(' | ')`);
+      await page!.click('.peek [data-act="open-def"]');
+      await page!.until(`!!document.querySelector('.code.src .ln') || (document.querySelector('.peek [data-act="open-def"]')?.textContent || '') === 'Not found'`, 120_000);
+      view = await read(page!, `document.querySelector('.fv-head .crumbs')?.textContent ?? ''`);
+      const line = /:(\d+)$/.exec(peekHead.split(' | ')[1] ?? '')?.[1] ?? '';
+      defined = await read(page!, `document.querySelector('.code.src .ln[data-n="${line}"] .tx')?.textContent ?? ''`);
+    });
+
+    it('then the peek showed the definition in the Dart SDK, with Open file.', () => {
+      assert.match(peekHead, /^Definition \| dart:core\/print\.dart:\d+ \| Dart SDK \| Open file \| Close$/);
+    });
+
+    it('then the Dart SDK\'s print.dart opens.', () => {
+      assert.equal(view, 'Dart SDK/print.dart');
+    });
+
+    it('then the line the peek named is print\'s declaration.', () => {
+      assert.equal(defined, 'void print(Object? object) {');
+    });
+  });
+
   describe('when a name away from the changes is opened, ', () => {
-    let opened: string;
+    let peekHead: string;
+    let hit: string;
 
     before(async () => {
       await rest(page!);
@@ -141,17 +175,19 @@ describe('Given a served review of a renamed parameter and its caller, with the 
       await page!.click('[data-act="menu"][data-menu="view"]');
       await page!.until(`!!document.querySelector('[data-act="whole"]')`);
       await page!.click('[data-act="whole"]');
-      await page!.until(`(document.querySelector('.code[data-p="lib/app.dart"]')?.textContent || '').includes('StringBuffer')`);
-      await page!.until(`[...document.querySelectorAll('.ref.live, .ref')].some((el) => el.textContent === 'StringBuffer')`);
-      await page!.eval(`([...document.querySelectorAll('.ref.live, .ref')].find((el) => el.textContent === 'StringBuffer')).click()`);
-      await page!.until(`(document.querySelector('.peek')?.textContent || '').includes('Definition')`);
-      if (await read(page!, `document.querySelector('[data-act="open-def"]') ? 'yes' : 'no'`) === 'yes') await page!.click('[data-act="open-def"]');
-      opened = await read(page!, `document.querySelector('.peek')?.textContent || document.querySelector('.fv-head')?.textContent || ''`);
+      await page!.until(`[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ref')].some((el) => el.textContent === 'StringBuffer')`);
+      await page!.clickIn('.code[data-p="lib/app.dart"] .ref', 'StringBuffer', 'final buffer = StringBuffer();');
+      await page!.until(`!!document.querySelector('.peek .pk-h') && !(document.querySelector('.peek')?.textContent || '').includes('looking it up')`, 120_000);
+      peekHead = await read(page!, `[...document.querySelectorAll('.peek .pk-h > *')].map((el) => el.textContent).filter(Boolean).join(' | ')`);
+      hit = await read(page!, `document.querySelector('.peek .pk-ln.hit .tx')?.textContent ?? ''`);
     });
 
-    it('then the language server’s definition opens.', () => {
-      const ok = opened.includes('Definition') || opened.includes('StringBuffer') || opened.includes('dart:');
-      assert.equal(ok ? 'opened' : opened, 'opened');
+    it('then the language server\'s definition is in the Dart SDK, with Open file and Open in editor.', () => {
+      assert.match(peekHead, /^Definition \| dart:core\/string_buffer\.dart:\d+ \| Dart SDK \| Open file \| Open in editor \| Close$/);
+    });
+
+    it('then the line it points at is StringBuffer\'s constructor.', () => {
+      assert.equal(hit.trim(), 'external StringBuffer([Object content = ""]);');
     });
   });
 });

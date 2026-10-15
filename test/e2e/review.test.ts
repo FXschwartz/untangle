@@ -896,29 +896,112 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  describe('when a change is marked reviewed side by side, ', () => {
+    let rows: string;
+
+    before(async () => {
+      await rest(page!);
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'split', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile(page!, 'lib/app.dart');
+      await page!.click('.code[data-p="lib/app.dart"] .tick');
+      await waitForSave(page!);
+      await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"] .sl.rvd-quiet')`);
+      rows = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .sl')].slice(0, 3).map((row) => [row.className, row.querySelector('.half.l .tx')?.textContent, row.querySelector('.half.r .tx')?.textContent, row.querySelector('.tick')?.getAttribute('aria-pressed') ?? 'no mark', row.querySelector('[data-act="toggle-diff"]')?.textContent ?? 'no toggle'].join(' | ')).join('\\n')`);
+    });
+
+    after(async () => {
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+    });
+
+    it('then its new lines are drawn once, quiet, in both columns, with its mark on and show diff on the first.', () => {
+      assert.equal(rows, [
+        'sl rvd-quiet | void greet(String name) { | void greet(String name) { | true | show diff',
+        'sl rvd-quiet |   print(name); |   print(name); | no mark | no toggle',
+        'sl | } | } | no mark | no toggle',
+      ].join('\n'));
+    });
+  });
+
+  describe('when show diff is clicked on a reviewed change side by side, ', () => {
+    let rows: string;
+
+    before(async () => {
+      await rest(page!);
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'split', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile(page!, 'lib/app.dart');
+      await page!.click('.code[data-p="lib/app.dart"] .tick');
+      await waitForSave(page!);
+      await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"] [data-act="toggle-diff"]')`);
+      await page!.click('.code[data-p="lib/app.dart"] [data-act="toggle-diff"]');
+      await page!.until(`!document.querySelector('.code[data-p="lib/app.dart"] .sl.rvd-quiet')`);
+      rows = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .sl')].slice(0, 3).map((row) => [row.className, row.querySelector('.half.l')?.className, row.querySelector('.half.l .tx')?.textContent, row.querySelector('.half.r')?.className, row.querySelector('.half.r .tx')?.textContent].join(' | ')).join('\\n')`);
+    });
+
+    after(async () => {
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+    });
+
+    it('then its removed and added lines are back, side by side.', () => {
+      assert.equal(rows, [
+        'sl rvd | half l del | void greet() { | half r add | void greet(String name) {',
+        "sl rvd | half l del |   print('hi'); | half r add |   print(name);",
+        'sl | half l ctx | } | half r ctx | }',
+      ].join('\n'));
+    });
+  });
+
   describe('when Diffs of reviewed code is chosen, ', () => {
     let beforeDiff: string;
     let afterDiff: string;
 
     before(async () => {
       await rest(page!);
-      await openFile(page!, 'lib/notes.dart');
-      await page!.click('[data-act="mark-file"]');
-      await page!.until(`!document.querySelector('.code[data-p="lib/notes.dart"] .ln.add')`);
-      beforeDiff = await read(page!, `document.querySelector('.code[data-p="lib/notes.dart"] .ln.add') ? 'diff' : 'plain'`);
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile(page!, 'lib/app.dart');
+      await page!.click('.code[data-p="lib/app.dart"] .tick');
+      await waitForSave(page!);
+      await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"] .ln.rvd-quiet')`);
+      beforeDiff = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln')].slice(0, 3).map((row) => row.className + ' | ' + (row.querySelector('.tx')?.textContent ?? '')).join('\\n')`);
       await page!.click('[data-act="menu"][data-menu="view"]');
       await page!.until(`!!document.querySelector('[data-act="revdiff"]')`);
       await page!.click('[data-act="revdiff"]');
-      await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"] .ln.add')`);
-      afterDiff = await read(page!, `document.querySelector('.code[data-p="lib/notes.dart"] .ln.add') ? 'diff' : 'plain'`);
+      await waitForSave(page!);
+      await page!.until(`!document.querySelector('.code[data-p="lib/app.dart"] .ln.rvd-quiet')`);
+      afterDiff = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln')].slice(0, 5).map((row) => row.className + ' | ' + (row.querySelector('.tx')?.textContent ?? '')).join('\\n')`);
     });
 
     after(async () => {
       await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
     });
 
-    it('then a reviewed change shows its diff again.', () => {
-      assert.equal(`${beforeDiff}\n${afterDiff}`, 'plain\ndiff');
+    it('then the reviewed change read as plain code before.', () => {
+      assert.equal(beforeDiff, [
+        'ln ctx rvd-quiet | void greet(String name) {',
+        'ln ctx rvd-quiet |   print(name);',
+        'ln ctx | }',
+      ].join('\n'));
+    });
+
+    it('then it shows its diff again.', () => {
+      assert.equal(afterDiff, [
+        'ln del rvd | void greet() {',
+        "ln del rvd |   print('hi');",
+        'ln add rvd | void greet(String name) {',
+        'ln add rvd |   print(name);',
+        'ln ctx | }',
+      ].join('\n'));
     });
   });
 

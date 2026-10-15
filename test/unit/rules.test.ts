@@ -1244,3 +1244,105 @@ describe('Given a removed class whose methods called each other in two pairs, ',
     });
   });
 });
+
+describe('Given a test moved from one group to another in its file, ', { skip: skipDart }, () => {
+  const before0 = "import 'package:test/test.dart';\nimport 'package:sample/a.dart';\n\nvoid main() {\n  group('first', () {\n    test('adds', () {\n      expect(add(1, 2), 3);\n    });\n  });\n\n  group('second', () {\n    test('other', () {\n      expect(add(0, 0), 0);\n    });\n  });\n}\n";
+  const after0 = "import 'package:test/test.dart';\nimport 'package:sample/a.dart';\n\nvoid main() {\n  group('first', () {\n  });\n\n  group('second', () {\n    test('other', () {\n      expect(add(0, 0), 0);\n    });\n\n    test('adds', () {\n      expect(add(1, 2), 3);\n    });\n  });\n}\n";
+  const files = {
+    base: { 'lib/a.dart': 'int add(int a, int b) => a + b;\n', 'test/a_test.dart': before0 },
+    head: { 'lib/a.dart': 'int add(int a, int b) => a + b;\n', 'test/a_test.dart': after0 },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the removed copy points at the moved test, which has nothing to review.', () => {
+      assert.equal(blocksOf(review!), [
+        'test/a_test.dart#0 main +0 -0 test adds, points at line 13 with 0 to review, standalone',
+        'test/a_test.dart#1 (top) +1 -0 standalone',
+        'test/a_test.dart#2 main +0 -0 test adds, standalone',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a doc comment whose two words change apart from each other, ', { skip: skipDart }, () => {
+  const files = {
+    base: { 'lib/a.dart': '/// Says hello to the user, once.\nvoid greet() {}\n' },
+    head: { 'lib/a.dart': '/// Says goodbye to the admin, once.\nvoid greet() {}\n' },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the comment is one edit.', () => {
+      assert.equal(editsOf(review!), 'replace documentation_comment /// Says hello to the user, once. → /// Says goodbye to the admin, once.');
+    });
+  });
+});
+
+describe('Given a function renamed while its only call is removed, ', { skip: skipDart }, () => {
+  const files = {
+    base: { 'lib/a.dart': "void greet() {\n  print('hi');\n}\n\nvoid main() {\n  greet();\n  print('done');\n}\n" },
+    head: { 'lib/a.dart': "void hello() {\n  print('hi');\n}\n\nvoid main() {\n  print('done');\n}\n" },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the removed call joins the renamed function\'s chain.', () => {
+      assert.equal(chainsOf(review!), [
+        'member hello +1 -2 depth 0',
+        'lib/a.dart#0, lib/a.dart#1',
+        'L0 hello, L1 main',
+        'main → hello [hello]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});
+
+describe('Given a new file whose functions call each other in two pairs, ', { skip: skipDart }, () => {
+  const files = {
+    base: { 'lib/a.dart': 'void main() {}\n' },
+    head: { 'lib/a.dart': 'void main() {}\n', 'lib/tools.dart': 'int a() => b();\n\nint b() => 1;\n\nint c() => d();\n\nint d() => 2;\n' },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then the file is one chain, named after it.', () => {
+      assert.equal(chainsOf(review!), [
+        'member tools.dart +7 -0 depth 0',
+        'lib/tools.dart#0, lib/tools.dart#1, lib/tools.dart#2, lib/tools.dart#3',
+        'L0 b, L1 a, L2 c, L2 d',
+        'a → b [b], c → d [d]',
+        'uses none, shares none, family 0',
+      ].join('\n'));
+    });
+  });
+});

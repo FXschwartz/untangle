@@ -230,6 +230,31 @@ describe('Given a served review of pull request 7, with an open thread on the ca
     });
   });
 
+  describe('when the reply box opens on a thread, with motion on, ', () => {
+    let heights: string;
+    let eased: string;
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await fresh();
+      await page!.until(`document.getAnimations().length === 0`);
+      const from = await read(page!, `String(document.querySelector('[data-thread="THREAD_1"]')?.getBoundingClientRect().height ?? 0)`);
+      await page!.click('[data-thread="THREAD_1"] [data-act="reply-open"]');
+      eased = await read(page!, `(() => { const th = document.querySelector('[data-thread="THREAD_1"]'); const a = document.getAnimations().find((x) => x.effect?.target === th); if (!a) return 'no animation'; const k = a.effect.getKeyframes(); return 'from ' + parseFloat(k[0].height).toFixed(1) + 'px to ' + parseFloat(k[k.length - 1].height).toFixed(1) + 'px'; })()`);
+      await page!.until(`document.getAnimations().length === 0`);
+      const to = await read(page!, `String(document.querySelector('[data-thread="THREAD_1"]')?.getBoundingClientRect().height ?? 0)`);
+      heights = `from ${Number(from).toFixed(1)}px to ${Number(to).toFixed(1)}px`;
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+    });
+
+    it('then the thread eases from its old height to its new one.', () => {
+      assert.equal(eased, heights);
+    });
+  });
+
   describe('when the open thread is resolved, ', () => {
     let resolved: string;
 
@@ -643,6 +668,32 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     it('then #12 is inserted.', () => {
       assert.equal(value, '#12 ');
+    });
+  });
+
+  describe('when a mention is picked with the mouse, ', () => {
+    let value: string;
+    let focused: string;
+
+    before(async () => {
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await fill(page!, '.th.new textarea.cmp-ta', '@g');
+      await page!.until(`(document.querySelector('.mn-pop')?.textContent || '').includes('grace')`);
+      const item = await read(page!, `[...document.querySelectorAll('.mn-pop [data-mn]')].find((el) => (el.textContent || '').includes('grace'))?.dataset.mn ?? ''`);
+      await page!.click(`.mn-pop [data-mn="${item}"]`);
+      await page!.until(`(document.querySelector('.th.new textarea.cmp-ta')?.value || '').includes('@grace')`);
+      value = await read(page!, `document.querySelector('.th.new textarea.cmp-ta')?.value ?? ''`);
+      focused = await read(page!, `document.activeElement === document.querySelector('.th.new textarea.cmp-ta') ? 'the comment box' : document.activeElement?.className ?? 'nothing'`);
+    });
+
+    it('then @grace is inserted.', () => {
+      assert.equal(value, '@grace ');
+    });
+
+    it('then the comment box keeps the focus.', () => {
+      assert.equal(focused, 'the comment box');
     });
   });
 

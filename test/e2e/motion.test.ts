@@ -121,4 +121,29 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
       assert.equal(landed, 'glided');
     });
   });
+  describe('when a peek is closed, ', () => {
+    let during: string;
+    let afterClose: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile('lib/end.dart');
+      await page!.clickIn('.code[data-p="lib/end.dart"] .ref', 'print', "print('b');");
+      await page!.until(`!!document.querySelector('.peek [data-act="close-peek"]') && document.getAnimations().length === 0`);
+      await page!.click('.peek [data-act="close-peek"]');
+      during = await read(page!, `(() => { const ghost = document.querySelector('.ghost'); if (!ghost) return 'no stand-in'; return 'a stand-in after line ' + (ghost.previousElementSibling?.dataset.n ?? '?') + ' with ' + ghost.querySelectorAll('.pk-h').length + ' peek in it, ' + document.getAnimations().filter((a) => a.effect?.target === ghost).length + ' animations'; })()`);
+      await page!.until(`!document.querySelector('.ghost')`);
+      afterClose = await read(page!, `[document.querySelector('.peek') ? 'a peek' : 'no peek', 'line 83 followed by line ' + (document.querySelector('.code[data-p="lib/end.dart"] [data-n="83"]')?.nextElementSibling?.dataset.n ?? '?')].join(', ')`);
+    });
+
+    it('then a fading stand-in of the peek folds under its line.', () => {
+      assert.equal(during, 'a stand-in after line 83 with 1 peek in it, 2 animations');
+    });
+
+    it('then the line is followed by the next one, and no peek is left.', () => {
+      assert.equal(afterClose, 'no peek, line 83 followed by line 84');
+    });
+  });
 });
