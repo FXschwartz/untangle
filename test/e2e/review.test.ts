@@ -252,11 +252,21 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await rest(page!);
       await page!.key('?');
       await page!.until(`document.querySelector('.keys') && !document.querySelector('.keys').hidden`);
-      listed = await read(page!, `document.querySelector('.keys')?.textContent ?? ''`);
+      listed = await read(page!, `[...document.querySelectorAll('.keys dt')].map((dt) => [...dt.querySelectorAll('kbd')].map((key) => key.textContent).join(' ') + ': ' + (dt.nextElementSibling?.textContent ?? '')).join('\\n')`);
     });
 
     it('then the keys are listed.', () => {
-      assert.equal(listed.includes('Next and previous change to review') && listed.includes('Mark the change reviewed and go to the next one') && listed.includes('Next and previous chain'), true);
+      assert.equal(listed, [
+        'j k: Next and previous change to review',
+        'Space: Mark the change reviewed and go to the next one',
+        'Shift Space: Mark the hunk, or the member in a chain',
+        'n p: Next and previous chain with changes to review',
+        'Ctrl K: Jump to a chain, file, symbol or thread',
+        'c: Comment on the line you’re on',
+        'Ctrl B: Show or hide the sidebar',
+        'Esc: Close the peek, the palette, a menu or a commit’s details; then show every change again (the lens off)',
+        '?: These keys',
+      ].join('\n'));
     });
   });
 
@@ -284,11 +294,21 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await rest(page!);
       await page!.key('k', { ctrl: true });
       await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
-      opened = await read(page!, `document.querySelector('.pal-list')?.textContent ?? ''`);
+      opened = await read(page!, `[...document.querySelectorAll('.pal-list > *')].map((el) => el.matches('.pal-r') ? '  ' + el.querySelector('.nm')?.textContent + ' | ' + el.querySelector('.hint')?.textContent : el.textContent).join('\\n')`);
     });
 
     it('then Jump to lists the greeting chain and the file.', () => {
-      assert.equal(opened.includes('greet(name)') && opened.includes('app.dart'), true);
+      assert.equal(opened, [
+        'Chains',
+        '  + String name | 2 to review',
+        '  greet(name) | 2 to review',
+        '  wave(name) | 2 to review',
+        'Files',
+        '  lib/app.dart | 4 to review',
+        '  lib/notes.dart | 1 to review',
+        '  lib/only/nested/added.dart | 1 to review',
+        '  lib/app.g.dart | generated',
+      ].join('\n'));
     });
   });
 
@@ -301,11 +321,17 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await page!.until(`document.querySelector('.pal') && !document.querySelector('.pal').hidden`);
       await page!.key('Tab');
       await page!.until(`(document.querySelector('.pal-scope')?.textContent || '').startsWith('Chains')`);
-      narrowed = await read(page!, `[document.querySelector('.pal-scope')?.textContent ?? '', document.querySelector('.pal-list')?.textContent ?? ''].join('\\n')`);
+      narrowed = await read(page!, `['scope ' + (document.querySelector('.pal-scope')?.textContent ?? ''), ...[...document.querySelectorAll('.pal-list > *')].map((el) => el.matches('.pal-r') ? '  ' + el.querySelector('.nm')?.textContent + ' | ' + el.querySelector('.hint')?.textContent : el.textContent)].join('\\n')`);
     });
 
     it('then the list narrows to chains.', () => {
-      assert.equal(narrowed.startsWith('Chains\n') && !narrowed.includes('Files'), true);
+      assert.equal(narrowed, [
+        'scope Chains',
+        'Chains',
+        '  + String name | 2 to review',
+        '  greet(name) | 2 to review',
+        '  wave(name) | 2 to review',
+      ].join('\n'));
     });
   });
 
@@ -360,7 +386,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
 
     it('then the hunk is already folded into its divider.', () => {
-      assert.equal(folded.includes('reviewed'), true);
+      assert.equal(folded, '7 lines reviewed');
     });
 
     it('then the pill is on the next change.', () => {
@@ -392,6 +418,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
   describe('when the greeting is marked and the page is reloaded, ', () => {
     let reviewed: string;
     let saved: string;
+    let message: string;
+    let base: string;
 
     before(async () => {
       await rest(page!);
@@ -406,6 +434,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await page!.click('[aria-label="Marks"]');
       await page!.until(`(document.querySelector('.mi-note')?.textContent || '').includes('untangle/feature')`);
       saved = await read(page!, `document.querySelector('.mi-note')?.textContent ?? ''`);
+      message = execFileSync('git', ['-C', repo!.dir, 'log', '-1', '--format=%B', 'untangle/feature'], { encoding: 'utf8' });
+      base = repo!.rev('main');
     });
 
     after(async () => {
@@ -413,12 +443,15 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
 
     it('then the greeting is still reviewed.', () => {
-      assert.equal(reviewed.includes('reviewed'), true);
+      assert.equal(reviewed, '7 lines reviewed');
     });
 
-    it('then the mark is on the branch untangle/feature.', () => {
-      const message = execFileSync('git', ['-C', repo!.dir, 'log', '-1', '--format=%B', 'untangle/feature'], { encoding: 'utf8' });
-      assert.equal(saved.includes('untangle/feature') && message.includes(`Untangle-Head: ${head}`), true);
+    it('then the marks panel says the marks are on the branch untangle/feature.', () => {
+      assert.match(saved, new RegExp(`^Your marks are kept on the branch untangle/feature, at [0-9a-f]{7}\\. git diff untangle/feature ${head.slice(0, 7)} shows what’s left\\.$`));
+    });
+
+    it('then that branch\'s last commit records the review against this base and head.', () => {
+      assert.equal(message, `Review: 1 of 6 changes reviewed\n\nUntangle-Base: ${base}\nUntangle-Head: ${head}\n\n`);
     });
   });
 
@@ -575,7 +608,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await chain(page!, 'greet(name)');
       await page!.clickIn('.ref', 'greet', "greet('ada')");
       await page!.until(`(document.querySelector('.peek .pk-loc')?.textContent || '').includes('lib/app.dart')`);
-      definition = await read(page!, `document.querySelector('.peek .pk-h')?.textContent ?? ''`);
+      definition = await read(page!, `[...document.querySelectorAll('.peek .pk-h > *')].map((part) => part.textContent).filter(Boolean).join(' | ')`);
       await page!.clickIn('.peek .ref.live', 'print', 'print(');
       await page!.until(`document.querySelector('[data-act="peek-back"]')`);
       inner = await read(page!, `document.querySelector('.peek .pk-loc')?.textContent ?? ''`);
@@ -588,15 +621,15 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
 
     it('then a peek shows where greet is defined.', () => {
-      assert.equal(definition.includes('Definition') && definition.includes('lib/app.dart'), true);
+      assert.equal(definition, 'Definition | lib/app.dart:1 | this repo | Open file | Open in editor | Close');
     });
 
     it('then a name in the peek replaces it.', () => {
-      assert.equal(inner.startsWith('dart:'), true);
+      assert.match(inner, /^dart:core\/print\.dart:\d+$/);
     });
 
     it('then Back returns to greet.', () => {
-      assert.equal(back.includes('lib/app.dart'), true);
+      assert.equal(back, 'lib/app.dart:1');
     });
 
     it('then a click outside closes the peek.', () => {
@@ -673,6 +706,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
 
     before(async () => {
       await page!.click('#vw-lsp');
+      // CPU is measured between two samples: until the second one, it reads —.
+      await page!.until(`/%$/.test(document.querySelector('[data-m="cpu"]')?.textContent ?? '') && /%$/.test(document.querySelector('[data-m="lspCpu"]')?.textContent ?? '')`, 30_000);
       popover = await read(page!, `(() => {
         const pop = document.querySelector('#lsp-pop');
         const shown = pop ? getComputedStyle(pop).display : '';
@@ -767,7 +802,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
 
     it('then the changed lines that contain it are listed.', () => {
-      assert.equal(found.includes('name') && found.includes('lib/app.dart') && found.includes('name'), true);
+      assert.equal(found, 'Search/“name”\nlib/app.dart\nname');
     });
   });
 
@@ -781,11 +816,11 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       const id = await read(page!, `[...document.querySelectorAll('.pal-r')].find((el) => (el.textContent || '').includes('The repository'))?.id ?? ''`);
       await page!.click(`#${id}`);
       await page!.until(`(document.querySelector('.fv-head')?.textContent || '').includes('after them') && !!document.querySelector('.code mark')`);
-      found = await read(page!, `[document.querySelector('.fv-head')?.textContent ?? '', document.querySelector('.code .inst-file')?.textContent ?? '', document.querySelector('.code mark')?.textContent ?? ''].join('\\n')`);
+      found = await read(page!, `[document.querySelector('.fv-head .crumbs')?.textContent ?? '', document.querySelector('.fv-head .facts')?.textContent ?? '', document.querySelector('.code .inst-file')?.textContent ?? '', document.querySelector('.code mark')?.textContent ?? ''].join('\\n')`);
     });
 
     it('then the head lists the line.', () => {
-      assert.equal(found.includes('after them') && found.includes('lib/app.dart') && found.includes('ada'), true);
+      assert.equal(found, `Search/“ada”\n2 lines in the repository, after them · ${head.slice(0, 7)}\nlib/app.dart\nada`);
     });
   });
 
@@ -1039,12 +1074,12 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       const chip = await read(page!, `document.querySelector('[data-menu="chains"]')?.textContent ?? ''`);
       await page!.click('[data-menu="chains"]');
       await page!.until(`!!document.querySelector('.menu .mi')`);
-      const names = await read(page!, `[...document.querySelectorAll('.menu .mi')].map((el) => el.textContent).join(', ')`);
+      const names = await read(page!, `[...document.querySelectorAll('.menu .mi')].map((el) => [...el.childNodes].map((node) => (node.textContent || '').trim()).filter(Boolean).join(' | ')).join('\\n')`);
       listed = `${chip}\n${names}`;
     });
 
     it('then the menu lists the chains the file is in.', () => {
-      assert.equal(listed.includes('In ') && listed.includes('chain') && listed.includes('greet(name)'), true);
+      assert.equal(listed, 'In 3 chains\n+ String name | 2 to review\ngreet(name) | 2 to review\nwave(name) | 2 to review');
     });
   });
 
@@ -1062,8 +1097,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
 
     it('then the link points at the file and the page stays here.', () => {
-      const kind = href.startsWith('vscode://') && href.includes('lib/app.dart') ? 'vscode lib/app.dart' : href;
-      assert.equal(`${kind}\n${stayed}`, 'vscode lib/app.dart\nstayed');
+      const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      assert.match(`${href}\n${stayed}`, new RegExp(`^vscode://(vscode-remote/wsl\\+[^/]+|file)${escaped(cache)}/worktrees/local/[^/]+/${head.slice(0, 12)}/lib/app\\.dart:1:1\nstayed$`));
     });
   });
 

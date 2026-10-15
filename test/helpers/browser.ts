@@ -184,17 +184,36 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     return result?.result?.value;
   };
 
-  const boxOf = async (selector: string, scroll: boolean) => {
-    const box = await evaluate(`(() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) return null;
-      if (${scroll ? 'true' : 'false'}) el.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const r = el.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: r.height };
-    })()`) as { left: number; top: number; width: number; height: number } | null;
-    if (!box) throw new Error(`no element matches ${selector}`);
-    return box;
+  type Box = { left: number; top: number; width: number; height: number };
+  const same = (a: Box, b: Box) => Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+  /**
+   * The box of the element `find` evaluates to, once it holds still and is what sits at its centre.
+   * The page keeps a line in place for a few frames after it redraws, so each look first lets
+   * those frames pass: a click measured before them would land where the line no longer is. An
+   * element that stays covered (a scrim over it, on purpose) is used as it is after a few tries.
+   */
+  const settledBox = async (find: string, scroll: boolean, what: string): Promise<Box> => {
+    let last: Box | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const box = await evaluate(`(async () => {
+        await Promise.race([
+          new Promise((done) => { let frames = 0; const tick = () => (++frames >= 4 ? done() : requestAnimationFrame(tick)); requestAnimationFrame(tick); }),
+          new Promise((done) => setTimeout(done, 250)),
+        ]);
+        const el = ${find};
+        if (!el) return null;
+        if (${scroll ? 'true' : 'false'}) el.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const r = el.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { left: r.left, top: r.top, width: r.width, height: r.height, hit: !!top && (top === el || el.contains(top)) };
+      })()`) as (Box & { hit: boolean }) | null;
+      if (!box) throw new Error(`no element matches ${what}`);
+      if (box.hit && last && same(last, box)) return box;
+      last = box;
+    }
+    return last!;
   };
+  const boxOf = (selector: string, scroll: boolean) => settledBox(`document.querySelector(${JSON.stringify(selector)})`, scroll, selector);
   const at = async (x: number, y: number, type: string, modifiers: number, clickCount: number, buttons = 0) => {
     await session('Input.dispatchMouseEvent', { x, y, type, button: 'left', buttons, modifiers, clickCount, pointerType: 'mouse' });
   };
@@ -313,15 +332,9 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       await clickAt(box.left + box.width / 2, box.top + box.height / 2, 0, 1);
     },
     async clickIn(selector: string, name: string, line: string) {
-      const point = await evaluate(`(() => {
-        const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((node) => (node.textContent || '') === ${JSON.stringify(name)} && (node.closest('.ln, .sl, .pk-ln')?.textContent || '').includes(${JSON.stringify(line)}));
-        if (!el) return null;
-        el.scrollIntoView({ block: 'center', inline: 'nearest' });
-        const r = el.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      })()`) as { x: number; y: number } | null;
-      if (!point) throw new Error(`no ${selector} named ${name} on a line with ${line}`);
-      await clickAt(point.x, point.y, 0, 1);
+      const find = `[...document.querySelectorAll(${JSON.stringify(selector)})].find((node) => (node.textContent || '') === ${JSON.stringify(name)} && (node.closest('.ln, .sl, .pk-ln')?.textContent || '').includes(${JSON.stringify(line)}))`;
+      const box = await settledBox(find, true, `${selector} named ${name} on a line with ${line}`);
+      await clickAt(box.left + box.width / 2, box.top + box.height / 2, 0, 1);
     },
     async shiftClick(selector: string) {
       const box = await boxOf(selector, true);

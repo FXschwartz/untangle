@@ -8,7 +8,7 @@ import { reviewClient, waitForReview, type ReviewClient } from '../helpers/http.
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
-import { read, rest } from './page.ts';
+import { read, rest, waitForSave } from './page.ts';
 
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
@@ -150,6 +150,15 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     await page!.until(`!!document.querySelector(${JSON.stringify(`.code[data-p="${file}"]`)})`);
   }
 
+  async function startOver(layout: 'unified' | 'split'): Promise<void> {
+    await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout, showReviewedDiff: false } });
+    await page!.goto(url);
+    await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+  }
+
+  /** Each header's parts: its name, its counts and its buttons, apart. */
+  const headerParts = (selector: string) => `[...document.querySelectorAll(${JSON.stringify(selector)})].map((head) => [...head.querySelectorAll(':scope > b, :scope > span:not(.sp):not(.hov):not(.bdgs), :scope > .hov > *, :scope > .bdgs > *')].map((part) => (part.textContent || '').trim()).filter(Boolean).join(' | ')).join('\\n')`;
+
   describe('when the old file is opened, ', () => {
     let moved: string;
 
@@ -160,33 +169,39 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     });
 
     it('then the removed copy points at where the function moved.', () => {
-      assert.equal(moved.replace(/\s+/g, ' ').includes('moved to') && moved.includes('b.dart'), true);
+      assert.equal(moved, '↦4 lines moved to b.dart:1, with 1 change');
     });
   });
 
   describe('when the moved function is shown side by side, ', () => {
-    let moved: string;
+    let head: string;
+    let rows: string;
 
     before(async () => {
       await rest(page!);
+      await startOver('split');
       await openFile('lib/b.dart');
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="layout"]')`);
-      const on = await read(page!, `document.querySelector('[data-act="layout"]')?.getAttribute('aria-checked') ?? ''`);
-      if (on !== 'true') await page!.click('[data-act="layout"]');
-      else await page!.key('Escape');
-      await page!.until(`!!document.querySelector('.mv-head, .mv-away')`);
-      moved = await read(page!, `document.querySelector('.mv-head, .mv-away')?.textContent ?? ''`);
+      await page!.until(`!!document.querySelector('.mv-head')`);
+      head = await read(page!, headerParts('.mv-head'));
+      rows = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/b.dart"] .ln:not(.mv-head)')].map((row) => [row.className, row.querySelector('.sg')?.textContent ?? '', row.querySelector('.tx')?.textContent ?? ''].join(' | ')).join('\\n')`);
     });
 
     after(async () => {
-      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, layout: 'unified' } });
-      await page!.goto(url);
-      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await startOver('unified');
     });
 
-    it('then the move is shown in two columns.', () => {
-      assert.equal(moved.includes('Moved from') || moved.includes('moved to'), true);
+    it('then its header says where it moved from.', () => {
+      assert.equal(head, '↤ | Moved from a.dart:1 · 1 change | same change ×3 | show the moved lines');
+    });
+
+    it('then its body\'s diff stays in one column, under that header.', () => {
+      assert.equal(rows, [
+        'ln mv |  | void greet() {',
+        "ln del | − |   print('hi');",
+        "ln add | + |   print('hello');",
+        'ln mv |  | }',
+        'ln del | − | ',
+      ].join('\n'));
     });
   });
 
@@ -195,49 +210,59 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
 
     before(async () => {
       await rest(page!);
+      await startOver('unified');
       await openFile('lib/a.dart');
-      await page!.click('.ln.del .tick, .tick');
-      await page!.until(`!!document.querySelector('.ln.gone, .sl.gone') || (document.querySelector('.tick.on') !== null)`);
+      const block = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/a.dart"] .ln.del')].find((row) => (row.textContent || '').includes('void gone() {'))?.querySelector('.tick')?.dataset.block ?? ''`);
+      await page!.click(`.tick[data-block="${block}"]`);
+      await waitForSave(page!);
       await page!.click('[data-act="menu"][data-menu="view"]');
       await page!.until(`!!document.querySelector('[data-act="layout"]')`);
-      const on = await read(page!, `document.querySelector('[data-act="layout"]')?.getAttribute('aria-checked') ?? ''`);
-      if (on !== 'true') await page!.click('[data-act="layout"]');
-      else await page!.key('Escape');
-      await page!.until(`(document.querySelector('.sl.gone, .ln.gone')?.textContent || '').includes('removed')`);
-      gone = await read(page!, `document.querySelector('.sl.gone, .ln.gone')?.textContent ?? ''`);
+      await page!.click('[data-act="layout"]');
+      await page!.until(`!!document.querySelector('.code[data-p="lib/a.dart"] .sl.gone')`);
+      gone = await read(page!, `[...document.querySelector('.code[data-p="lib/a.dart"] .sl.gone').querySelectorAll('.tick, .tx, .bdgs')].map((el) => el.matches('.tick') ? 'mark ' + el.getAttribute('aria-pressed') : el.textContent).join(' | ')`);
     });
 
     after(async () => {
-      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, layout: 'unified' } });
-      await page!.goto(url);
-      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await startOver('unified');
     });
 
     it('then the removed lines are one reviewed row.', () => {
-      assert.equal(gone.replace(/\s+/g, ' ').includes('removed line') && gone.includes('reviewed'), true);
+      assert.equal(gone, 'mark true | 4 removed lines, reviewed | show diff');
     });
   });
 
   describe('when the same change is opened, ', () => {
+    let head: string;
     let places: string;
 
     before(async () => {
       await rest(page!);
       await openFile('lib/a.dart');
-      await page!.until(`(document.querySelector('.code[data-p="lib/a.dart"]')?.textContent || '').includes('hello')`);
       await page!.until(`!!document.querySelector('[data-group]')`);
       await page!.click('[data-group]');
       await page!.until(`(document.querySelector('.fv-head')?.textContent || '').includes('Same change')`);
-      places = await read(page!, `document.querySelector('.fv-head')?.textContent ?? ''`);
+      head = await read(page!, `[document.querySelector('.fv-head .crumbs')?.textContent, document.querySelector('.fv-head .facts')?.textContent].join('\\n')`);
+      places = await read(page!, `[...document.querySelectorAll('.code.inst > .inst-file, .code.inst .ln.add')].map((el) => el.matches('.inst-file') ? el.textContent : '  ' + el.dataset.n + ' ' + (el.querySelector('.tx')?.textContent ?? '').trim()).join('\\n')`);
     });
 
-    it('then its places are listed.', () => {
-      assert.equal(places.includes('Same change'), true);
+    it('then the header names the change and counts its places.', () => {
+      assert.equal(head, "Same change/'hi' → 'hello'\n3 places · 2 files");
+    });
+
+    it('then its places are listed by file.', () => {
+      assert.equal(places, [
+        'lib/a.dart',
+        "  2 print('hello');",
+        "  6 print('hello');",
+        'lib/b.dart',
+        "  2 print('hello');",
+      ].join('\n'));
     });
   });
 
   describe('when Not in a chain is opened, ', () => {
-    let heading: string;
+    let head: string;
+    let changes: string;
 
     before(async () => {
       await rest(page!);
@@ -245,11 +270,31 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
       await page!.until(`!!document.querySelector('[data-standalone]')`);
       await page!.click('[data-standalone]');
       await page!.until(`(document.querySelector('.fv-head')?.textContent || '').includes('Not in a chain')`);
-      heading = await read(page!, `document.querySelector('.crumbs')?.textContent ?? ''`);
+      head = await read(page!, `[document.querySelector('.fv-head .crumbs')?.textContent, document.querySelector('.fv-head .facts')?.textContent].join('\\n')`);
+      changes = await read(page!, `[...document.querySelectorAll('#vw-main .code[data-p]')].map((code) => code.dataset.p + '\\n' + [...code.querySelectorAll('.ln.add, .ln.del, .mv-away')].map((row) => '  ' + (row.matches('.mv-away') ? row.textContent : (row.matches('.add') ? '+ ' : '− ') + (row.querySelector('.tx')?.textContent ?? ''))).join('\\n')).join('\\n')`);
     });
 
-    it('then the changes outside chains are shown.', () => {
-      assert.equal(heading.includes('Not in a chain'), true);
+    it('then its header names it and counts its changes.', () => {
+      assert.equal(head, 'Map/Not in a chain\n4 changes · +3 −8');
+    });
+
+    it('then the changes outside chains are shown, by file.', () => {
+      assert.equal(changes, [
+        'lib/a.dart',
+        '  ↦4 lines moved to b.dart:1, with 1 change',
+        '  − void gone() {',
+        "  −   print('bye');",
+        '  − }',
+        '  − ',
+        "  −   print('hi');",
+        "  +   print('hello');",
+        "  −   print('hi');",
+        "  +   print('hello');",
+        'lib/b.dart',
+        "  −   print('hi');",
+        "  +   print('hello');",
+        '  − ',
+      ].join('\n'));
     });
   });
 
@@ -259,29 +304,35 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     before(async () => {
       await rest(page!);
       await openChain(page!, 'helper');
-      await page!.until(`(document.querySelector('main, #vw-main')?.textContent || '').includes('names')`);
-      list = await read(page!, `document.querySelector('#vw-main')?.textContent ?? ''`);
+      await page!.until(`!!document.querySelector('#vw-main .sec-h.sub')`);
+      list = await read(page!, headerParts('#vw-main .sec > .sec-h'));
     });
 
-    it('then the tests are listed by group.', () => {
-      assert.equal(list.includes('names') && list.includes('one') && list.includes('group'), true);
+    it('then the tests are listed by group, then the helpers.', () => {
+      assert.equal(list, 'names | group · 1 test\none | 1 change | Mark test reviewed\nHelpers | 1 change');
     });
   });
 
   describe('when the generated file is opened, ', () => {
-    let shown: string;
+    let facts: string;
+    let rows: string;
 
     before(async () => {
       await rest(page!);
       await page!.click('[data-tab="files"]');
-      await page!.until(`(document.querySelector('#vw-side')?.textContent || '').includes('Generated')`);
+      await page!.until(`!!document.querySelector('[data-open="lib/app.g.dart"]')`);
       await page!.click('[data-open="lib/app.g.dart"]');
       await page!.until(`(document.querySelector('.code')?.textContent || '').includes('generated = 2')`);
-      shown = await read(page!, `[document.querySelector('.fv-head')?.textContent ?? '', document.querySelector('.code')?.textContent ?? ''].join('\\n')`);
+      facts = await read(page!, `document.querySelector('.fv-head .facts')?.textContent ?? ''`);
+      rows = await read(page!, `[...document.querySelectorAll('.code .ln')].map((row) => [row.querySelector('.sg')?.textContent ?? '', row.querySelector('.no')?.textContent ?? '', row.querySelector('.tx')?.textContent ?? ''].join(' ')).join('\\n')`);
+    });
+
+    it('then its header says it is generated, and by which adapter.', () => {
+      assert.equal(facts, 'Generated (build_runner adapter) · +1 −1');
     });
 
     it('then its changed lines are shown for reference.', () => {
-      assert.equal(shown.includes('Generated') && shown.includes('generated = 2'), true);
+      assert.equal(rows, '− 1 const generated = 1;\n+ 1 const generated = 2;');
     });
   });
 
