@@ -113,8 +113,8 @@ describe('Given a served review of feature, its pull request, a merge of two com
         },
       }),
       feature: [
-        step('Plant a hollow line', '03', { write: { 'lib/temp.dart': "void temp() {\n  print('HOLLOW');\n}\n" } }),
-        step('Overwrite the hollow line', '04', { write: { 'lib/temp.dart': "void temp() {\n  print('KEPT');\n}\n" } }),
+        step('Plant a hollow line', '03', { write: { 'lib/temp.dart': "void temp() {\n  print('base');\n  print('HOLLOW');\n}\n" } }),
+        step('Overwrite the hollow line', '04', { write: { 'lib/temp.dart': "void temp() {\n  print('base');\n  print('KEPT');\n}\n" } }),
         step('Mention the code', '05', {
           body: 'Call `greet` from #12.\nSee https://example.test/notes.\n',
           write: { 'lib/docs.dart': '/// A note.\n' },
@@ -219,13 +219,9 @@ describe('Given a served review of feature, its pull request, a merge of two com
       assert.equal(dotOf(dots, 'Pass the name'), 'left');
     });
 
-    it(
-      'then the commit that deleted lib/gone.dart still has that deletion to review.',
-      { todo: 'bug: the deletion is credited to the later merge of main, so Delete the old file is drawn hollow' },
-      () => {
-        assert.equal(dotOf(dots, 'Delete the old file'), 'left');
-      },
-    );
+    it('then the commit that deleted lib/gone.dart still has that deletion to review.', () => {
+      assert.equal(dotOf(dots, 'Delete the old file'), 'left');
+    });
 
     it('then your review is flagged on the merge.', () => {
       assert.equal(flag, `Your review${whenOf(noon('20'))}`);

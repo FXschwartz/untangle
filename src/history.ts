@@ -168,6 +168,12 @@ async function attribute(repo: string, base: string, head: string, commits: Hist
   const lastMerge = commits.findIndex((c) => c.brought > 0);
   // Where the branch starts: its oldest commits.
   const start = commits.length - 1;
+  // A merge from outside makes the base that side's tip, which the branch's own commits don't
+  // descend from. A line they removed before the merge still exists on that side, so blame from
+  // the base sees it vanish at the merge. Such lines are blamed again along the branch's first
+  // parents, from the commit it started from, with each line found there through the diff from it.
+  const fork = commits[start] ? commits[start].outside[0] : undefined;
+  const merged = (i: number) => i >= 0 && commits[i].outside.length > 0 && commits[i].parents.length + commits[i].outside.length > 1;
   const rows: Array<number[][] | null> = files.map(() => null);
   await pool(files.map((f, fi) => ({ f, fi })), WIDTH, async ({ f, fi }) => {
     if (!f.hunks || !f.hunks.length) return;
@@ -195,8 +201,50 @@ async function attribute(repo: string, base: string, head: string, commits: Hist
         return at;
       });
     });
+    // Removed lines a merge is credited with: removed before it, on the branch's own side?
+    const atMerge: Array<[number[], number, number]> = [];
+    f.hunks.forEach((h, hi) => {
+      let o = h.o;
+      h.rows.forEach((r, ri) => {
+        if (r[0] === '-' && merged(rows[fi]![hi][ri])) atMerge.push([rows[fi]![hi], ri, o]);
+        if (r[0] !== '+') o++;
+      });
+    });
+    if (!atMerge.length || !fork || fork === base) return;
+    const [diff, own] = await Promise.all([
+      gitAsync(repo, ['diff', '--unified=0', '--no-color', '--no-ext-diff', '--no-renames', fork, base, '--', f.p]).catch(() => null),
+      blame(['--reverse', '--first-parent', `${fork}..${head}`]),
+    ]);
+    if (diff == null) return;
+    const toFork = forkLines(diff);
+    atMerge.forEach(([hunkRows, ri, line]) => {
+      const was = toFork(line);
+      const last = was != null ? own.get(was) : undefined;
+      const at = last ? childOf(last) : -1;
+      if (at >= 0 && !merged(at)) hunkRows[ri] = at;
+    });
   });
   return rows;
+}
+
+/**
+ * From a diff of one file, from an older commit to a newer one (--unified=0): the older line a
+ * newer line was, or null for a line the diff changed.
+ */
+function forkLines(diff: string): (line: number) => number | null {
+  const hunks: Array<[number, number, number, number]> = [];
+  for (const m of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    hunks.push([Number(m[1]), m[2] == null ? 1 : Number(m[2]), Number(m[3]), m[4] == null ? 1 : Number(m[4])]);
+  }
+  return (line) => {
+    let delta = 0;
+    for (const [, oldCount, from, count] of hunks) {
+      if (count && line >= from && line < from + count) return null;
+      if (line < (count ? from : from + 1)) break;
+      delta += oldCount - count;
+    }
+    return line + delta;
+  };
 }
 
 /**
