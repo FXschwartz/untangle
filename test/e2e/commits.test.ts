@@ -514,21 +514,29 @@ describe('Given a served review of feature, its pull request, a merge of two com
     });
   });
 
-  describe('when Review its changes is clicked, ', () => {
+  describe('when the details of a commit with changes to review are opened, ', () => {
     let offer: string;
-    let opened: string;
 
     before(async () => {
       await rest(page!);
       await details(page!, sha['Pass the name']);
       offer = await read(page!, `document.querySelector('[data-act="hd-review"]')?.textContent ?? ''`);
+    });
+
+    it('then they offer to review its changes still to review.', () => {
+      assert.equal(offer, 'Review its changes · 2');
+    });
+  });
+
+  describe('when Review its changes is clicked, ', () => {
+    let opened: string;
+
+    before(async () => {
+      await rest(page!);
+      await details(page!, sha['Pass the name']);
       await page!.click('[data-act="hd-review"]');
       await page!.until(`(document.querySelector('.crumbs')?.textContent || '').includes('greet(name)')`);
       opened = await read(page!, `[document.querySelector('.crumbs')?.textContent ?? '', ${topBar}].join('\\n')`);
-    });
-
-    it('then it offers the changes still to review.', () => {
-      assert.equal(offer, 'Review its changes · 2');
     });
 
     it('then the chain opens under that commit\'s lens.', () => {
@@ -768,21 +776,25 @@ describe('Given a served review of feature, its pull request, a merge of two com
     });
   });
 
+  /** Opens the greeting's chain with Name the parameter as the lens. */
+  async function chainUnderNameTheParameter(): Promise<void> {
+    await rest(page!);
+    await changesFrom(page!);
+    await page!.click(`.lp-row[data-commit="${sha['Name the parameter']}"]`);
+    await page!.until(`document.querySelector('.menu')?.hidden === true`);
+    await chain(page!);
+  }
+
   describe('when the chain is opened under one commit\'s lens, ', () => {
     let header: string;
     let lines: string;
     let counts: string;
 
     before(async () => {
-      await rest(page!);
-      await changesFrom(page!);
-      await page!.click(`.lp-row[data-commit="${sha['Name the parameter']}"]`);
-      await page!.until(`document.querySelector('.menu')?.hidden === true`);
-      await chain(page!);
+      await chainUnderNameTheParameter();
       header = await read(page!, `[document.querySelector('.fv-head')?.textContent?.includes(${JSON.stringify(short('Name the parameter'))}) ? 'chip' : 'no chip', ${topBar}].join('\\n')`);
       lines = await read(page!, `[${lineFade('greet(String name)')}, ${lineFade('print(name)')}].join('\\n')`);
-      await page!.key('j');
-      counts = await read(page!, `[document.querySelector('.sb-prog b')?.textContent ?? '', document.querySelector('.pill-n')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '', document.querySelectorAll('.tick').length + ' ticks', document.querySelectorAll('.tick:not(.lens-out)').length + ' in the lens'].join('\\n')`);
+      counts = await read(page!, `[document.querySelector('.sb-prog b')?.textContent ?? '', document.querySelectorAll('.tick').length + ' ticks', document.querySelectorAll('.tick:not(.lens-out)').length + ' in the lens'].join('\\n')`);
     });
 
     it('then the view header has no lens chip and the top bar names the commit.', () => {
@@ -793,8 +805,23 @@ describe('Given a served review of feature, its pull request, a merge of two com
       assert.equal(lines, 'shown\nfaded');
     });
 
-    it('then the sidebar, the pill and j count only the changes in the lens.', () => {
-      assert.equal(counts, '1\n1 of 1\n2 ticks\n1 in the lens');
+    it('then the sidebar counts only the change in the lens, the one of its two marks not faded.', () => {
+      assert.equal(counts, '1\n2 ticks\n1 in the lens');
+    });
+  });
+
+  describe('when j is pressed in a chain under one commit\'s lens, ', () => {
+    let pill: string;
+
+    before(async () => {
+      await chainUnderNameTheParameter();
+      await page!.key('j');
+      await page!.until(`(document.querySelector('.pill-n')?.textContent || '').includes('of')`);
+      pill = await read(page!, `document.querySelector('.pill-n')?.textContent?.replace(/\\s+/g, ' ').trim() ?? ''`);
+    });
+
+    it('then the pill counts only the change in the lens.', () => {
+      assert.equal(pill, '1 of 1');
     });
   });
 
@@ -957,58 +984,82 @@ describe('Given a served review of feature, its pull request, a merge of two com
     });
   });
 
-  describe('when the function change is marked under each of its commits, ', () => {
-    let afterOne: string;
+  /** Marks the greeting's function change under one commit's lens, opened from its details. */
+  async function markUnder(subject: string): Promise<void> {
+    await history(page!);
+    await details(page!, sha[subject]);
+    await page!.click('[data-act="hd-review"]');
+    await page!.until(`!!document.querySelector('.sec')`);
+    const id = await read(page!, `([...document.querySelectorAll('.sec')].find((el) => (el.textContent || '').includes('void greet(String name)')) || {}).id ?? ''`);
+    await page!.click(`#${id} .tick:not(.lens-out)`);
+    await waitForSave(page!);
+    await page!.key('Escape');
+    await page!.until(`!(document.querySelector('.t-head')?.textContent || '').includes(${JSON.stringify(subject)})`);
+  }
+
+  describe('when the function change is marked under its first commit, ', () => {
+    let tick: string;
     let dots: string;
-    let afterBoth: string;
-    let afterReload: string;
 
     before(async () => {
       await rest(page!);
-      await history(page!);
-      await details(page!, sha['Name the parameter']);
-      await page!.click('[data-act="hd-review"]');
-      await page!.until(`!!document.querySelector('.sec:not(.lens-out) .tick:not(.lens-out)')`);
-      await page!.click('.sec:not(.lens-out) .tick:not(.lens-out)');
-      await waitForSave(page!);
-      await page!.key('Escape');
-      await page!.until(`!(document.querySelector('.t-head')?.textContent || '').includes('Name the parameter')`);
-      afterOne = await read(page!, functionTick);
+      await markUnder('Name the parameter');
+      tick = await read(page!, functionTick);
       await history(page!);
       dots = await read(page!, historyDots);
-      await details(page!, sha['Pass the name']);
-      await page!.click('[data-act="hd-review"]');
-      await page!.until(`!!document.querySelector('.sec')`);
-      const id = await read(page!, `([...document.querySelectorAll('.sec')].find((el) => (el.textContent || '').includes('void greet(String name)')) || {}).id ?? ''`);
-      await page!.click(`#${id} .tick:not(.lens-out)`);
-      await waitForSave(page!);
-      await page!.key('Escape');
-      await page!.until(`!(document.querySelector('.t-head')?.textContent || '').includes('Pass the name')`);
-      afterBoth = await read(page!, functionTick);
-      await page!.goto(url);
-      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
-      await chain(page!);
-      afterReload = await read(page!, functionTick);
     });
 
     after(async () => {
       await resetMarks();
     });
 
-    it('then marking it under the first commit does not review the whole change.', () => {
-      assert.equal(afterOne, 'false');
+    it('then the change is not reviewed as a whole.', () => {
+      assert.equal(tick, 'false');
     });
 
     it('then that commit shows a check and the other commit stays amber.', () => {
       assert.equal(`${dotOf(dots, 'Name the parameter')}\n${dotOf(dots, 'Pass the name')}`, 'done\nleft');
     });
+  });
 
-    it('then the change is reviewed once its other commit is marked too.', () => {
-      assert.equal(afterBoth, 'reviewed');
+  describe('when the function change is marked under both of its commits, ', () => {
+    let tick: string;
+
+    before(async () => {
+      await rest(page!);
+      await markUnder('Name the parameter');
+      await markUnder('Pass the name');
+      tick = await read(page!, functionTick);
     });
 
-    it('then the mark is still there after a reload.', () => {
-      assert.equal(afterReload, 'reviewed');
+    after(async () => {
+      await resetMarks();
+    });
+
+    it('then the change is reviewed.', () => {
+      assert.equal(tick, 'reviewed');
+    });
+  });
+
+  describe('when the page is reloaded after the function change was marked under both of its commits, ', () => {
+    let tick: string;
+
+    before(async () => {
+      await rest(page!);
+      await markUnder('Name the parameter');
+      await markUnder('Pass the name');
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await chain(page!);
+      tick = await read(page!, functionTick);
+    });
+
+    after(async () => {
+      await resetMarks();
+    });
+
+    it('then the change is still reviewed.', () => {
+      assert.equal(tick, 'reviewed');
     });
   });
 

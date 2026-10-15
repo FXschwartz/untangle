@@ -83,19 +83,43 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
-  describe('when a commit lands, the greeting is marked and a note is left unsent, and Refresh is clicked, ', () => {
+  // The head the stub gh reports: each scenario lands its own commit on top of it.
+  let current = '';
+
+  /** Commits on the branch, and has the stub gh report the new head. */
+  function land(file: string, lines: string[], subject: string, day: string): string {
+    const author = ada(`2020-07-${day}T15:00:00Z`);
+    repo!.write(file, [...lines, ''].join('\n'));
+    const sha = repo!.commit({ subject, author, committer: author });
+    followHead(gh!, current || head, sha);
+    current = sha;
+    return sha;
+  }
+
+  describe('when a commit lands on the branch, ', () => {
+    let landed = '';
     let banner: string;
+
+    before(async () => {
+      landed = land('lib/extra.dart', ['void extra() {}'], 'Add an extra file', '03');
+      await rest(page!);
+      await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes(${JSON.stringify(landed.slice(0, 7))})`, 90_000);
+      banner = await read(page!, `document.querySelector('#vw-fresh')?.textContent ?? ''`);
+    });
+
+    it('then a banner names the new commit and offers to refresh.', () => {
+      assert.equal(banner, `New commits: ${landed.slice(0, 7)}Refresh`);
+    });
+  });
+
+  describe('when Refresh is clicked after a commit lands, with the greeting marked and a note left unsent, ', () => {
     let where: string;
     let glow: string;
     let marked: string;
     let draft: string;
 
     before(async () => {
-      const next = ada('2020-07-03T15:00:00Z');
-      repo!.write('lib/notes.dart', ['// edited', '// pad 1', '// glowed', ''].join('\n'));
-      const sha = repo!.commit({ subject: 'Glow a line', author: next, committer: next });
-      glowed = sha.slice(0, 7);
-      followHead(gh!, head, sha);
+      glowed = land('lib/notes.dart', ['// edited', '// pad 1', '// glowed'], 'Glow a line', '04').slice(0, 7);
       await rest(page!);
       await page!.click('[data-tab="chains"]');
       await page!.until(`!!document.querySelector('[data-chain]')`);
@@ -115,13 +139,12 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       await page!.click('.th.new textarea.cmp-ta');
       await page!.type('Not yet');
       await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes('New commits')`, 90_000);
-      banner = await read(page!, `document.querySelector('#vw-fresh')?.textContent ?? ''`);
       await page!.click('#vw-fresh [data-act="refresh"]');
       await page!.until(`(document.querySelector('.t-head')?.textContent || '').includes('${glowed}')`, 120_000);
       where = await read(page!, `document.querySelector('.crumbs')?.textContent ?? ''`);
       await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"] .glow')`, 30_000);
       await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"] span[class*=" k"]')`, 30_000);
-      glow = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/notes.dart"] .glow')].map((el) => el.textContent).join(' ')`);
+      glow = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/notes.dart"] .glow')].map((el) => el.querySelector('.tx')?.textContent ?? el.textContent).join('\\n')`);
       await page!.click('[data-tab="chains"]');
       const chainId = await read(page!, `([...document.querySelectorAll('[data-chain]')].find((el) => (el.textContent || '').includes('greet(name)')) || {}).dataset?.chain ?? ''`);
       await page!.click(`[data-chain="${chainId}"]`);
@@ -137,10 +160,6 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       draft = await read(page!, `document.querySelector('.th.new textarea.cmp-ta')?.value ?? ''`);
     });
 
-    it('then the banner names the new commit.', () => {
-      assert.equal(banner, `New commits: ${glowed}Refresh`);
-    });
-
     it('then the page reloads on the notes file.', () => {
       assert.equal(where, 'Files/lib/notes.dart');
     });
@@ -153,8 +172,8 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       assert.equal(draft, 'Not yet');
     });
 
-    it('then the new line glows once.', () => {
-      assert.equal(glow.includes('// glowed') ? '// glowed' : glow, '// glowed');
+    it('then only the new line glows.', () => {
+      assert.equal(glow, '// glowed');
     });
   });
 });

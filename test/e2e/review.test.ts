@@ -550,34 +550,57 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
-  describe('when the notes file\'s divider is opened, ', () => {
-    let first: string;
-    let second: string;
-    let last: string;
+  describe('when the notes file is opened, ', () => {
+    let divider: string;
 
     before(async () => {
       await rest(page!);
+      await fresh();
       await openFile(page!, 'lib/notes.dart');
       await page!.until(`!!document.querySelector('.hh-tail')`);
-      first = await read(page!, tail);
-      await page!.click('.hh-tail .mo');
-      await page!.until(`document.querySelector('.hh-tail .hh-tx')?.textContent === '21 lines below'`);
-      second = await read(page!, tail);
-      await page!.click('.hh-tail .mo');
-      await page!.until(`document.querySelector('.hh-tail .mo')?.textContent === '1 line'`);
-      last = await read(page!, tail);
+      divider = await read(page!, tail);
     });
 
-    it('then the divider offers 20 more lines.', () => {
-      assert.equal(first, '41 lines below\n20 lines');
+    it('then the divider under its change offers 20 of the 41 lines below.', () => {
+      assert.equal(divider, '41 lines below\n20 lines');
+    });
+  });
+
+  describe('when the notes file\'s divider is opened, ', () => {
+    let divider: string;
+
+    before(async () => {
+      await rest(page!);
+      await fresh();
+      await openFile(page!, 'lib/notes.dart');
+      await page!.until(`!!document.querySelector('.hh-tail')`);
+      await page!.click('.hh-tail .mo');
+      await page!.until(`document.querySelector('.hh-tail .hh-tx')?.textContent === '21 lines below'`);
+      divider = await read(page!, tail);
     });
 
     it('then the next divider offers 20 more lines.', () => {
-      assert.equal(second, '21 lines below\n20 lines');
+      assert.equal(divider, '21 lines below\n20 lines');
+    });
+  });
+
+  describe('when the notes file\'s divider is opened twice, ', () => {
+    let divider: string;
+
+    before(async () => {
+      await rest(page!);
+      await fresh();
+      await openFile(page!, 'lib/notes.dart');
+      await page!.until(`!!document.querySelector('.hh-tail')`);
+      await page!.click('.hh-tail .mo');
+      await page!.until(`document.querySelector('.hh-tail .hh-tx')?.textContent === '21 lines below'`);
+      await page!.click('.hh-tail .mo');
+      await page!.until(`document.querySelector('.hh-tail .mo')?.textContent === '1 line'`);
+      divider = await read(page!, tail);
     });
 
     it('then the last divider offers the remaining line.', () => {
-      assert.equal(last, '1 line below\n1 line');
+      assert.equal(divider, '1 line below\n1 line');
     });
   });
 
@@ -599,42 +622,70 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  /** Opens the peek of greet's definition from its changed call. */
+  async function peekGreet(): Promise<void> {
+    await rest(page!);
+    await chain(page!, 'greet(name)');
+    await page!.clickIn('.ref', 'greet', "greet('ada')");
+    await page!.until(`(document.querySelector('.peek .pk-loc')?.textContent || '').includes('lib/app.dart')`);
+  }
+
   describe('when greet on the changed call is clicked, ', () => {
     let definition: string;
-    let inner: string;
-    let back: string;
-    let closed: string;
 
     before(async () => {
-      await rest(page!);
-      await chain(page!, 'greet(name)');
-      await page!.clickIn('.ref', 'greet', "greet('ada')");
-      await page!.until(`(document.querySelector('.peek .pk-loc')?.textContent || '').includes('lib/app.dart')`);
+      await peekGreet();
       definition = await read(page!, `[...document.querySelectorAll('.peek .pk-h > *')].map((part) => part.textContent).filter(Boolean).join(' | ')`);
-      await page!.clickIn('.peek .ref.live', 'print', 'print(');
-      await page!.until(`document.querySelector('[data-act="peek-back"]')`);
-      inner = await read(page!, `document.querySelector('.peek .pk-loc')?.textContent ?? ''`);
-      await page!.click('[data-act="peek-back"]');
-      await page!.until(`(document.querySelector('.peek .pk-loc')?.textContent || '').includes('lib/app.dart') && !document.querySelector('[data-act="peek-back"]')`);
-      back = await read(page!, `document.querySelector('.peek .pk-loc')?.textContent ?? ''`);
-      await page!.click('.sb-prog');
-      await page!.until(`!document.querySelector('.peek')`);
-      closed = await read(page!, `document.querySelector('.peek') ? 'open' : 'closed'`);
     });
 
     it('then a peek shows where greet is defined.', () => {
       assert.equal(definition, 'Definition | lib/app.dart:1 | this repo | Open file | Open in editor | Close');
     });
+  });
 
-    it('then a name in the peek replaces it.', () => {
-      assert.match(inner, /^dart:core\/print\.dart:\d+$/);
+  describe('when a name in greet\'s peek is clicked, ', () => {
+    let inner: string;
+
+    before(async () => {
+      await peekGreet();
+      await page!.clickIn('.peek .ref.live', 'print', 'print(');
+      await page!.until(`document.querySelector('[data-act="peek-back"]')`);
+      inner = await read(page!, `[document.querySelector('.peek .pk-loc')?.textContent ?? '', document.querySelector('[data-act="peek-back"]')?.textContent ?? 'no Back'].join(' | ')`);
     });
 
-    it('then Back returns to greet.', () => {
+    it('then the peek shows that name\'s definition instead, with Back.', () => {
+      assert.match(inner, /^dart:core\/print\.dart:\d+ \| Back$/);
+    });
+  });
+
+  describe('when Back is clicked in a peek that went on to another name, ', () => {
+    let back: string;
+
+    before(async () => {
+      await peekGreet();
+      await page!.clickIn('.peek .ref.live', 'print', 'print(');
+      await page!.until(`document.querySelector('[data-act="peek-back"]')`);
+      await page!.click('[data-act="peek-back"]');
+      await page!.until(`!document.querySelector('[data-act="peek-back"]')`);
+      back = await read(page!, `document.querySelector('.peek .pk-loc')?.textContent ?? ''`);
+    });
+
+    it('then the peek returns to greet.', () => {
       assert.equal(back, 'lib/app.dart:1');
     });
+  });
 
-    it('then a click outside closes the peek.', () => {
+  describe('when the page outside greet\'s peek is clicked, ', () => {
+    let closed: string;
+
+    before(async () => {
+      await peekGreet();
+      await page!.click('.sb-prog');
+      await page!.until(`!document.querySelector('.peek')`);
+      closed = await read(page!, `document.querySelector('.peek') ? 'open' : 'closed'`);
+    });
+
+    it('then the peek closes.', () => {
       assert.equal(closed, 'closed');
     });
   });
@@ -854,21 +905,40 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
   });
 
   describe('when Ctrl B is pressed, ', () => {
-    let hidden: string;
-    let shown: string;
+    let sidebar: string;
 
     before(async () => {
       await rest(page!);
+      await fresh();
       await page!.key('b', { ctrl: true });
       await page!.until(`document.querySelector('#viewer')?.classList.contains('side-off')`);
-      hidden = await read(page!, `document.querySelector('#viewer')?.classList.contains('side-off') ? 'hidden' : 'shown'`);
-      await page!.key('b', { ctrl: true });
-      await page!.until(`!document.querySelector('#viewer')?.classList.contains('side-off')`);
-      shown = await read(page!, `document.querySelector('#viewer')?.classList.contains('side-off') ? 'hidden' : 'shown'`);
+      sidebar = await read(page!, `document.querySelector('#viewer')?.classList.contains('side-off') ? 'hidden' : 'shown'`);
     });
 
-    it('then the sidebar hides and shows again.', () => {
-      assert.equal(`${hidden}\n${shown}`, 'hidden\nshown');
+    after(async () => {
+      await fresh();
+    });
+
+    it('then the sidebar hides.', () => {
+      assert.equal(sidebar, 'hidden');
+    });
+  });
+
+  describe('when Ctrl B is pressed twice, ', () => {
+    let sidebar: string;
+
+    before(async () => {
+      await rest(page!);
+      await fresh();
+      await page!.key('b', { ctrl: true });
+      await page!.until(`document.querySelector('#viewer')?.classList.contains('side-off')`);
+      await page!.key('b', { ctrl: true });
+      await page!.until(`!document.querySelector('#viewer')?.classList.contains('side-off')`);
+      sidebar = await read(page!, `document.querySelector('#viewer')?.classList.contains('side-off') ? 'hidden' : 'shown'`);
+    });
+
+    it('then the sidebar shows again.', () => {
+      assert.equal(sidebar, 'shown');
     });
   });
 
@@ -994,26 +1064,51 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
-  describe('when Diffs of reviewed code is chosen, ', () => {
-    let beforeDiff: string;
-    let afterDiff: string;
+  /** Marks the greeting's change in app.dart, whose hunk has other changes and so stays open. */
+  async function markGreet(): Promise<void> {
+    await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+    await page!.goto(url);
+    await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+    await openFile(page!, 'lib/app.dart');
+    await page!.click('.code[data-p="lib/app.dart"] .tick');
+    await waitForSave(page!);
+    await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"] .ln.rvd-quiet')`);
+  }
+
+  describe('when a change whose hunk has others is marked reviewed, ', () => {
+    let rows: string;
 
     before(async () => {
       await rest(page!);
-      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
-      await page!.goto(url);
-      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
-      await openFile(page!, 'lib/app.dart');
-      await page!.click('.code[data-p="lib/app.dart"] .tick');
-      await waitForSave(page!);
-      await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"] .ln.rvd-quiet')`);
-      beforeDiff = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln')].slice(0, 3).map((row) => row.className + ' | ' + (row.querySelector('.tx')?.textContent ?? '')).join('\\n')`);
+      await markGreet();
+      rows = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln')].slice(0, 3).map((row) => row.className + ' | ' + (row.querySelector('.tx')?.textContent ?? '')).join('\\n')`);
+    });
+
+    after(async () => {
+      await clearMarks();
+    });
+
+    it('then it reads as plain code, quiet.', () => {
+      assert.equal(rows, [
+        'ln ctx rvd-quiet | void greet(String name) {',
+        'ln ctx rvd-quiet |   print(name);',
+        'ln ctx | }',
+      ].join('\n'));
+    });
+  });
+
+  describe('when Diffs of reviewed code is chosen, ', () => {
+    let rows: string;
+
+    before(async () => {
+      await rest(page!);
+      await markGreet();
       await page!.click('[data-act="menu"][data-menu="view"]');
       await page!.until(`!!document.querySelector('[data-act="revdiff"]')`);
       await page!.click('[data-act="revdiff"]');
       await waitForSave(page!);
       await page!.until(`!document.querySelector('.code[data-p="lib/app.dart"] .ln.rvd-quiet')`);
-      afterDiff = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln')].slice(0, 5).map((row) => row.className + ' | ' + (row.querySelector('.tx')?.textContent ?? '')).join('\\n')`);
+      rows = await read(page!, `[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ln')].slice(0, 5).map((row) => row.className + ' | ' + (row.querySelector('.tx')?.textContent ?? '')).join('\\n')`);
     });
 
     after(async () => {
@@ -1022,16 +1117,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await page!.until(`!!document.querySelector('.t-head')`, 30_000);
     });
 
-    it('then the reviewed change read as plain code before.', () => {
-      assert.equal(beforeDiff, [
-        'ln ctx rvd-quiet | void greet(String name) {',
-        'ln ctx rvd-quiet |   print(name);',
-        'ln ctx | }',
-      ].join('\n'));
-    });
-
-    it('then it shows its diff again.', () => {
-      assert.equal(afterDiff, [
+    it('then the reviewed change shows its diff again.', () => {
+      assert.equal(rows, [
         'ln del rvd | void greet() {',
         "ln del rvd |   print('hi');",
         'ln add rvd | void greet(String name) {',

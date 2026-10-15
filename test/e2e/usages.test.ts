@@ -140,28 +140,40 @@ describe('Given a served review of a renamed parameter and its caller, with the 
     });
   });
 
-  describe('when Open file is clicked in the peek of print, on a changed line, ', () => {
+  /** Opens the peek of print from the changed line that calls it. */
+  async function peekPrint(): Promise<void> {
+    await rest(page!);
+    await page!.goto(url);
+    await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+    await openApp();
+    await page!.clickIn('.code[data-p="lib/app.dart"] .ref', 'print', 'print(title)');
+    await page!.until(`!!document.querySelector('.peek [data-act="open-def"]')`);
+  }
+
+  describe('when print on a changed line is clicked, ', () => {
     let peekHead: string;
+
+    before(async () => {
+      await peekPrint();
+      peekHead = await read(page!, `[...document.querySelectorAll('.peek .pk-h > *')].map((el) => el.textContent).filter(Boolean).join(' | ')`);
+    });
+
+    it('then the peek shows its definition in the Dart SDK, with Open file.', () => {
+      assert.match(peekHead, /^Definition \| dart:core\/print\.dart:\d+ \| Dart SDK \| Open file \| Close$/);
+    });
+  });
+
+  describe('when Open file is clicked in the peek of print, ', () => {
     let view: string;
     let defined: string;
 
     before(async () => {
-      await rest(page!);
-      await page!.goto(url);
-      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
-      await openApp();
-      await page!.clickIn('.code[data-p="lib/app.dart"] .ref', 'print', 'print(title)');
-      await page!.until(`!!document.querySelector('.peek [data-act="open-def"]')`);
-      peekHead = await read(page!, `[...document.querySelectorAll('.peek .pk-h > *')].map((el) => el.textContent).filter(Boolean).join(' | ')`);
+      await peekPrint();
+      const line = /:(\d+)$/.exec(await read(page!, `document.querySelector('.peek .pk-loc')?.textContent ?? ''`))?.[1] ?? '';
       await page!.click('.peek [data-act="open-def"]');
       await page!.until(`!!document.querySelector('.code.src .ln') || (document.querySelector('.peek [data-act="open-def"]')?.textContent || '') === 'Not found'`, 120_000);
       view = await read(page!, `document.querySelector('.fv-head .crumbs')?.textContent ?? ''`);
-      const line = /:(\d+)$/.exec(peekHead.split(' | ')[1] ?? '')?.[1] ?? '';
       defined = await read(page!, `document.querySelector('.code.src .ln[data-n="${line}"] .tx')?.textContent ?? ''`);
-    });
-
-    it('then the peek showed the definition in the Dart SDK, with Open file.', () => {
-      assert.match(peekHead, /^Definition \| dart:core\/print\.dart:\d+ \| Dart SDK \| Open file \| Close$/);
     });
 
     it('then the Dart SDK\'s print.dart opens.', () => {

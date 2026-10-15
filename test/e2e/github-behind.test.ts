@@ -87,13 +87,24 @@ describe('Given a served review that is behind pull request 7, which has a pendi
 
   describe('when the Threads tab is opened, ', () => {
     let warning: string;
-    let plus: string;
 
     before(async () => {
       await rest(page!);
       await page!.click('[data-tab="comments"]');
       await page!.until(`(document.querySelector('.sb-warn')?.textContent || '').includes('Comments on lines wait')`);
       warning = await read(page!, `document.querySelector('.sb-warn')?.textContent ?? ''`);
+    });
+
+    it('then it warns that comments on lines wait until the review is on GitHub\'s head.', () => {
+      assert.equal(warning, `GitHub has newer commits (${behind.slice(0, 7)}). Comments on lines wait for this review to be on them. Refresh`);
+    });
+  });
+
+  describe('when a changed line is hovered, ', () => {
+    let plus: string;
+
+    before(async () => {
+      await rest(page!);
       await page!.click('[data-tab="files"]');
       await page!.click('[data-open="lib/app.dart"]');
       await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"]')`);
@@ -101,8 +112,8 @@ describe('Given a served review that is behind pull request 7, which has a pendi
       plus = await read(page!, `document.querySelector('.cm-add')?.classList.contains('on') ? 'shown' : 'hidden'`);
     });
 
-    it('then comments on lines wait until the review is on GitHub\'s head.', () => {
-      assert.equal(`${warning}\n${plus}`, `GitHub has newer commits (${behind.slice(0, 7)}). Comments on lines wait for this review to be on them. Refresh\nhidden`);
+    it('then no + offers to comment on it.', () => {
+      assert.equal(plus, 'hidden');
     });
   });
 
