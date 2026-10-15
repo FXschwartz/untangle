@@ -111,8 +111,8 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       await page!.hover('[data-c="R:1"]');
       await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await page!.click('textarea.cmp-ta');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await page!.click('.th.new textarea.cmp-ta');
       await page!.type('Not yet');
       await page!.until(`!document.querySelector('#vw-fresh')?.hidden && (document.querySelector('#vw-fresh')?.textContent || '').includes('New commits')`, 90_000);
       banner = await read(page!, `document.querySelector('#vw-fresh')?.textContent ?? ''`);
@@ -133,8 +133,8 @@ describe('Given a served review of a greeting and a notes file, ', { skip, timeo
       await page!.hover('[data-c="R:1"]');
       await page!.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      draft = await read(page!, `document.querySelector('textarea.cmp-ta')?.value ?? ''`);
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      draft = await read(page!, `document.querySelector('.th.new textarea.cmp-ta')?.value ?? ''`);
     });
 
     it('then the banner names the new commit.', () => {

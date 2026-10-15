@@ -212,10 +212,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     before(async () => {
       await fresh();
-      await page!.click('[data-act="reply-open"]');
-      await page!.until(`!!document.querySelector('textarea[data-draft="reply:THREAD_1"]')`);
-      await fill(page!, 'textarea[data-draft="reply:THREAD_1"]', 'Because it reads clearly.');
-      await page!.click('[data-act="gh-reply"][data-mode="single"]');
+      await page!.click('[data-thread="THREAD_1"] [data-act="reply-open"]');
+      await page!.until(`!!document.querySelector('[data-thread="THREAD_1"] textarea[data-draft="reply:THREAD_1"]')`);
+      await fill(page!, '[data-thread="THREAD_1"] textarea[data-draft="reply:THREAD_1"]', 'Because it reads clearly.');
+      await page!.click('[data-thread="THREAD_1"] [data-act="gh-reply"][data-mode="single"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Reply posted'`);
       thread = await read(page!, `document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? ''`);
       sent = posted(gh!, 'addPullRequestReviewThreadReply');
@@ -271,8 +271,8 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('[data-act="gh-thread"]')`);
-      buttons = await read(page!, `[...document.querySelectorAll('[data-act="gh-thread"]')].map((el) => el.textContent).join('\\n')`);
+      await page!.until(`!!document.querySelector('.th.new [data-act="gh-thread"]')`);
+      buttons = await read(page!, `[...document.querySelectorAll('.th.new [data-act="gh-thread"]')].map((el) => el.textContent).join('\\n')`);
     });
 
     it('then the comment can be sent on its own or can start a review.', () => {
@@ -322,9 +322,9 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await fill(page!, 'textarea.cmp-ta', 'Looks good.');
-      await page!.click('[data-act="gh-thread"][data-mode="single"]');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await fill(page!, '.th.new textarea.cmp-ta', 'Looks good.');
+      await page!.click('.th.new [data-act="gh-thread"][data-mode="single"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Comment posted'`);
       sent = posted(gh!, 'addPullRequestReview');
     });
@@ -342,9 +342,9 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await fill(page!, 'textarea.cmp-ta', 'Please rename it.');
-      await page!.click('[data-act="gh-thread"][data-mode="review"]');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await fill(page!, '.th.new textarea.cmp-ta', 'Please rename it.');
+      await page!.click('.th.new [data-act="gh-thread"][data-mode="review"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Added to your pending review'`);
       sent = posted(gh!, 'addPullRequestReviewThread');
       pending = await read(page!, `document.querySelector('.cm.pending') ? 'pending' : 'posted'`);
@@ -362,8 +362,8 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await fill(page!, 'textarea.cmp-ta', '@');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await fill(page!, '.th.new textarea.cmp-ta', '@');
       await page!.until(`document.querySelector('.mn-pop') && !document.querySelector('.mn-pop').hidden && (document.querySelector('.mn-pop')?.textContent || '').includes('grace')`);
       suggestions = await read(page!, `document.querySelector('.mn-pop')?.textContent ?? ''`);
     });
@@ -380,8 +380,8 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('textarea.cmp-ta')`);
-      await fill(page!, 'textarea.cmp-ta', '#12');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await fill(page!, '.th.new textarea.cmp-ta', '#12');
       await page!.until(`(document.querySelector('.mn-pop')?.textContent || '').includes('The name')`);
       suggestions = await read(page!, `document.querySelector('.mn-pop')?.textContent ?? ''`);
     });
@@ -476,11 +476,11 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('.cmp-ta')`);
-      await fill(page!, '.cmp-ta', '**hello**');
-      await page!.click('[data-act="cmp-pane"][data-pane="preview"]');
-      await page!.until(`document.querySelector('.cmp-pre strong')?.textContent === 'hello'`);
-      preview = await read(page!, `document.querySelector('.cmp-pre strong')?.textContent ?? ''`);
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await fill(page!, '.th.new textarea.cmp-ta', '**hello**');
+      await page!.click('.th.new [data-act="cmp-pane"][data-pane="preview"]');
+      await page!.until(`document.querySelector('.th.new .cmp-pre strong')?.textContent === 'hello'`);
+      preview = await read(page!, `document.querySelector('.th.new .cmp-pre strong')?.textContent ?? ''`);
     });
 
     it('then the comment is shown rendered.', () => {
@@ -495,9 +495,9 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('.cmp-ta')`);
-      await fill(page!, '.cmp-ta', 'Ship it.');
-      await page!.click('.cmp-ta');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      await fill(page!, '.th.new textarea.cmp-ta', 'Ship it.');
+      await page!.click('.th.new textarea.cmp-ta');
       await page!.key('Enter', { ctrl: true });
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Added to your pending review'`);
       sent = posted(gh!, 'addPullRequestReviewThread');
@@ -515,10 +515,10 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fresh();
       await showAdd(page!, callLine);
       await page!.click('.cm-add');
-      await page!.until(`!!document.querySelector('[data-act="cmp-suggest"]')`);
-      await page!.click('[data-act="cmp-suggest"]');
-      await page!.until(`(document.querySelector('.cmp-ta')?.value || '').includes('\`\`\`suggestion')`);
-      await page!.click('[data-act="gh-thread"][data-mode="single"]');
+      await page!.until(`!!document.querySelector('.th.new [data-act="cmp-suggest"]')`);
+      await page!.click('.th.new [data-act="cmp-suggest"]');
+      await page!.until(`(document.querySelector('.th.new textarea.cmp-ta')?.value || '').includes('\`\`\`suggestion')`);
+      await page!.click('.th.new [data-act="gh-thread"][data-mode="single"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Comment posted'`);
       sent = posted(gh!, 'addPullRequestReview');
     });
@@ -603,6 +603,54 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     it('then GitHub is asked to comment on the file.', () => {
       assert.equal(sent, `{"pullRequestId":"PR_1","commitOID":"${head}","event":"COMMENT","threads":[{"path":"lib/app.dart","body":"On the whole file."}]}`);
+    });
+  });
+
+  describe('when the page reloads right after a reply is sent, ', () => {
+    let box: string;
+
+    before(async () => {
+      await page!.installClock();
+      await fresh();
+      await page!.click('[data-thread="THREAD_1"] [data-act="reply-open"]');
+      await fill(page!, '[data-thread="THREAD_1"] textarea[data-draft="reply:THREAD_1"]', 'Sent just now.');
+      // The typed reply is kept. Sending clears it, and that write stays pending.
+      await page!.advance(300);
+      await page!.click('[data-thread="THREAD_1"] [data-act="gh-reply"][data-mode="single"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Reply posted'`);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openApp();
+      await page!.until(`(document.querySelector('[data-thread="THREAD_1"]')?.textContent || '').includes('Why this name?')`);
+      box = await read(page!, `document.querySelector('textarea[data-draft="reply:THREAD_1"]')?.value ?? ''`);
+    });
+
+    it('then the reply box does not come back with the sent text.', () => {
+      assert.equal(box, '');
+    });
+  });
+
+  describe('when the page reloads right after a comment is typed, ', () => {
+    let value: string;
+
+    before(async () => {
+      await page!.installClock();
+      await fresh();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await fill(page!, '.th.new textarea.cmp-ta', 'Keep this.');
+      // The clock does not move, so this write is still waiting when the page goes.
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openApp();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
+      value = await read(page!, `document.querySelector('.th.new textarea.cmp-ta')?.value ?? ''`);
+    });
+
+    it('then the text is still there.', () => {
+      assert.equal(value, 'Keep this.');
     });
   });
 });

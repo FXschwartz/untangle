@@ -79,8 +79,13 @@ export interface Browser {
 interface CdpMessage {
   id?: number;
   method?: string;
+  sessionId?: string;
   result?: unknown;
-  params?: { response?: { url?: string; status?: number } };
+  params?: {
+    loaderId?: string;
+    frame?: { loaderId?: string; parentId?: string };
+    response?: { url?: string; status?: number };
+  };
 }
 
 export async function launchBrowser(width = 1400, height = 900): Promise<Browser> {
@@ -107,6 +112,16 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
   let next = 0;
   let sessionId = '';
   const pending = new Map<number, (message: CdpMessage) => void>();
+  const events = new Map<string, Array<(message: CdpMessage) => void>>();
+  const onEvent = (method: string, handler: (message: CdpMessage) => void) => {
+    const list = events.get(method) ?? [];
+    list.push(handler);
+    events.set(method, list);
+    return () => {
+      const current = events.get(method) ?? [];
+      events.set(method, current.filter((item) => item !== handler));
+    };
+  };
   const send = (method: string, params: Record<string, unknown> = {}, session?: string) => new Promise<CdpMessage>((resolve, reject) => {
     const id = ++next;
     const timer = setTimeout(() => {
@@ -124,6 +139,9 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     if (message.id && pending.has(message.id)) {
       pending.get(message.id)!(message);
       pending.delete(message.id);
+    }
+    if (message.method && (!message.sessionId || message.sessionId === sessionId)) {
+      for (const handler of events.get(message.method) ?? []) handler(message);
     }
     if (message.method === 'Page.javascriptDialogOpening' && sessionId) {
       void send('Page.handleJavaScriptDialog', { accept: true }, sessionId);
@@ -210,8 +228,61 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
 
   return {
     async goto(url: string) {
-      await session('Page.navigate', { url });
-      await poll(evaluate, 'document.readyState === "complete"', 60_000);
+      // The document already up is complete, so readyState alone can succeed
+      // before this navigation commits. Mark it, and accept the page only once
+      // the loader Page.navigate returns has committed and loaded. A token URL
+      // redirects, and that loader id is kept across the redirect. The load
+      // event itself carries no loader id.
+      const token = `leaving-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      let marked = false;
+      try {
+        await evaluate(`window.__leaving = ${JSON.stringify(token)}`);
+        marked = true;
+      } catch {
+        // about:blank, or a document that is already going away.
+      }
+      const frames: Array<{ loaderId: string; parentId?: string; n: number }> = [];
+      const loads: number[] = [];
+      let n = 0;
+      const stopFrame = onEvent('Page.frameNavigated', (message) => {
+        const frame = message.params?.frame;
+        if (!frame?.loaderId) return;
+        frames.push({ loaderId: frame.loaderId, parentId: frame.parentId, n: ++n });
+      });
+      const stopLoad = onEvent('Page.loadEventFired', () => {
+        loads.push(++n);
+      });
+      try {
+        const navigated = await session('Page.navigate', { url });
+        const result = navigated.result as { loaderId?: string; errorText?: string } | undefined;
+        if (result?.errorText) throw new Error(result.errorText);
+        const loaderId = result?.loaderId;
+        if (!loaderId) throw new Error(`the new page did not load: ${url}`);
+        const arrived = marked
+          ? `window.__leaving !== ${JSON.stringify(token)} && document.readyState === "complete"`
+          : 'document.readyState === "complete"';
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline) {
+          const frame = frames.find((item) => item.loaderId === loaderId && !item.parentId);
+          const loaded = frame != null && loads.some((at) => at > frame.n);
+          if (loaded) {
+            const tree = await session('Page.getFrameTree');
+            const current = (tree.result as { frameTree?: { frame?: { loaderId?: string } } } | undefined)?.frameTree?.frame?.loaderId;
+            if (current === loaderId) {
+              try {
+                if (await evaluate(arrived)) return;
+              } catch {
+                // The new document is not scriptable yet.
+              }
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error(`the new page did not load: ${url}`);
+      } finally {
+        stopFrame();
+        stopLoad();
+      }
     },
     until(expression: string, ms = 60_000) {
       return poll(evaluate, expression, ms);
