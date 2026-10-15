@@ -100,14 +100,21 @@ for (const rel of [...byFile.keys()].sort()) {
 
 // The page's script: the inline <script> that holds viewer.js, found by one of its functions.
 const viewer = fs.readFileSync(path.join(root, 'viewer/viewer.js'), 'utf8');
-const anchor = viewer.indexOf('function renderHistory(');
 const state = new Uint8Array(viewer.length);
+// V8 leaves out functions it never compiled, so a page that never opened History has no
+// renderHistory in its snapshot. Any of these, present in both the file and the snapshot, lines
+// the script up with viewer.js. (Where V8 leaves a function out, its parent reports that span
+// as not run, so a missing function never counts as run.)
+const anchors = ['function renderHistory(', 'function renderStandalone(', 'function render(', 'function api(']
+  .map((source) => ({ source, name: /function\s+([A-Za-z_$][\w$]*)/.exec(source)![1], at: viewer.indexOf(source) }))
+  .filter((item) => item.at >= 0);
 let snapshots = 0;
 for (const name of fs.existsSync(pageDir) ? fs.readdirSync(pageDir) : []) {
   for (const script of JSON.parse(fs.readFileSync(path.join(pageDir, name), 'utf8')) as ScriptCoverage[]) {
-    const fn = script.functions.find((f) => f.functionName === 'renderHistory');
-    if (!fn) continue;
-    paint(state, script.functions, fn.ranges[0].startOffset - anchor);
+    const anchorOf = anchors.find((item) => script.functions.some((fn) => fn.functionName === item.name));
+    const fn = anchorOf && script.functions.find((item) => item.functionName === anchorOf.name);
+    if (!anchorOf || !fn) continue;
+    paint(state, script.functions, fn.ranges[0].startOffset - anchorOf.at);
     snapshots++;
   }
 }
