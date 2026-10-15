@@ -60,8 +60,12 @@ export interface Browser {
   doubleClick(selector: string): Promise<void>;
   /** Presses at the element's center, moves by `dx`/`dy`, and releases. */
   drag(selector: string, dx: number, dy: number): Promise<void>;
+  /** Presses on `from` and releases on `onto`. */
+  dragOnto(from: string, onto: string): Promise<void>;
   /** Clicks at a fraction of the element's box, 0 to 1 from the top left. */
   clickRatio(selector: string, xRatio: number, yRatio: number): Promise<void>;
+  hover(selector: string): Promise<void>;
+  type(text: string): Promise<void>;
   key(key: string, opts?: { shift?: boolean; ctrl?: boolean }): Promise<void>;
   setViewport(width: number, height: number): Promise<void>;
   reducedMotion(on: boolean): Promise<void>;
@@ -151,13 +155,25 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     if (!box) throw new Error(`no element matches ${selector}`);
     return box;
   };
-  const at = async (x: number, y: number, type: string, modifiers: number, clickCount: number) => {
-    await session('Input.dispatchMouseEvent', { x, y, type, button: 'left', modifiers, clickCount, pointerType: 'mouse' });
+  const at = async (x: number, y: number, type: string, modifiers: number, clickCount: number, buttons = 0) => {
+    await session('Input.dispatchMouseEvent', { x, y, type, button: 'left', buttons, modifiers, clickCount, pointerType: 'mouse' });
   };
   const clickAt = async (x: number, y: number, modifiers: number, clickCount: number) => {
     await at(x, y, 'mouseMoved', modifiers, 0);
     await at(x, y, 'mousePressed', modifiers, clickCount);
     await at(x, y, 'mouseReleased', modifiers, clickCount);
+  };
+  const press = async (key: string, opts: { shift?: boolean; ctrl?: boolean }) => {
+    const known = KEYS[key] ?? {
+      code: key.length === 1 && /[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : key,
+      vk: 0,
+      text: key.length === 1 ? key : undefined,
+    };
+    const modifiers = ((opts.shift || known.shift) ? 8 : 0) + (opts.ctrl ? 2 : 0);
+    const base = { key, code: known.code, windowsVirtualKeyCode: known.vk, modifiers };
+    await session('Input.dispatchKeyEvent', { ...base, type: 'keyDown' });
+    if (known.text && !opts.ctrl) await session('Input.dispatchKeyEvent', { ...base, type: 'char', text: known.text });
+    await session('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
   };
 
   let closed = false;
@@ -226,22 +242,38 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       const box = await boxOf(selector, true);
       const x = box.left + box.width / 2;
       const y = box.top + box.height / 2;
-      await at(x, y, 'mouseMoved', 0, 0);
-      await at(x, y, 'mousePressed', 0, 1);
-      await at(x + dx, y + dy, 'mouseMoved', 0, 0);
-      await at(x + dx, y + dy, 'mouseReleased', 0, 1);
+      await at(x, y, 'mousePressed', 0, 1, 1);
+      await at(x + dx, y + dy, 'mouseMoved', 0, 0, 1);
+      await at(x + dx, y + dy, 'mouseReleased', 0, 1, 0);
+    },
+    async dragOnto(from: string, onto: string) {
+      const points = await evaluate(`(() => {
+        const start = document.querySelector(${JSON.stringify(from)});
+        const end = document.querySelector(${JSON.stringify(onto)});
+        if (!start || !end) return null;
+        start.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const a = start.getBoundingClientRect();
+        const b = end.getBoundingClientRect();
+        return { x: a.left + a.width / 2, y: a.top + a.height / 2, x2: b.left + b.width / 2, y2: b.top + b.height / 2 };
+      })()`) as { x: number; y: number; x2: number; y2: number } | null;
+      if (!points) throw new Error(`cannot drag ${from} onto ${onto}`);
+      await at(points.x, points.y, 'mousePressed', 0, 1, 1);
+      await at(points.x2, points.y2, 'mouseMoved', 0, 0, 1);
+      await at(points.x2, points.y2, 'mouseReleased', 0, 1, 0);
     },
     async clickRatio(selector: string, xRatio: number, yRatio: number) {
       const box = await boxOf(selector, true);
       await clickAt(box.left + box.width * xRatio, box.top + box.height * yRatio, 0, 1);
     },
-    async key(key: string, opts: { shift?: boolean; ctrl?: boolean } = {}) {
-      const known = KEYS[key] ?? (key.length === 1 && /[a-z]/i.test(key) ? { code: `Key${key.toUpperCase()}`, vk: 0, text: key } : { code: key, vk: 0 });
-      const modifiers = ((opts.shift || known.shift) ? 8 : 0) + (opts.ctrl ? 2 : 0);
-      const base = { key, code: known.code, windowsVirtualKeyCode: known.vk, modifiers };
-      await session('Input.dispatchKeyEvent', { ...base, type: 'keyDown' });
-      if (known.text && !opts.ctrl) await session('Input.dispatchKeyEvent', { ...base, type: 'char', text: known.text });
-      await session('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
+    async hover(selector: string) {
+      const box = await boxOf(selector, true);
+      await at(box.left + box.width / 2, box.top + box.height / 2, 'mouseMoved', 0, 0);
+    },
+    async type(text: string) {
+      for (const char of text) await press(char, {});
+    },
+    key(key: string, opts: { shift?: boolean; ctrl?: boolean } = {}) {
+      return press(key, opts);
     },
     async setViewport(nextWidth: number, nextHeight: number) {
       await session('Emulation.setDeviceMetricsOverride', { width: nextWidth, height: nextHeight, deviceScaleFactor: 1, mobile: false });
