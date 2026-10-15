@@ -38,11 +38,14 @@ export function e2eSkip(): string | false {
   return false;
 }
 
-const KEYS: Record<string, { code: string; vk: number }> = {
+const KEYS: Record<string, { code: string; vk: number; text?: string; shift?: boolean }> = {
   Escape: { code: 'Escape', vk: 27 },
   ArrowUp: { code: 'ArrowUp', vk: 38 },
   ArrowDown: { code: 'ArrowDown', vk: 40 },
   Enter: { code: 'Enter', vk: 13 },
+  Tab: { code: 'Tab', vk: 9 },
+  ' ': { code: 'Space', vk: 32, text: ' ' },
+  '?': { code: 'Slash', vk: 191, text: '?', shift: true },
 };
 
 export interface Browser {
@@ -50,8 +53,15 @@ export interface Browser {
   /** Polls a JS expression until it is truthy. Throws the expression if it never is. */
   until(expression: string, ms?: number): Promise<unknown>;
   eval(expression: string): Promise<unknown>;
-  click(selector: string): Promise<void>;
+  click(selector: string, opts?: { scroll?: boolean }): Promise<void>;
+  /** Clicks the element whose own text is `name` and whose line contains `line`. */
+  clickIn(selector: string, name: string, line: string): Promise<void>;
   shiftClick(selector: string): Promise<void>;
+  doubleClick(selector: string): Promise<void>;
+  /** Presses at the element's center, moves by `dx`/`dy`, and releases. */
+  drag(selector: string, dx: number, dy: number): Promise<void>;
+  /** Clicks at a fraction of the element's box, 0 to 1 from the top left. */
+  clickRatio(selector: string, xRatio: number, yRatio: number): Promise<void>;
   key(key: string, opts?: { shift?: boolean; ctrl?: boolean }): Promise<void>;
   setViewport(width: number, height: number): Promise<void>;
   reducedMotion(on: boolean): Promise<void>;
@@ -130,19 +140,24 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     return result?.result?.value;
   };
 
-  const mouse = async (selector: string, modifiers: number) => {
-    const point = await evaluate(`(() => {
+  const boxOf = async (selector: string, scroll: boolean) => {
+    const box = await evaluate(`(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return null;
-      el.scrollIntoView({ block: 'center', inline: 'nearest' });
+      if (${scroll ? 'true' : 'false'}) el.scrollIntoView({ block: 'center', inline: 'nearest' });
       const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    })()`) as { x: number; y: number } | null;
-    if (!point) throw new Error(`no element matches ${selector}`);
-    const at = { x: point.x, y: point.y, button: 'left', modifiers, clickCount: 1 };
-    await session('Input.dispatchMouseEvent', { ...at, type: 'mouseMoved' });
-    await session('Input.dispatchMouseEvent', { ...at, type: 'mousePressed' });
-    await session('Input.dispatchMouseEvent', { ...at, type: 'mouseReleased' });
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    })()`) as { left: number; top: number; width: number; height: number } | null;
+    if (!box) throw new Error(`no element matches ${selector}`);
+    return box;
+  };
+  const at = async (x: number, y: number, type: string, modifiers: number, clickCount: number) => {
+    await session('Input.dispatchMouseEvent', { x, y, type, button: 'left', modifiers, clickCount, pointerType: 'mouse' });
+  };
+  const clickAt = async (x: number, y: number, modifiers: number, clickCount: number) => {
+    await at(x, y, 'mouseMoved', modifiers, 0);
+    await at(x, y, 'mousePressed', modifiers, clickCount);
+    await at(x, y, 'mouseReleased', modifiers, clickCount);
   };
 
   let closed = false;
@@ -181,17 +196,51 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       return poll(evaluate, expression, ms);
     },
     eval: evaluate,
-    click(selector: string) {
-      return mouse(selector, 0);
+    async click(selector: string, opts: { scroll?: boolean } = {}) {
+      const box = await boxOf(selector, opts.scroll !== false);
+      await clickAt(box.left + box.width / 2, box.top + box.height / 2, 0, 1);
     },
-    shiftClick(selector: string) {
-      return mouse(selector, 8);
+    async clickIn(selector: string, name: string, line: string) {
+      const point = await evaluate(`(() => {
+        const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((node) => (node.textContent || '') === ${JSON.stringify(name)} && (node.closest('.ln, .sl, .pk-ln')?.textContent || '').includes(${JSON.stringify(line)}));
+        if (!el) return null;
+        el.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`) as { x: number; y: number } | null;
+      if (!point) throw new Error(`no ${selector} named ${name} on a line with ${line}`);
+      await clickAt(point.x, point.y, 0, 1);
+    },
+    async shiftClick(selector: string) {
+      const box = await boxOf(selector, true);
+      await clickAt(box.left + box.width / 2, box.top + box.height / 2, 8, 1);
+    },
+    async doubleClick(selector: string) {
+      const box = await boxOf(selector, true);
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      await clickAt(x, y, 0, 1);
+      await clickAt(x, y, 0, 2);
+    },
+    async drag(selector: string, dx: number, dy: number) {
+      const box = await boxOf(selector, true);
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      await at(x, y, 'mouseMoved', 0, 0);
+      await at(x, y, 'mousePressed', 0, 1);
+      await at(x + dx, y + dy, 'mouseMoved', 0, 0);
+      await at(x + dx, y + dy, 'mouseReleased', 0, 1);
+    },
+    async clickRatio(selector: string, xRatio: number, yRatio: number) {
+      const box = await boxOf(selector, true);
+      await clickAt(box.left + box.width * xRatio, box.top + box.height * yRatio, 0, 1);
     },
     async key(key: string, opts: { shift?: boolean; ctrl?: boolean } = {}) {
-      const known = KEYS[key] ?? { code: key, vk: 0 };
-      const modifiers = (opts.shift ? 8 : 0) + (opts.ctrl ? 2 : 0);
+      const known = KEYS[key] ?? (key.length === 1 && /[a-z]/i.test(key) ? { code: `Key${key.toUpperCase()}`, vk: 0, text: key } : { code: key, vk: 0 });
+      const modifiers = ((opts.shift || known.shift) ? 8 : 0) + (opts.ctrl ? 2 : 0);
       const base = { key, code: known.code, windowsVirtualKeyCode: known.vk, modifiers };
       await session('Input.dispatchKeyEvent', { ...base, type: 'keyDown' });
+      if (known.text && !opts.ctrl) await session('Input.dispatchKeyEvent', { ...base, type: 'char', text: known.text });
       await session('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
     },
     async setViewport(nextWidth: number, nextHeight: number) {
