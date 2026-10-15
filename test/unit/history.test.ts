@@ -781,3 +781,139 @@ describe('Given a repository with one commit, ', () => {
     },
   );
 });
+
+describe('Given a branch that removes a line and then merges main, which did not touch that file, ', () => {
+  let repo: TempRepo | undefined;
+  let mainTip: string;
+  let head: string;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('lib/a.dart', 'keep\ngone\n');
+    repo.commit({ subject: 'start', author: dated('2020-07-01T00:00:00Z'), committer: dated('2020-07-01T00:00:00Z') });
+    repo.branch('feature');
+    repo.write('lib/a.dart', 'keep\n');
+    repo.commit({ subject: 'remove the line', author: dated('2020-07-02T00:00:00Z'), committer: dated('2020-07-02T00:00:00Z') });
+    repo.checkout('main');
+    repo.write('lib/other.dart', 'extra\n');
+    mainTip = repo.commit({ subject: 'add another file', author: dated('2020-07-03T00:00:00Z'), committer: dated('2020-07-03T00:00:00Z') });
+    repo.checkout('feature');
+    head = repo.merge({ ref: 'main', subject: 'merge main', author: dated('2020-07-04T00:00:00Z'), committer: dated('2020-07-04T00:00:00Z') });
+  });
+
+  after(() => repo?.remove());
+
+  it(
+    'when the history against main\'s tip is read, '
+    + 'then the removed line names the commit that removed it.',
+    async () => {
+      const files = reviewFiles(repo!.dir, mainTip, head).filter((file) => file.p === 'lib/a.dart');
+      const history = await readHistory(repo!.dir, mainTip, head, files, null);
+      assert.equal(attributed(files, history), 'lib/a.dart\n keep [-]\n-gone [remove the line]');
+    },
+  );
+});
+
+describe('Given a branch that deletes a file and then merges main, which did not touch that file, ', () => {
+  let repo: TempRepo | undefined;
+  let mainTip: string;
+  let head: string;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('lib/a.dart', 'keep\n');
+    repo.write('lib/gone.dart', 'gone\n');
+    repo.commit({ subject: 'start', author: dated('2020-07-01T00:00:00Z'), committer: dated('2020-07-01T00:00:00Z') });
+    repo.branch('feature');
+    repo.delete('lib/gone.dart');
+    repo.commit({ subject: 'delete the file', author: dated('2020-07-02T00:00:00Z'), committer: dated('2020-07-02T00:00:00Z') });
+    repo.checkout('main');
+    repo.write('lib/other.dart', 'extra\n');
+    mainTip = repo.commit({ subject: 'add another file', author: dated('2020-07-03T00:00:00Z'), committer: dated('2020-07-03T00:00:00Z') });
+    repo.checkout('feature');
+    head = repo.merge({ ref: 'main', subject: 'merge main', author: dated('2020-07-04T00:00:00Z'), committer: dated('2020-07-04T00:00:00Z') });
+  });
+
+  after(() => repo?.remove());
+
+  it(
+    'when the history against main\'s tip is read, '
+    + 'then the deleted file\'s removed lines name the commit that deleted it.',
+    async () => {
+      const files = reviewFiles(repo!.dir, mainTip, head).filter((file) => file.p === 'lib/gone.dart');
+      const history = await readHistory(repo!.dir, mainTip, head, files, null);
+      assert.equal(attributed(files, history), 'lib/gone.dart\n-gone [delete the file]');
+    },
+  );
+});
+
+describe('Given a line removed after merging main, ', () => {
+  let repo: TempRepo | undefined;
+  let mainTip: string;
+  let head: string;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('lib/a.dart', 'keep\nlater\n');
+    repo.commit({ subject: 'start', author: dated('2020-07-01T00:00:00Z'), committer: dated('2020-07-01T00:00:00Z') });
+    repo.branch('feature');
+    repo.checkout('main');
+    repo.write('lib/other.dart', 'extra\n');
+    mainTip = repo.commit({ subject: 'add another file', author: dated('2020-07-02T00:00:00Z'), committer: dated('2020-07-02T00:00:00Z') });
+    repo.checkout('feature');
+    repo.merge({ ref: 'main', subject: 'merge main', author: dated('2020-07-03T00:00:00Z'), committer: dated('2020-07-03T00:00:00Z') });
+    repo.write('lib/a.dart', 'keep\n');
+    head = repo.commit({ subject: 'remove after', author: dated('2020-07-04T00:00:00Z'), committer: dated('2020-07-04T00:00:00Z') });
+  });
+
+  after(() => repo?.remove());
+
+  it(
+    'when the history against main\'s tip is read, '
+    + 'then the removed line names that later commit.',
+    async () => {
+      const files = reviewFiles(repo!.dir, mainTip, head).filter((file) => file.p === 'lib/a.dart');
+      const history = await readHistory(repo!.dir, mainTip, head, files, null);
+      assert.equal(attributed(files, history), 'lib/a.dart\n keep [-]\n-later [remove after]');
+    },
+  );
+});
+
+describe('Given main changes a line the branch deleted, and the merge drops main\'s version, ', () => {
+  let repo: TempRepo | undefined;
+  let mainTip: string;
+  let head: string;
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('lib/a.dart', 'keep\nshared\n');
+    repo.commit({ subject: 'start', author: dated('2020-07-01T00:00:00Z'), committer: dated('2020-07-01T00:00:00Z') });
+    repo.branch('feature');
+    repo.write('lib/a.dart', 'keep\n');
+    repo.commit({ subject: 'delete the line', author: dated('2020-07-02T00:00:00Z'), committer: dated('2020-07-02T00:00:00Z') });
+    repo.checkout('main');
+    repo.write('lib/a.dart', 'keep\nfrom-main\n');
+    mainTip = repo.commit({ subject: 'main changes the line', author: dated('2020-07-03T00:00:00Z'), committer: dated('2020-07-03T00:00:00Z') });
+    repo.checkout('feature');
+    try {
+      repo.merge({ ref: 'main', subject: 'merge main', author: dated('2020-07-04T00:00:00Z'), committer: dated('2020-07-04T00:00:00Z') });
+    } catch {
+      repo.write('lib/a.dart', 'keep\n');
+      head = repo.commit({ subject: 'merge main', author: dated('2020-07-04T00:00:00Z'), committer: dated('2020-07-04T00:00:00Z') });
+      return;
+    }
+    throw new Error('the merge did not conflict');
+  });
+
+  after(() => repo?.remove());
+
+  it(
+    'when the history against main\'s tip is read, '
+    + 'then the removed line names the merge.',
+    async () => {
+      const files = reviewFiles(repo!.dir, mainTip, head).filter((file) => file.p === 'lib/a.dart');
+      const history = await readHistory(repo!.dir, mainTip, head, files, null);
+      assert.equal(attributed(files, history), 'lib/a.dart\n keep [-]\n-from-main [merge main]');
+    },
+  );
+});
