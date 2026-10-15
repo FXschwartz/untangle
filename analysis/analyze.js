@@ -733,7 +733,16 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         continue;
       }
       const d = plusRow.get(rel + ':' + (tl + 1));
-      if (d) { if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc)); continue; }
+      if (d) {
+        if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc));
+        else {
+          // A parameter used only inside its own change: no use, but it can still name the
+          // ripple it passes on (the top parameter, where the change enters).
+          const dk = `${rel}:${tl + 1}:${tc}`;
+          if (!decls.has(dk)) { const made = declAt(rel, d.f, d.b, tl + 1, tc)(); if (made.kind === 'param') decls.set(dk, made); }
+        }
+        continue;
+      }
       // A test links to the changed code it reaches: the first changed function on each path
       // of calls from what it calls, up to the call graph's depth.
       if (isTestFile(u.f.p)) reachChanged(rel, tl, tc).forEach((h) => { if (h.b !== u.b) addUse(u, h.key, declAt(h.rel, h.f, h.b, h.line, h.col, { kind: 'member' })); });
@@ -1001,7 +1010,11 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     const linkedBlocks = new Set(chains.flatMap((c) => [...c.blocks]));
     chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => { if (!linkedBlocks.has(x)) c.blocks.add(x); })); });
     chains.forEach((c) => {
-      const inside = [...decls.values()].filter((d) => c.blocks.has(d.block) && d.kind !== 'import').map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length })).filter((x) => x.n > 0);
+      const counted = [...decls.values()].filter((d) => c.blocks.has(d.block) && d.kind !== 'import').map((d) => ({ d, n: [...d.users].filter((u) => c.blocks.has(u)).length }));
+      // A parameter whose own change passes it on to another member's parameter counts too:
+      // the top of a ripple can have no other change using it, when its uses sit in its own.
+      const passesOn = (d) => d.kind === 'param' && counted.some((x) => x.d.kind === 'param' && x.d.member !== d.member && x.d.users.has(d.block));
+      const inside = counted.filter((x) => x.n > 0 || passesOn(x.d));
       // In a ripple, the top parameter comes first: its callers don't pass it on from a
       // parameter of their own (the one where the change enters).
       const params = inside.filter((x) => x.d.kind === 'param').map((x) => x.d);

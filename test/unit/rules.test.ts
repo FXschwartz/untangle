@@ -218,7 +218,7 @@ scenario(
   },
   'then the parameter and the caller are one chain.',
   chainsOf,
-  'ripple greet(title) +4 -4 depth 0\nlib/a.dart#0, lib/a.dart#1\nL0 greet, L1 wave\nwave → greet [title]\nuses none, shares none, family 0',
+  'ripple wave(title) +4 -4 depth 0\nlib/a.dart#0, lib/a.dart#1\nL0 wave, L1 greet\nwave → greet [title]\nuses none, shares none, family 0',
 );
 
 scenario(
@@ -230,7 +230,6 @@ scenario(
   'then the chain is named for the parameter the value enters at.',
   (review) => baseOf(review).chains.map((chain) => chain.name).join('\n'),
   'wave(title)',
-  'bug: the ripple is named greet(title), the parameter the value is passed on to, rather than wave(title), where the value enters',
 );
 
 scenario(
