@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { RawDefinitions } from '../../analysis/analyze.js';
-import { askAll, type DartServer, type Location } from '../lsp/dart.js';
+import type { DartServer, Location } from '../lsp/dart.js';
 import type { Positions } from './positions.js';
 
 export interface Target {
@@ -36,22 +36,21 @@ export const slim = (d: Definitions): SlimDefinitions => ({
   defs: d.defs,
 });
 
-const WINDOW = 64;
-
 function short(file: string, root: string): [string, Target['w']] {
   if (file.startsWith(root + '/')) return [file.slice(root.length + 1), 'repo'];
   const pub = file.indexOf('/.pub-cache/');
   if (pub >= 0) return [file.slice(pub + '/.pub-cache/'.length).split('/').slice(2).join('/'), 'package'];
-  const sdk = file.indexOf('/dart-sdk/lib/');
-  if (sdk >= 0) return ['dart:' + file.slice(sdk + '/dart-sdk/lib/'.length), 'sdk'];
+  const sdk = /\/(?:dart-sdk|pkg\/sky_engine)\/lib\/(.+)$/.exec(file);
+  if (sdk) return ['dart:' + sdk[1], 'sdk'];
   return [path.basename(file), 'other'];
 }
 
 export async function definitions(server: DartServer, root: string, positions: Positions, onProgress?: (done: number, total: number) => void): Promise<Definitions> {
   const items: Array<[string, number, number, number]> = [];
   for (const [p, lines] of Object.entries(positions)) for (const [line, cols] of Object.entries(lines)) for (const [col, len] of cols) items.push([p, +line, col, len]);
-  server.openAll(Object.keys(positions).map((p) => path.join(root, p)));
-  const results = await askAll(items, WINDOW, ([p, line, col]) => server.definition(path.join(root, p), line - 1, col).catch(() => null), (r) => !r, (done) => onProgress?.(done, items.length));
+  const results = await server.askFiles(items, ([p]) => path.join(root, p),
+    ([p, line, col]) => server.definition(path.join(root, p), line - 1, col).catch(() => null),
+    (done) => onProgress?.(done, items.length));
 
   const targets: Target[] = [], index = new Map<string, number>(), files = new Map<string, string[] | null>();
   const lines = (file: string) => {

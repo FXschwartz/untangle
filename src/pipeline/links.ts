@@ -2,12 +2,11 @@
 // calls that changed tests reach, and what changed declarations override.
 import path from 'node:path';
 import type { CallGraph, Diff, RawDefinitions } from '../../analysis/analyze.js';
-import { askAll, uriPath, type CallHierarchyItem, type DartServer } from '../lsp/dart.js';
+import { uriPath, type CallHierarchyItem, type DartServer } from '../lsp/dart.js';
 
 /** How many calls deep a test is followed. */
 export const CALL_DEPTH = 3;
 const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/;
-const WINDOW = 16;
 
 const splitKey = (key: string): [string, number, number] => {
   const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
@@ -93,8 +92,7 @@ export async function testCalls(server: DartServer, diff: Diff, head: string, ra
   }
   const sorted = [...seeds.values()].sort((a, b) => cmp(a[0], b[0]) || a[1] - b[1] || a[2] - b[2]);
   let requests = sorted.length;
-  server.openAll(sorted.map(([rel]) => path.join(head, rel)));
-  const prepared = await askAll(sorted, WINDOW, ([rel, tl, tc]) => server.prepareCallHierarchy(path.join(head, rel), tl, tc).catch(() => []), (r) => !r.length);
+  const prepared = await server.askFiles(sorted, ([rel]) => path.join(head, rel), ([rel, tl, tc]) => server.prepareCallHierarchy(path.join(head, rel), tl, tc).catch(() => []));
   const items = new Map<string, CallHierarchyItem>();
   prepared.forEach((res) => { const k = res[0] && nodeKey(res[0]); if (k) items.set(k, res[0]); });
   // Breadth first, so each function is expanded at its shortest distance from a seed.
@@ -104,8 +102,7 @@ export async function testCalls(server: DartServer, diff: Diff, head: string, ra
     const fresh = level.filter(([k]) => !seen.has(k) && (seen.add(k), true));
     if (depth >= CALL_DEPTH) break;
     const next: Array<[string, CallHierarchyItem]> = [];
-    server.openAll(fresh.filter(([, item]) => item.uri.startsWith('file:')).map(([, item]) => uriPath(item.uri)));
-    const calls = await askAll(fresh, WINDOW, ([, item]) => server.outgoingCalls(item).catch(() => []), (r) => !r.length);
+    const calls = await server.askFiles(fresh, ([, item]) => uriPath(item.uri), ([, item]) => server.outgoingCalls(item).catch(() => []));
     requests += fresh.length;
     fresh.forEach(([k], i) => {
       const callees = new Set<string>();
@@ -131,8 +128,7 @@ export async function overrides(server: DartServer, diff: Diff, head: string, ra
     const [tpath, tl, tc] = raw[key];
     return plus.has(`${p}:${line}`) && tpath === path.join(head, p) && tl === line - 1 && tc === col;
   });
-  server.openAll(keys.map((key) => raw[key][0]));
-  const res = await askAll(keys, WINDOW, (key) => server.superOf(raw[key][0], raw[key][1], raw[key][2]).catch(() => null), (r) => !r);
+  const res = await server.askFiles(keys, (key) => raw[key][0], (key) => server.superOf(raw[key][0], raw[key][1], raw[key][2]).catch(() => null));
   const out: RawDefinitions = {};
   keys.forEach((key, i) => { const r = res[i]; if (r) out[key] = [r.path, r.line, r.col]; });
   return out;

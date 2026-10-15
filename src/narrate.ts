@@ -23,6 +23,7 @@ export class Narrator implements Progress {
   // Notes of the running step print under it once it ends, so the step line stays in place.
   private pending: string[] = [];
   private drawn = false;
+  private ticker: NodeJS.Timeout | null = null;
   private readonly tty: boolean;
   private readonly c: (code: string, s: string) => string;
 
@@ -69,9 +70,15 @@ export class Narrator implements Progress {
   step = (label: string) => {
     this.finish();
     this.status.phase = 'building';
-    const step: StepStatus = { label, state: 'running', notes: [] };
+    const step: StepStatus = { label, state: 'running', ms: 0, notes: [] };
     this.status.steps.push(step);
     this.current = { step, start: Date.now() };
+    this.ticker = setInterval(() => {
+      if (!this.current) return;
+      this.current.step.ms = Date.now() - this.current.start;
+      this.draw();
+    }, 1000);
+    this.ticker.unref();
     if (!this.tty && !this.opts.quiet) process.stderr.write(`  … ${label}\n`);
     this.draw();
   }
@@ -95,6 +102,8 @@ export class Narrator implements Progress {
 
   /** Ends the running step. */
   finish(failed = false) {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
     if (!this.current) return;
     const { step, start } = this.current;
     step.ms = Date.now() - start;

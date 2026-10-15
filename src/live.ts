@@ -112,10 +112,10 @@ export class LiveSession {
     const file = await this.resolve(where);
     if (!file) throw new Error('not a file of this review');
     const server = await this.ensure();
-    // A file a definition led to may sit in a package nothing opened yet: ask again once its
-    // package is analyzed.
-    let loc: Location | null = await server.definition(file, line - 1, col).catch(() => null);
-    if (!loc) loc = await new Promise((r) => setTimeout(r, 400)).then(() => server.definition(file, line - 1, col).catch(() => null));
+    // Imported packages and SDK files often resolve in an existing context. Try that first
+    // so an onward jump does not rebuild every context just to open another dependency.
+    let loc: Location | null = await server.definition(file, line - 1, col, where.ext == null).catch(() => null);
+    if (!loc && where.ext != null) loc = await server.definition(file, line - 1, col).catch(() => null);
     return loc && this.describe(loc);
   }
 
@@ -133,23 +133,22 @@ export class LiveSession {
     for (const [side, root] of [['head', headDir], ['base', baseDir]] as const) {
       if (loc.path.startsWith(root + '/')) return { side, p: loc.path.slice(root.length + 1), abs: loc.path, w: 'repo', ...snippet };
     }
-    const pub = loc.path.indexOf('/.pub-cache/'), sdk = loc.path.indexOf('/dart-sdk/lib/');
+    const pub = loc.path.indexOf('/.pub-cache/');
+    const sdk = /\/(?:dart-sdk|pkg\/sky_engine)\/lib\/(.+)$/.exec(loc.path);
     const [p, w] = pub >= 0 ? [loc.path.slice(pub + 12).split('/').slice(2).join('/'), 'package' as const]
-      : sdk >= 0 ? ['dart:' + loc.path.slice(sdk + 14), 'sdk' as const] : [path.basename(loc.path), 'other' as const];
+      : sdk ? ['dart:' + sdk[1], 'sdk' as const] : [path.basename(loc.path), 'other' as const];
     return { side: null, p, ext: this.externalId(loc.path), abs: loc.path, w, ...snippet };
   }
 
   /**
    * Declarations at the head whose name matches a query, from the language server. It knows the
-   * packages of the files it has open, so the review's files are opened first.
+   * packages loaded so far, so load the review's packages first.
    */
   async symbols(q: string, files: string[]): Promise<Array<{ name: string; kind: number; container: string | null; p: string; l: number; c: number }>> {
     const server = await this.ensure();
     const { headDir } = await this.checkouts();
-    server.openAll(files.filter((p) => p.endsWith('.dart')).map((p) => path.join(headDir, p)).filter((f) => fs.existsSync(f)));
-    let found = await server.symbols(q);
-    // Asked while the server rebuilds its contexts, it answers nothing: once more, a moment later.
-    if (!found.length) found = await new Promise((r) => setTimeout(r, 400)).then(() => server.symbols(q));
+    await server.loadAll(files.filter((p) => p.endsWith('.dart')).map((p) => path.join(headDir, p)).filter((f) => fs.existsSync(f)));
+    const found = await server.symbols(q);
     const out: Array<{ name: string; kind: number; container: string | null; p: string; l: number; c: number }> = [];
     for (const x of found) {
       if (!x.location.path.startsWith(headDir + '/')) continue;

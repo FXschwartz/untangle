@@ -11,7 +11,7 @@ import { DartServer } from './lsp/dart.js';
 import { definitions, slim, type Definitions, type SlimDefinitions } from './pipeline/definitions.js';
 import { exportDiff, generatedPatterns } from './pipeline/diff.js';
 import { changedUsages, overrides, testCalls } from './pipeline/links.js';
-import { headPositions, oldPositions } from './pipeline/positions.js';
+import { headPositions, oldPositions, type Positions } from './pipeline/positions.js';
 import type { History } from './history.js';
 import type { Target } from './target.js';
 import { ROOT, VERSION } from './version.js';
@@ -163,15 +163,26 @@ async function askLanguageServer(target: Target, dir: string, label: string, ver
   if (!has('dart')) throw new Error('untangle needs the Dart SDK on PATH, for `dart language-server`');
   const head = await headPositions(diff, headDir);
   const old = oldPositions(diff, 'base');
+  const positionFiles = (root: string, positions: Positions) => Object.entries(positions)
+    .filter(([, lines]) => Object.values(lines).some((cols) => cols.length))
+    .map(([file]) => path.join(root, file));
   progress.detail('starting the Dart analysis server');
   const server = await DartServer.start([{ name: 'head', dir: headDir }, { name: 'base', dir: baseDir }], { clientVersion: VERSION, log: progress.verbose });
   let kept = false;
   try {
-    // Both sides' packages up front: the server builds its contexts once, before any lookup.
-    server.openAll([...Object.keys(head.positions).map((p) => path.join(headDir, p)), ...Object.keys(old.positions).map((p) => path.join(baseDir, p))]);
+    // Load both sides together: a later rebuild can discard named-argument targets.
+    const loading = server.loadAll([...positionFiles(headDir, head.positions), ...positionFiles(baseDir, old.positions)]);
+    progress.detail(`the analyzer is loading ${server.packageCount} ${server.packageCount === 1 ? 'package' : 'packages'}`);
+    await loading;
     const t0 = Date.now();
     const total = head.count + old.count;
-    const tick = (offset: number) => (done: number) => { if (done % 200 === 0) progress.detail(`definitions ${offset + done} of ${total}`); };
+    let lastDetail = 0;
+    const tick = (offset: number) => (done: number) => {
+      const now = Date.now();
+      if (now - lastDetail < 1000) return;
+      lastDetail = now;
+      progress.detail(`definitions ${offset + done} of ${total}`);
+    };
     const defs = await definitions(server, headDir, head.positions, tick(0));
     const defsOld = await definitions(server, baseDir, old.positions, tick(head.count));
     progress.note(`${total} definitions in ${Math.round((Date.now() - t0) / 1000)} s`);

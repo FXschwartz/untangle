@@ -79,7 +79,11 @@ async function jump(page: Browser, query: string): Promise<void> {
     await page.key('Tab');
   }
   await page.until(`document.querySelector('.pal-scope')?.textContent === 'Everything'`);
-  if (query) await page.type(query);
+  if (!query) return;
+  await page.type(query);
+  // The language server's symbols redraw the list when they arrive, and rows are numbered by
+  // position: wait for them, so the row a scenario reads is still the one it clicks.
+  if (query.length >= 2) await page.until(`!(document.querySelector('.pal-wait')?.textContent || '').includes('language server')`);
 }
 
 async function openFile(page: Browser, file: string): Promise<void> {
