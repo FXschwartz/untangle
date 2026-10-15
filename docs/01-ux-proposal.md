@@ -327,6 +327,15 @@ From the review of v11:
   Clicking a graph node shows only that node's code and dims unrelated nodes, without scrolling,
   so the graph stays under the pointer; the names its arrows stand for show then, in the gaps
   between rows of nodes.
+- **The commits** (v15, decided in v16): a Commits tab in the sidebar draws them as a graph,
+  newest on top, opened from the head commit in the top bar; a History view shows each in full,
+  with what it touched, its checks and its reviews from GitHub, and the commits a merge brought
+  from the base under it. Picking a commit, a range, "Since your review" or a force-pushed head
+  turns on a lens: lines outside it fade (nothing is hidden), counts and keys follow it, and
+  under a commit's lens a mark covers that commit's lines, so a change is done when all its
+  commits are. Blame over the pull request's commits attributes each changed line, once per
+  review (0.1 s on #5864, 0.3 s on #5630); "since" a head is a diff from it. The lanes follow VS
+  Code's Source Control Graph (`scmHistory.ts`, MIT).
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. Keys `n` and `p` walk the same order.
 - **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
@@ -598,6 +607,14 @@ through the page.
     chain map in the menu), arrows' names only for the node clicked, lighter arrows, filtering
     from the graph without scrolling, and the language server's process id on its own line.
     Done.
+- **v15:** four places for a graph of the commits (a Commits tab, "Changes from" on the head
+  commit, a History view, a range strip), drawn on #5630's history, and the existing components
+  that could draw it.
+  - Decided (v16): the Commits tab drives it, the head commit opens it, the History view is for
+    reading the history; force pushes in; lines outside a lens fade; under a commit's lens a mark
+    covers that commit's lines; newest on top; main's commits listed in the History view; dots
+    show state; lanes from VS Code's code. Later: a commit's files and lines in the History view.
+  - Asked: build it as designed. Done.
 
 ## References
 

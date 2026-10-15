@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prepareCheckouts, type Checkouts, type Progress } from './build.js';
 import { git, gitMaybe, run } from './exec.js';
+import { diffHunks } from './history.js';
 import { DartServer, type Location } from './lsp/dart.js';
 import type { LspState } from './metrics.js';
 import type { Target } from './target.js';
@@ -249,15 +250,7 @@ export function changedSince(repo: string, from: string, to: string): Record<str
   const out: Record<string, Array<[number, number]>> = {};
   const diff = gitMaybe(repo, 'diff', '--unified=0', '--no-color', '--no-ext-diff', '--no-renames', from, to, '--');
   if (!diff) return out;
-  let file: string | null = null;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ ')) file = line.startsWith('+++ b/') ? line.slice(6) : null;
-    else if (file && line.startsWith('@@')) {
-      const m = /\+(\d+)(?:,(\d+))?/.exec(line);
-      const start = m ? Number(m[1]) : 0, count = m && m[2] != null ? Number(m[2]) : 1;
-      if (count) (out[file] ??= []).push([start, start + count - 1]);
-    }
-  }
+  diffHunks(diff, 'plus').forEach((list, file) => { out[file] = list.map(([first, count]) => [first, first + count - 1]); });
   return out;
 }
 

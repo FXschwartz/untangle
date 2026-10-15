@@ -6,7 +6,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs, usage, UsageError, type Options } from './args.js';
-import { buildReview } from './build.js';
+import { buildReview, type ReviewData } from './build.js';
+import { reviewDir } from './cache.js';
+import { readHistory } from './history.js';
 import { gitMaybe } from './exec.js';
 import { LiveSession } from './live.js';
 import { Narrator, type Status } from './narrate.js';
@@ -109,11 +111,25 @@ async function main(): Promise<number> {
     };
   };
   // A target's review (built, or read from the cache), opened for the page.
+  // The commits and who wrote each changed line: a review without them still works.
+  const withHistory = async (t: Target, data: ReviewData, progress: Narrator): Promise<ReviewData> => {
+    progress.step('history');
+    try {
+      const t0 = Date.now();
+      const history = await readHistory(t.repo, t.baseSha, t.headSha, data.model.compares.base.files, reviewDir(t.repoKey, t.baseSha, t.headSha));
+      progress.verbose(`${history.commits.length} commits, lines attributed in ${Date.now() - t0} ms`);
+      return { ...data, history };
+    } catch (e) {
+      progress.note(`no commit history: ${(e as Error).message}`);
+      return { ...data, history: null };
+    }
+  };
   const open = async (t: Target, progress: Narrator, noCache: boolean) => {
     const n = names(t);
     const built = await buildReview(t, { noCache, label: n.base.replace(' ', ' · '), title: n.title, keepServer: true }, progress);
+    built.data = await withHistory(t, built.data, progress);
     const l = new LiveSession(t, { step: () => {}, detail: () => {}, note: (x) => say.verbose(x), verbose: (x) => say.verbose(x) }, built.checkouts);
-    const s = new ReviewSession(t, built.data, l, editorFrom(opts.editor), { key: n.key, url: t.pr ? t.pr.url : null, where: n.where, snapshotKey: n.snapshotKey }, progress);
+    const s = new ReviewSession(t, built.data, l, editorFrom(opts.editor), { key: n.key, url: t.pr ? t.pr.url : null, where: n.where, snapshotKey: n.snapshotKey }, progress, built.data.history ?? null);
     return { live: l, session: s, render: reviewPage(built.data, n.title, 'served') };
   };
 
@@ -182,6 +198,7 @@ async function main(): Promise<number> {
     t.notes.forEach((x) => say.note(x));
     if (exporting) {
       const built = await buildReview(t, { noCache: opts.noCache, label: n.base.replace(' ', ' · '), title: n.title, keepServer: false }, say);
+      built.data = await withHistory(t, built.data, say);
       const file = path.resolve(opts.exportTo!);
       fs.writeFileSync(file, reviewPage(built.data, n.title, 'export')({ served: false, key: n.key, state: null, url: t.pr ? t.pr.url : null, where: n.where }));
       say.finish();

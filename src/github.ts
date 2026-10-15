@@ -131,6 +131,15 @@ const comment = (c: RawComment): Comment => ({
 });
 
 /** One line of a review thread, as the page anchors it. */
+/** What GitHub knows about the pull request's commits. */
+export interface CommitFacts {
+  /** Each commit's checks, rolled up (SUCCESS, FAILURE, PENDING, ERROR, EXPECTED), by sha. */
+  checks: Record<string, string>;
+  /** Submitted reviews, with the commit each was made on. */
+  reviews: Array<{ sha: string | null; state: string; author: Person; at: string | null; url: string }>;
+  /** Force pushes, oldest first: the head before (null when GitHub no longer has it) and after. */
+  pushes: Array<{ before: string | null; after: string | null; at: string; actor: string }>;
+}
 export interface Draft { path: string; body: string; line?: number; side?: 'LEFT' | 'RIGHT'; startLine?: number; startSide?: 'LEFT' | 'RIGHT' }
 
 export type Action =
@@ -175,6 +184,32 @@ export class PullRequestConversation {
     if (!d.repository.pullRequest) throw new GitHubError(`GitHub has no ${this.pr.owner}/${this.pr.repo}#${this.pr.number}`);
     this.viewer = person(d.viewer);
     return this.shape(await this.rest(d.repository.pullRequest));
+  }
+
+  /** For the commits' graph: each commit's checks, the reviews by the commit they were made on, and the force pushes. */
+  async commits(): Promise<CommitFacts> {
+    type Raw = {
+      commits: { nodes: Array<{ commit: { oid: string; statusCheckRollup: { state: string } | null } }> };
+      reviews: { nodes: Array<{ state: string; submittedAt: string | null; url: string; author: RawPerson | null; commit: { oid: string } | null }> };
+      timelineItems: { nodes: Array<{ createdAt?: string; actor?: { login: string } | null; beforeCommit?: { oid: string } | null; afterCommit?: { oid: string } | null }> };
+    };
+    const d = await graphql<{ repository: { pullRequest: Raw | null } }>(
+      `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+        commits(last: 250) { nodes { commit { oid statusCheckRollup { state } } } }
+        reviews(last: 100) { nodes { state submittedAt url author { ...Who } commit { oid } } }
+        timelineItems(last: 100, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) { nodes { ... on HeadRefForcePushedEvent { createdAt actor { login } beforeCommit { oid } afterCommit { oid } } } }
+      } } } ${fragments('Who')}`,
+      { owner: this.pr.owner, repo: this.pr.repo, number: this.pr.number },
+    );
+    const pr = d.repository.pullRequest;
+    if (!pr) throw new GitHubError(`GitHub has no ${this.pr.owner}/${this.pr.repo}#${this.pr.number}`);
+    const checks: Record<string, string> = {};
+    pr.commits.nodes.forEach((n) => { if (n.commit.statusCheckRollup) checks[n.commit.oid] = n.commit.statusCheckRollup.state; });
+    return {
+      checks,
+      reviews: pr.reviews.nodes.filter((r) => r.state !== 'PENDING').map((r) => ({ sha: r.commit ? r.commit.oid : null, state: r.state, author: person(r.author), at: r.submittedAt, url: r.url })),
+      pushes: pr.timelineItems.nodes.filter((n) => n.createdAt).map((n) => ({ before: n.beforeCommit ? n.beforeCommit.oid : null, after: n.afterCommit ? n.afterCommit.oid : null, at: n.createdAt!, actor: n.actor ? n.actor.login : 'ghost' })),
+    };
   }
 
   /** Carries out a change, and answers with the conversation after it. */

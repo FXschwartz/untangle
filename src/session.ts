@@ -6,7 +6,9 @@ import { reviewDir } from './cache.js';
 import { changedSince, LiveSession, openInEditor, type Side } from './live.js';
 import { Metrics } from './metrics.js';
 import type { PageConfig } from './page.js';
-import { ghReady, GitHubError, PullRequestConversation, type Action } from './github.js';
+import { ghReady, GitHubError, PullRequestConversation, type Action, type CommitFacts } from './github.js';
+import { broughtBy, hasCommit, reviewedHead, sinceRows, type History } from './history.js';
+import { gitAsync, gitMaybe } from './exec.js';
 import { fileHunks, generatedPatterns } from './pipeline/diff.js';
 import { writeAtomic } from './server.js';
 import { Snapshot, snapshotBranch } from './snapshot.js';
@@ -38,6 +40,8 @@ export class ReviewSession {
   private readonly edits: Edit[];
   private readonly stateFile: string;
   private partial = new Set<number>();
+  // A change's lines from one commit, reviewed under that commit's lens ("<block>@<sha>").
+  private cmarks = new Set<string>();
   private view: { layout?: string; showReviewedDiff?: boolean } = {};
   private snapshotInfo: { branch: string; commit: string | null; note: string | null };
   private readonly generatedRx: RegExp[];
@@ -54,6 +58,8 @@ export class ReviewSession {
     private readonly editor: Editor,
     private readonly page: { key: string; url: string | null; where: string; snapshotKey: string },
     progress: Progress,
+    /** The commits and who wrote each line, as the page has them (null when git couldn't tell). */
+    private readonly history: History | null = null,
   ) {
     const c = data.model.compares.base;
     c.files.forEach((f: { blocks: Block[] }) => f.blocks.forEach((b) => this.blocks.set(b.id, b)));
@@ -63,7 +69,7 @@ export class ReviewSession {
     // Marks on parts of a change, the layout, and the blocks of the last commit this review wrote
     // live next to the review, for these commits only.
     this.stateFile = path.join(reviewDir(target.repoKey, target.baseSha, target.headSha), 'state.json');
-    let saved: { partial?: number[]; layout?: string; showReviewedDiff?: boolean; snapshot?: { commit: string; blocks: string[] } } = {};
+    let saved: { partial?: number[]; cmarks?: string[]; layout?: string; showReviewedDiff?: boolean; snapshot?: { commit: string; blocks: string[] } } = {};
     try {
       saved = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
     } catch {
@@ -78,9 +84,74 @@ export class ReviewSession {
     this.snapshotInfo = { branch: this.snapshot.branch, commit: loaded.commit, note };
     this.reviewed = loaded.reviewed;
     this.partial = new Set((saved.partial || []).filter((id: number) => this.edits[id] && !this.reviewed.has(this.edits[id].b)));
+    this.cmarks = this.commitMarks(saved.cmarks);
     this.view = { layout: saved.layout, showReviewedDiff: saved.showReviewedDiff };
     const pr = target.pr;
     this.github = pr && ghReady() ? new PullRequestConversation({ owner: pr.owner, repo: pr.repo, number: pr.number }, target.headSha) : null;
+  }
+
+  // Rows changed since an older head, by that head: the diffs behind them don't change.
+  private readonly since = new Map<string, Promise<Record<number, Record<number, number[]>> | null>>();
+  // GitHub's facts about the commits, asked at most twice a minute.
+  private facts: { at: number; value: CommitFacts | null; error: string | null; pending: Promise<void> | null } = { at: 0, value: null, error: null, pending: null };
+  // Old heads fetched (or tried) once each.
+  private readonly fetched = new Map<string, Promise<boolean>>();
+
+  /** An old head, fetched from GitHub when this clone doesn't have it (GitHub keeps them a while). */
+  private oldHead(sha: string): Promise<boolean> {
+    if (hasCommit(this.target.repo, sha)) return Promise.resolve(true);
+    let p = this.fetched.get(sha);
+    if (!p) {
+      p = gitAsync(this.target.repo, ['fetch', '--quiet', '--no-tags', 'origin', sha]).then(() => hasCommit(this.target.repo, sha), () => false);
+      this.fetched.set(sha, p);
+    }
+    return p;
+  }
+
+  /**
+   * What the commits' graph learns live: the head of your last review before this one, GitHub's
+   * checks, reviews and force pushes, and each old head (a force push's, or the one you reviewed
+   * when it's no longer in the branch) with where it left the branch and how many commits it had.
+   */
+  private async commitsNow() {
+    const t = this.target;
+    const inHistory = new Set((this.history ? this.history.commits : []).map((c) => c.sha));
+    const prev = reviewedHead(t.repo, this.snapshot.ref, t.headSha);
+    if (this.github && Date.now() - this.facts.at > 30_000 && !this.facts.pending) {
+      this.facts.pending = this.github.commits().then(
+        (v) => { this.facts = { at: Date.now(), value: v, error: null, pending: null }; },
+        (e) => { this.facts = { at: Date.now(), value: this.facts.value, error: (e as Error).message, pending: null }; },
+      );
+    }
+    if (this.facts.pending) await this.facts.pending;
+    const facts = this.facts.value;
+    const olds = new Map<string, { at: number; actor: string | null; after: string | null; yours: boolean }>();
+    (facts ? facts.pushes : []).forEach((p) => { if (p.before && !inHistory.has(p.before)) olds.set(p.before, { at: Date.parse(p.at) / 1000, actor: p.actor, after: p.after, yours: false }); });
+    if (prev && !inHistory.has(prev.head)) {
+      const o = olds.get(prev.head);
+      if (o) o.yours = true;
+      else olds.set(prev.head, { at: prev.at, actor: null, after: null, yours: true });
+    }
+    // The latest few force pushes, and always the head of your last review.
+    const kept = [...olds].sort((a, b) => b[1].at - a[1].at).filter(([, o], i) => o.yours || i < 5);
+    const ghosts = await Promise.all(kept.map(async ([sha, o]) => {
+      const here = await this.oldHead(sha);
+      if (!here) return { sha, ...o, here, fork: null, replaced: null };
+      const fork = gitMaybe(t.repo, 'merge-base', sha, t.headSha)?.trim() || null;
+      const replaced = Number(gitMaybe(t.repo, 'rev-list', '--count', sha, `^${t.headSha}`, `^${t.baseSha}`)?.trim()) || 0;
+      return { sha, ...o, here, fork: fork && inHistory.has(fork) ? fork : null, replaced };
+    }));
+    return {
+      review: prev ? { head: prev.head, at: prev.at, here: prev.head === t.headSha ? true : await this.oldHead(prev.head), inBranch: inHistory.has(prev.head) } : null,
+      github: facts,
+      githubError: this.github ? this.facts.error : null,
+      ghosts,
+    };
+  }
+
+  /** Marks on one commit's lines of a change, for changes of this review that aren't reviewed whole. */
+  private commitMarks(list: unknown): Set<string> {
+    return new Set((Array.isArray(list) ? list : []).filter((k): k is string => typeof k === 'string' && /@[0-9a-f]{40}$/.test(k) && this.blocks.has(k.slice(0, k.lastIndexOf('@'))) && !this.reviewed.has(k.slice(0, k.lastIndexOf('@')))));
   }
 
   /** Edits marked reviewed: the snapshot's blocks, and marks on parts of a change. */
@@ -101,7 +172,7 @@ export class ReviewSession {
       key: this.page.key,
       url: this.page.url,
       where: this.page.where,
-      state: { rev: { base: this.rev() }, layout: this.view.layout, showReviewedDiff: this.view.showReviewedDiff },
+      state: { rev: { base: this.rev() }, cmarks: [...this.cmarks], layout: this.view.layout, showReviewedDiff: this.view.showReviewedDiff },
       roots,
       editor: this.editor.mode === 'uri' ? { mode: 'uri', template: this.editor.template } : { mode: 'command' },
       snapshot: this.snapshotInfo,
@@ -112,7 +183,7 @@ export class ReviewSession {
     };
   }
 
-  private saveState(body: { rev?: { base?: number[] }; layout?: string; showReviewedDiff?: boolean }) {
+  private saveState(body: { rev?: { base?: number[] }; cmarks?: string[]; layout?: string; showReviewedDiff?: boolean }) {
     const rev = new Set((body.rev?.base || []).filter((id) => Number.isInteger(id) && this.edits[id]));
     const reviewed = new Set([...this.blocks.values()].filter((b) => b.edits.length && b.edits.every((e) => rev.has(e))).map((b) => b.id));
     if (this.snapshot.differs(reviewed)) {
@@ -122,8 +193,9 @@ export class ReviewSession {
       this.reviewed = reviewed;
     }
     this.partial = new Set([...rev].filter((id) => !reviewed.has(this.edits[id].b)));
+    this.cmarks = this.commitMarks(body.cmarks);
     this.view = { layout: body.layout, showReviewedDiff: body.showReviewedDiff };
-    writeAtomic(this.stateFile, JSON.stringify({ partial: [...this.partial], ...this.view, snapshot: this.snapshotInfo.commit ? { commit: this.snapshotInfo.commit, blocks: [...this.reviewed] } : undefined }));
+    writeAtomic(this.stateFile, JSON.stringify({ partial: [...this.partial], cmarks: [...this.cmarks], ...this.view, snapshot: this.snapshotInfo.commit ? { commit: this.snapshotInfo.commit, blocks: [...this.reviewed] } : undefined }));
     return { snapshot: this.snapshotInfo };
   }
 
@@ -186,6 +258,25 @@ export class ReviewSession {
       } catch (e) {
         return { status: e instanceof GitHubError ? 502 : 500, data: { error: (e as Error).message } };
       }
+    }
+    if (route === 'history' && method === 'GET') return { data: await this.commitsNow() };
+    if (route === 'since' && method === 'GET') {
+      const from = q.get('from') || '';
+      if (!/^[0-9a-f]{40}$/.test(from)) return { status: 400, data: { error: 'since which commit?' } };
+      let rows = this.since.get(from);
+      if (!rows) {
+        rows = sinceRows(this.target.repo, this.target.baseSha, this.target.headSha, from, this.data.model.compares.base.files);
+        this.since.set(from, rows);
+        rows.catch(() => this.since.delete(from));
+      }
+      const out = await rows;
+      return out ? { data: { rows: out } } : { status: 404, data: { error: `${from.slice(0, 7)} isn’t in the repository` } };
+    }
+    if (route === 'brought' && method === 'GET') {
+      const sha = q.get('sha') || '';
+      if (!/^[0-9a-f]{40}$/.test(sha)) return { status: 400, data: { error: 'which merge?' } };
+      const out = await broughtBy(this.target.repo, sha);
+      return out ? { data: out } : { status: 404, data: { error: `${sha.slice(0, 7)} isn’t in the repository` } };
     }
     if (route === 'roots' && method === 'GET') {
       // The checkouts, made when the review came from the cache: links to the editor need them.

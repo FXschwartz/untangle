@@ -13,6 +13,8 @@
   const defsNow = () => { if (DEFS_ALL.targets) return DEFS_ALL; const d = DEFS_ALL[state.compare]; return typeof d === 'string' ? DEFS_ALL[d] : d; };
   const REFS = JSON.parse($('#d-refs').textContent);
   const DEFS_OLD = JSON.parse($('#d-defs-old').textContent);
+  // The commits (newest first) and which wrote each changed line; null when git couldn't tell.
+  const HISTORY = JSON.parse(($('#d-history') || { textContent: 'null' }).textContent || 'null');
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const trunc = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
   const fileName = (p) => p.slice(p.lastIndexOf('/') + 1);
@@ -61,6 +63,8 @@
     eye: svg('<path d="M7.99993 6.00316C9.47266 6.00316 10.6666 7.19708 10.6666 8.66981C10.6666 10.1426 9.47266 11.3365 7.99993 11.3365C6.52715 11.3365 5.33324 10.1426 5.33324 8.66981C5.33324 7.19708 6.52715 6.00316 7.99993 6.00316ZM7.99993 7.00315C7.07946 7.00315 6.33324 7.74935 6.33324 8.66981C6.33324 9.59028 7.07946 10.3365 7.99993 10.3365C8.9204 10.3365 9.6666 9.59028 9.6666 8.66981C9.6666 7.74935 8.9204 7.00315 7.99993 7.00315ZM7.99993 3.66675C11.0756 3.66675 13.7307 5.76675 14.4673 8.70968C14.5344 8.97755 14.3716 9.24908 14.1037 9.31615C13.8358 9.38315 13.5643 9.22041 13.4973 8.95248C12.8713 6.45205 10.6141 4.66675 7.99993 4.66675C5.38454 4.66675 3.12664 6.45359 2.50182 8.95555C2.43491 9.22341 2.16348 9.38635 1.89557 9.31948C1.62766 9.25255 1.46471 8.98115 1.53162 8.71321C2.26701 5.76856 4.9229 3.66675 7.99993 3.66675Z"/>'),
     sidebar: path1('M2 1L1 2V14L2 15H14L15 14V2L14 1H2ZM14 14H7V2H14V14Z'),
     minimap: svg('<path d="M2 2h7v1H2zM2 4.5h9v1H2zM2 7h5v1H2zM2 9.5h8v1H2zM2 12h6v1H2z"/><path d="M12 1h3v14h-3z" opacity=".55"/>'),
+    close: path1('M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.707.708L7.293 8l-3.646 3.646.707.708L8 8.707z'),
+    history: path1('M13.507 12.324a7 7 0 0 0 .065-8.56A7 7 0 0 0 2 4.393V2H1v3.5l.5.5H5V5H2.811a6.008 6.008 0 1 1-.135 5.77l-.887.462a7 7 0 0 0 11.718 1.092zm-3.361-.97l.708-.707L8 7.792V4H7v4l.146.354 3 3z'),
   };
   // An icon button: its tooltip says what a click does; a toggle keeps one name and says whether it's on.
   const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
@@ -80,7 +84,9 @@
   // ---------- state
   const state = {
     compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
-    view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null,
+    view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null, lens: null,
+    // A change's lines from one commit, reviewed under that commit's lens: "<block>@<sha>".
+    cmarks: new Set(),
     rev: {},
     blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
     search: { q: '', scope: 'unreviewed' },
@@ -93,6 +99,7 @@
     const saved = CONFIG.served ? CONFIG.state : JSON.parse(localStorage.getItem(STORE) || 'null');
     if (saved) {
       Object.entries(saved.rev || {}).forEach(([k, v]) => { state.rev[k] = new Set(v); });
+      state.cmarks = new Set(saved.cmarks || []);
       state.layout = saved.layout === 'split' ? 'split' : 'unified';
       state.showReviewedDiff = !!saved.showReviewedDiff;
     }
@@ -114,7 +121,7 @@
       .catch(() => viewer.classList.add('unsaved'));
   }
   function save() {
-    const data = JSON.stringify({ rev: Object.fromEntries(Object.entries(state.rev).map(([k, v]) => [k, [...v]])), layout: state.layout, showReviewedDiff: state.showReviewedDiff });
+    const data = JSON.stringify({ rev: Object.fromEntries(Object.entries(state.rev).map(([k, v]) => [k, [...v]])), cmarks: [...state.cmarks], layout: state.layout, showReviewedDiff: state.showReviewedDiff });
     if (CONFIG.served) {
       clearTimeout(saveTimer);
       pendingSave = data;
@@ -192,16 +199,124 @@
   const rev = () => state.rev[state.compare] || (state.rev[state.compare] = new Set());
   const done = (b) => b.edits.every((id) => rev().has(id));
   function setEdits(ids, on) { ids.forEach((id) => (on ? rev().add(id) : rev().delete(id))); save(); }
+
+  // ---------- the lens: the review through some commits. The changes of a commit or a range
+  // (blame says which commit wrote each line), or everything since an older head (your last
+  // review, the head before a force push), which a diff from it says. Lines outside it fade, and
+  // the counts, the pill, the minimap and the keys go through what's in it. Under a commit's
+  // lens, marking a change marks the lines that commit wrote; since a head, the whole change.
+  // state.lens: { kind: 'commits', shas } or { kind: 'since', from, why: 'review' | 'push' }.
+  const HX = HISTORY && HISTORY.commits && HISTORY.commits.length
+    ? { index: new Map(HISTORY.commits.map((c, i) => [c.sha, i])), live: null, liveAt: 0, loading: null, since: new Map(), brought: new Map(), open: new Set() }
+    : null;
+  let lensMemo = null;
+  const lensOn = () => !!state.lens;
+  function lensData() {
+    const ln = state.lens;
+    if (!ln) return null;
+    if (lensMemo && lensMemo.lens === ln) return lensMemo;
+    lensMemo = { lens: ln, set: ln.kind === 'commits' ? new Set(ln.shas.map((x) => HX.index.get(x)).filter((i) => i != null)) : null, rows: ln.kind === 'since' ? HX.since.get(ln.from) || {} : null, blocks: new Map(), tick: new Map() };
+    return lensMemo;
+  }
+  // Which commit wrote a row of a file's hunk (an index into the history), or -1.
+  const rowCommit = (f, hi, ri) => { const a = HISTORY && HISTORY.rows[f.idx]; const v = a && a[hi] ? a[hi][ri] : -1; return v == null ? -1 : v; };
+  function rowInLens(f, hi, ri) {
+    const d = lensData();
+    if (!d) return true;
+    if (d.set) return d.set.has(rowCommit(f, hi, ri));
+    const r = d.rows[f.idx] && d.rows[f.idx][hi];
+    return !!r && r.has(ri);
+  }
+  // The commits that wrote lines of a change (indices into the history).
+  const blockCommitsMemo = new Map();
+  function blockCommits(b) {
+    let set = blockCommitsMemo.get(b.id);
+    if (!set) {
+      set = new Set();
+      const h = b.file.hunks[b.hunk];
+      if (HISTORY) for (let ri = b.first; ri < b.first + b.len; ri++) if (h.rows[ri][0] !== ' ') { const ci = rowCommit(b.file, b.hunk, ri); if (ci >= 0) set.add(ci); }
+      blockCommitsMemo.set(b.id, set);
+    }
+    return set;
+  }
+  const cmKey = (b, ci) => b.id + '@' + HISTORY.commits[ci].sha;
+  // A change's lines from a commit are reviewed: marked so, or the whole change is.
+  const commitDone = (b, ci) => done(b) || state.cmarks.has(cmKey(b, ci));
+  const commitLens = () => !!state.lens && state.lens.kind === 'commits';
+  // A change under the lens: whether it's in it, and (a commit's lens) the lens's commits in it.
+  function lensBlock(b) {
+    const d = lensData();
+    if (!d) return { in: true, commits: [] };
+    let x = d.blocks.get(b.id);
+    if (!x) {
+      if (d.set) { const commits = [...blockCommits(b)].filter((ci) => d.set.has(ci)); x = { in: b.edits.length > 0 && commits.length > 0, commits }; }
+      else {
+        let any = false;
+        for (let ri = b.first; ri < b.first + b.len && !any; ri++) any = b.file.hunks[b.hunk].rows[ri][0] !== ' ' && rowInLens(b.file, b.hunk, ri);
+        x = { in: b.edits.length > 0 && any, commits: [] };
+      }
+      d.blocks.set(b.id, x);
+    }
+    return x;
+  }
+  const blockIn = (b) => !lensOn() || lensBlock(b).in;
+  // Done as the lens sees it: under a commit's lens, when its lines in the change are reviewed.
+  const doneL = (b) => (commitLens() && blockIn(b) ? lensBlock(b).commits.every((ci) => commitDone(b, ci)) : done(b));
+  // Marks (or unmarks) the lens's commits' lines in changes. A change all of whose commits are
+  // marked is reviewed; one unmarked while reviewed keeps its other commits' lines reviewed.
+  function markCommitLines(blocks, on) {
+    blocks.forEach((b) => {
+      const lensCommits = lensBlock(b).commits, all = [...blockCommits(b)];
+      if (on) {
+        lensCommits.forEach((ci) => state.cmarks.add(cmKey(b, ci)));
+        if (all.every((ci) => state.cmarks.has(cmKey(b, ci)))) b.edits.forEach((id) => rev().add(id));
+      } else {
+        if (done(b)) { all.forEach((ci) => state.cmarks.add(cmKey(b, ci))); b.edits.forEach((id) => rev().delete(id)); }
+        lensCommits.forEach((ci) => state.cmarks.delete(cmKey(b, ci)));
+      }
+    });
+    save();
+  }
+  const clearCommitMarks = (b) => { if (HISTORY) blockCommits(b).forEach((ci) => state.cmarks.delete(cmKey(b, ci))); };
+  // The row a change's mark sits on: its first row, or its first row in the lens.
+  function tickRow(b) {
+    const d = lensData();
+    if (!d || !blockIn(b)) return b.first;
+    if (!d.tick.has(b.id)) {
+      const h = b.file.hunks[b.hunk];
+      let at = b.first;
+      for (let ri = b.first; ri < b.first + b.len; ri++) if (h.rows[ri][0] !== ' ' && rowInLens(b.file, b.hunk, ri)) { at = ri; break; }
+      d.tick.set(b.id, at);
+    }
+    return d.tick.get(b.id);
+  }
+  // A row drawn with the lens on and outside it.
+  const lensOut = (f, hi, ri) => lensOn() && !rowInLens(f, hi, ri);
   function stats(blocks) {
     const s = { total: 0, open: 0, lines: 0, all: 0 };
-    blocks.forEach((b) => { if (!b.edits.length) return; s.total++; s.all += b.adds + b.dels; if (!done(b)) { s.open++; s.lines += b.adds + b.dels; } });
+    const lens = lensOn();
+    blocks.forEach((b) => { if (!b.edits.length || (lens && !blockIn(b))) return; s.total++; s.all += b.adds + b.dels; if (!doneL(b)) { s.open++; s.lines += b.adds + b.dels; } });
     return s;
   }
+  // The same, as if no lens were on.
+  function withoutLens(fn) {
+    const ln = state.lens, memo = lensMemo;
+    state.lens = null;
+    try { return fn(); } finally { state.lens = ln; lensMemo = memo; }
+  }
   const blocksOf = (ids) => ids.map((id) => M().blockById.get(id));
+  // Marks or unmarks changes: under a lens, the ones in it (a change outside it, when that's all
+  // there is: its mark was clicked).
   function toggleBlocks(blocks) {
-    const anyOpen = blocks.some((b) => !done(b));
-    setEdits(blocks.flatMap((b) => b.edits), anyOpen);
-    blocks.forEach((b) => state.blockDiff.delete(b.id));
+    const inside = lensOn() ? blocks.filter(blockIn) : blocks;
+    const list = inside.length ? inside : blocks;
+    const anyOpen = list.some((b) => !doneL(b));
+    if (commitLens() && inside.length) markCommitLines(list, anyOpen);
+    else {
+      setEdits(list.flatMap((b) => b.edits), anyOpen);
+      if (!anyOpen) list.forEach(clearCommitMarks);
+    }
+    list.forEach((b) => state.blockDiff.delete(b.id));
   }
 
   // ---------- labels
@@ -348,8 +463,8 @@
     return h;
   }
   function tickHtml(b) {
-    const d = done(b);
-    return `<button type="button" class="tick${d ? ' on' : ''}" data-act="toggle-block" data-block="${esc(b.id)}" title="${d ? 'Reviewed: mark unreviewed' : 'Mark this change reviewed (Space)'}" aria-label="${d ? 'Mark unreviewed' : 'Mark this change reviewed'}" aria-pressed="${d}"></button>`;
+    const d = doneL(b);
+    return `<button type="button" class="tick${d ? ' on' : ''}${lensOn() && !blockIn(b) ? ' lens-out' : ''}" data-act="toggle-block" data-block="${esc(b.id)}" title="${d ? 'Reviewed: mark unreviewed' : 'Mark this change reviewed (Space)'}" aria-label="${d ? 'Mark unreviewed' : 'Mark this change reviewed'}" aria-pressed="${d}"></button>`;
   }
   function diffToggle(b) {
     const shown = state.blockDiff.has(b.id) || state.showReviewedDiff;
@@ -446,13 +561,14 @@
         }
         const first = !placed.has(b.id);
         placed.add(b.id);
-        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other, sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel });
+        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel });
         continue;
       }
-      const first = !placed.has(b.id);
+      // The change's mark: on its row in the lens, or on its first row drawn here.
+      const want = tickRow(b), first = want >= start && want < end ? ri === want : !placed.has(b.id);
       placed.add(b.id);
       out += uRow(f, meta, text, ranges, {
-        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other, emphasis, refs: !ctx.noRefs, colors, c: true, sel,
+        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, colors, c: true, sel,
         tick: first ? tickHtml(b) : '', toggle: first && d ? diffToggle(b) : '',
         badges: ctx.noBadges ? '' : badgesHtml(f, b, ri, t !== '-' ? meta.n : null),
       });
@@ -506,17 +622,21 @@
         adds.forEach((i, k) => {
           const m2 = h.meta[i];
           const colors = rowColors(h.rows, f.p, i);
-          out += `<div class="sl rvd-quiet${other}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
+          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
         });
       } else {
         const rows = Math.max(dels.length, adds.length);
+        const outL = (i) => i != null && lensOut(f, hi, i);
+        let kTick = 0;
+        if (lensOn() && blockIn(b)) for (let k = 0; k < rows; k++) if ((dels[k] != null && !outL(dels[k])) || (adds[k] != null && !outL(adds[k]))) { kTick = k; break; }
         for (let k = 0; k < rows; k++) {
           const li = dels[k], ai = adds[k];
           const lm = li != null ? h.meta[li] : null, am = ai != null ? h.meta[ai] : null;
           const sel = (li != null && inCompose(f, hi, li)) || (ai != null && inCompose(f, hi, ai));
-          out += `<div class="sl${d ? ' rvd' : ''}${other}${sel ? ' cm-sel' : ''}" data-n="${am ? am.n : ''}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>`
-            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del', emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null, c: true })
-            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add', emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === 0 && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null, c: true })
+          const fade = lensOn() && (li == null || outL(li)) && (ai == null || outL(ai));
+          out += `<div class="sl${d ? ' rvd' : ''}${other}${fade ? ' lens-out' : ''}${sel ? ' cm-sel' : ''}" data-n="${am ? am.n : ''}"><span class="g">${k === kTick ? tickHtml(b) : ''}</span>`
+            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del' + (outL(li) ? ' lens-out' : ''), emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null, c: true })
+            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add' + (outL(ai) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === kTick && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null, c: true })
             + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '') + (lm ? threadsAt(f, 'LEFT', lm.o) : '') + (am ? threadsAt(f, 'RIGHT', am.n) : '');
         }
       }
@@ -638,8 +758,8 @@
   }
   function sectionInfo(f, S, ctx) {
     const blocks = (f.blocks || []).filter((b) => b.hunk === S.hi && b.edits.length && b.first < S.e0 && b.first + b.len > S.s0);
-    const open = blocks.filter((b) => !done(b)).length;
-    const allDone = blocks.length > 0 && open === 0;
+    const allDone = blocks.length > 0 && blocks.every(done);
+    const open = blocks.filter((b) => blockIn(b) && !doneL(b)).length;
     // Reviewed sections fold, and so do long ones in a chain, unless a conversation is open in them.
     const folds = !!f.blocks;
     const threads = threadsIn(f, S.hi, S.s0, S.e0);
@@ -682,7 +802,7 @@
       if (focus.length && !x.allDone) out += `<span class="hh-chips"><span class="hh-sum">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(S.key)}" data-line="${ln}">line ${ln}</button>`).join('')}</span>`;
     }
     out += `<span class="sp"></span><span class="hh-x">${btns}`;
-    if (x.blocks.length) out += `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(x.blocks.map((b) => b.id).join(' '))}" title="${x.open ? 'Mark every change in this hunk reviewed (Shift+Space)' : 'Mark this hunk’s changes unreviewed'}">${x.open ? 'Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
+    if (x.blocks.length && (!lensOn() || x.blocks.some(blockIn))) out += `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(x.blocks.map((b) => b.id).join(' '))}" title="${x.open ? 'Mark every change in this hunk reviewed (Shift+Space)' : 'Mark this hunk’s changes unreviewed'}">${x.open ? 'Mark hunk reviewed' : 'Mark hunk unreviewed'}</button>`;
     return out + '</span></div>';
   }
   // The divider after a file's last section, while lines follow it (rest: how many, null if unknown).
@@ -931,7 +1051,7 @@
       }
     });
     posOf.forEach(({ x, y, n }) => {
-      const cls = ['g-node', n.ok ? 'ok' : '', n.root ? 'root' : '', n.grp ? 'grp' : '', spec.focus ? (n.key === spec.focus ? 'focus' : near.has(n.key) ? '' : 'dim') : ''].filter(Boolean).join(' ');
+      const cls = ['g-node', n.ok ? 'ok' : '', n.out ? 'out' : '', n.root ? 'root' : '', n.grp ? 'grp' : '', spec.focus ? (n.key === spec.focus ? 'focus' : near.has(n.key) ? '' : 'dim') : ''].filter(Boolean).join(' ');
       svg += `<g class="${cls}" ${n.attr} tabindex="0" role="button" aria-label="${esc(n.l2 + ', ' + n.l1)}"><title>${esc(n.tip)}</title>
         <rect class="g-box" x="${x}" y="${y}" width="${W0}" height="${NH}" rx="8"/>
         <rect class="g-bar" x="${x}" y="${y}" width="6" height="${NH}" rx="3"/>
@@ -954,7 +1074,7 @@
       nodes: c.graph.nodes.map((n) => {
         const s = stats(n.blocks.map((id) => m.blockById.get(id)));
         const { l1, l2, owner } = nodeLabels(n);
-        return { key: n.key, layer: n.layer, l1, l2, cnt: s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open, root: n.key === c.graph.root, grp: n.group !== null && n.group !== undefined,
+        return { key: n.key, layer: n.layer, l1, l2, cnt: outOfLens(s) ? '' : s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open && !outOfLens(s), out: outOfLens(s), root: n.key === c.graph.root, grp: n.group !== null && n.group !== undefined,
           attr: `data-node="${n.idx}"`, tip: (owner ? owner + '.' : '') + l2 + ' · ' + n.file };
       }),
     });
@@ -994,7 +1114,7 @@
       nodes: fam.chains.map((c) => {
         const s = stats(blocksOf(c.blocks));
         const cls = /^(_?[A-Z][\w$]*)\.(.+)$/.exec(c.name);
-        return { key: 'k' + c.id, layer: c.depth, l1: cls ? cls[1] : c.kind === 'group' && !c.rootKind ? 'same change' : '', l2: cls ? cls[2] : c.name, cnt: s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open, root: c === fam.top,
+        return { key: 'k' + c.id, layer: c.depth, l1: cls ? cls[1] : c.kind === 'group' && !c.rootKind ? 'same change' : '', l2: cls ? cls[2] : c.name, cnt: outOfLens(s) ? '' : s.open ? s.open + '/' + s.total : '✓ ' + s.total, out: outOfLens(s), ok: !s.open, root: c === fam.top,
           attr: `data-chain="${c.id}"`, tip: c.name };
       }),
     });
@@ -1757,7 +1877,9 @@
   // A chain's name with its owner apart: "BridgeMcpServer." and "logPath".
   const splitName = (name) => { const m = /^(_?[A-Z][\w$]*\.)(.+)$/.exec(name); return m ? { own: m[1], name: m[2] } : { own: '', name }; };
   // What's left to review of a set of changes, in words.
-  const leftWords = (s) => (!s.total ? 'no changes' : !s.open ? (s.total === 1 ? 'its change reviewed' : `all ${s.total} changes reviewed`) : s.open === s.total ? `${s.total} change${s.total === 1 ? '' : 's'}` : `${s.open} of ${s.total} to review`);
+  // Under a lens, a scope with nothing in it: no mark, no action, "nothing in the lens".
+  const outOfLens = (st) => lensOn() && !st.total;
+  const leftWords = (s) => (!s.total ? (lensOn() ? 'nothing in the lens' : 'no changes') : !s.open ? (s.total === 1 ? 'its change reviewed' : `all ${s.total} changes reviewed`) : s.open === s.total ? `${s.total} change${s.total === 1 ? '' : 's'}` : `${s.open} of ${s.total} to review`);
   const plusMinus = (a, d) => `<span class="a">+${fmt(a)}</span> <span class="d">−${fmt(d)}</span>`;
   const sumOf = (blocks, k) => blocks.reduce((x, b) => x + b[k], 0);
   // A view's header, in one row: where you are, what it holds, the previous and next change, the
@@ -1766,7 +1888,7 @@
   function headerHtml(o) {
     const nav = o.nav ? iconBtn(ICON.up, 'Previous change', 'data-act="nav" data-step="-1"') + iconBtn(ICON.down, 'Next change', 'data-act="nav" data-step="1"') : '';
     const menu = viewMenuItems().length ? `<button type="button" class="ib" data-act="menu" data-menu="view" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="${MENU.open === 'view'}">${ICON.more}</button>` : '';
-    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}<span class="sp"></span>${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
+    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}${lensChipHtml()}<span class="sp"></span>${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
   }
   function instancesHtml(g, blocks, key) {
     const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
@@ -1867,7 +1989,7 @@
         const st = stats(blocksOf(n.blocks));
         const { l1, l2, owner } = nodeLabels(n);
         const on = state.focus && state.focus.chain === c.id && state.focus.node === n.idx;
-        h += `<button type="button" class="node${n.key === c.graph.root ? ' root' : ''}${st.open ? '' : ' done'}${n.member ? '' : ' ui'}" data-act="to-node" data-i="${n.idx}"${on ? ' aria-current="true"' : ''} title="${esc((owner ? owner + '.' : '') + l2 + ' · ' + l1 + ' · ' + leftWords(st))}">${st.open ? '<i class="mk"></i>' : `<i class="mk ok">${ICON.check}</i>`}<span class="nm">${esc(l2)}</span>${st.open ? `<span class="c">${st.open}</span>` : ''}</button>`;
+        h += `<button type="button" class="node${n.key === c.graph.root ? ' root' : ''}${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}${n.member ? '' : ' ui'}" data-act="to-node" data-i="${n.idx}"${on ? ' aria-current="true"' : ''} title="${esc((owner ? owner + '.' : '') + l2 + ' · ' + l1 + ' · ' + leftWords(st))}">${markHtml(st)}<span class="nm">${esc(l2)}</span>${st.open ? `<span class="c">${st.open}</span>` : ''}</button>`;
       });
     });
     const more = c.graph.nodes.length - shown;
@@ -1887,7 +2009,7 @@
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
       nav: true,
       tools: oneTestFile ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
-      action: `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
+      action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
       // The members stay under the header, so going from one to another needs no scrolling back.
       pinned: oneTestFile ? '' : stripHtml(c),
     });
@@ -1910,8 +2032,8 @@
       const usesFull = out.map((e) => `uses ${e.labels.join(', ')} of ${nodeLabels(c.graph.nodes.find((x) => x.key === e.to)).l2}`);
       const rel = (out.length === 1 ? [`uses ${nodeLabels(c.graph.nodes.find((x) => x.key === out[0].to)).l2}`] : out.length ? [`uses ${out.length}`] : []).concat(usedByN ? [`used by ${usedByN}`] : []).join(' · ');
       const full = usesFull.concat(usedByN ? [`used by ${usedByN} member${usedByN > 1 ? 's' : ''}`] : []).join('; ');
-      h += `<section class="sec" id="sec-${n.idx}"><div class="sec-h"><b>${esc(l2)}</b><span>${esc(owner ? owner + ' · ' + l1 : l1)}</span>${n.key === c.graph.root ? '<span class="tag">root</span>' : ''}${rel ? `<span title="${esc(full)}">${esc(rel)}</span>` : ''}<span class="sp"></span>`
-        + `<span class="hov"><span>${leftWords(ns)} · ${plusMinus(sumOf(blocks, 'adds'), sumOf(blocks, 'dels'))}</span><button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(n.blocks.join(' '))}">${ns.open ? 'Mark reviewed' : 'Mark unreviewed'}</button></span></div>`;
+      h += `<section class="sec${lensOn() && !blocks.some((b) => b.edits.length && blockIn(b)) ? ' lens-out' : ''}" id="sec-${n.idx}"><div class="sec-h"><b>${esc(l2)}</b><span>${esc(owner ? owner + ' · ' + l1 : l1)}</span>${n.key === c.graph.root ? '<span class="tag">root</span>' : ''}${rel ? `<span title="${esc(full)}">${esc(rel)}</span>` : ''}<span class="sp"></span>`
+        + `<span class="hov"><span>${leftWords(ns)} · ${plusMinus(sumOf(blocks, 'adds'), sumOf(blocks, 'dels'))}</span>${outOfLens(ns) ? '' : `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(n.blocks.join(' '))}">${ns.open ? 'Mark reviewed' : 'Mark unreviewed'}</button>`}</span></div>`;
       if (n.group !== null && n.group !== undefined) {
         const g = m.groupById.get(n.group);
         h += `<p class="sec-note">The same change in ${blocks.length} places. Each place shows the whole edit.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
@@ -1954,7 +2076,7 @@
       crumbs: `<button type="button" data-map="" title="Open the chain map">Map</button>${SEP}<b class="ui">Not in a chain</b>`,
       facts: `${leftWords(s)} · ${plusMinus(sumOf(m.standalone, 'adds'), sumOf(m.standalone, 'dels'))}`,
       nav: true,
-      action: `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
+      action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
       below: '<p class="fv-note">Changes that don’t use, and aren’t used by, anything changed elsewhere. Grouped by file.</p>',
     });
     return h + '<div class="sec">' + subHunksHtml(m.standalone, { key: 'standalone' }) + '</div>';
@@ -2113,9 +2235,335 @@
     return h + '</div>';
   }
 
+  // ---------- commits: the history as a graph, in the sidebar's Commits tab and the History view
+  const hxOn = () => !!HX && state.compare === 'base';
+  const shortSha = (sha) => sha.slice(0, 7);
+  const CONV = /^(\w+)(\(([^)]*)\))?!?:\s*(.*)$/;
+  // A message as a row shows it: a conventional prefix ("feat(database)") apart, and a body run
+  // into a long subject cut off.
+  function subjectOf(c) {
+    const s = c.subject.length > 90 && c.subject.includes(' - ') ? c.subject.slice(0, c.subject.indexOf(' - ')).trim() : c.subject.trim();
+    const m = CONV.exec(s);
+    if (!m || !m[4]) return { text: s, kind: '' };
+    return { text: m[4][0].toUpperCase() + m[4].slice(1), kind: m[1] + (m[3] ? `(${m[3]})` : '') };
+  }
+  const thisYear = new Date().getFullYear();
+  const dayOf = (sec) => { const d = new Date(sec * 1000); return d.toLocaleDateString('en-US', d.getFullYear() === thisYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }); };
+  const whenOf = (sec) => `${dayOf(sec)}, ${new Date(sec * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  // The base's branch, as the review names it ("main · 1a2b3c4").
+  const baseName = () => { const l = (M().raw.label || '').split(' · ')[0].trim(); return l && !/^[0-9a-f]{7,40}$/.test(l) ? l : 'the base'; };
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+  let commitMemo = null;
+  // Per commit, the changes it wrote lines of.
+  function commitParts() {
+    if (commitMemo) return commitMemo;
+    const per = HISTORY.commits.map(() => []);
+    M().files.forEach((f) => (f.blocks || []).forEach((b) => { if (b.edits.length) blockCommits(b).forEach((ci) => per[ci] && per[ci].push(b)); }));
+    return (commitMemo = per);
+  }
+  // A commit's changes: how many, how many still to review (its lines in them), and so its dot.
+  function commitState(ci) {
+    let open = 0;
+    const list = commitParts()[ci];
+    list.forEach((b) => { if (!commitDone(b, ci)) open++; });
+    return { total: list.length, open, state: !list.length ? 'gone' : open ? 'left' : 'done' };
+  }
+
+  // ---------- lanes, after VS Code's Source Control Graph: toISCMHistoryItemViewModelArray and
+  // renderSCMHistoryItemGraph in src/vs/workbench/contrib/scm/browser/scmHistory.ts, Copyright (c)
+  // Microsoft Corporation, MIT License. Each row has the lanes coming in from above and going out
+  // below, each lane named by the commit it leads to. Here a commit without parents (the branch's
+  // start, or parents left outside the review) ends its own lane and no other.
+  function laneModels(items) {
+    const out = [];
+    items.forEach((item, n) => {
+      const input = n ? out[n - 1].output.map((x) => ({ ...x })) : [];
+      const output = [];
+      let firstAdded = false;
+      for (const node of input) {
+        if (node.id === item.id) {
+          if (!firstAdded && item.parents.length) { output.push({ id: item.parents[0], k: node.k }); firstAdded = true; }
+          continue;
+        }
+        output.push({ ...node });
+      }
+      const k0 = item.ghost ? 'ghost' : n === 0 ? 'main' : 'side';
+      for (let i = firstAdded ? 1 : 0; i < item.parents.length; i++) output.push({ id: item.parents[i], k: i === 0 ? k0 : item.ghost ? 'ghost' : 'side' });
+      out.push({ item, input, output });
+    });
+    return out;
+  }
+  const laneAt = (vm) => { const i = vm.input.findIndex((n) => n.id === vm.item.id); return i !== -1 ? i : vm.input.length; };
+  // Room for the widest row: g = { W: between lanes, H: a row, pad, flagH: a flag's row }.
+  function laneGeom(models, W, H, pad, flagH) {
+    let lanes = 1, stub = false;
+    models.forEach((vm) => { lanes = Math.max(lanes, vm.input.length, vm.output.length, laneAt(vm) + 1); if (vm.item.c && vm.item.c.brought) stub = true; });
+    return { W, H, pad, flagH, width: pad * 2 + (lanes - 1 + (stub ? 1 : 0)) * W };
+  }
+  function laneSvg(vm, g, dot, extra) {
+    const { item, input, output } = vm;
+    const X = (i) => g.pad + i * g.W, H = g.H, mid = H / 2;
+    const found = input.findIndex((n) => n.id === item.id);
+    const ci = found !== -1 ? found : input.length;
+    const kOf = ci < output.length ? output[ci].k : found !== -1 ? input[found].k : item.ghost ? 'ghost' : 'side';
+    let d = '';
+    const seg = (path, k) => { d += `<path class="lane ${k}" d="${path}"/>`; };
+    let oi = 0;
+    input.forEach((n, i) => {
+      if (n.id === item.id) {
+        // Another lane that leads here joins the commit.
+        if (i !== ci) seg(`M${X(i)} 0C${X(i)} ${mid * 0.7} ${X(ci)} ${mid * 0.3} ${X(ci)} ${mid}`, n.k);
+        else if (item.parents.length) oi++;
+        return;
+      }
+      if (oi < output.length && n.id === output[oi].id) {
+        seg(i === oi ? `M${X(i)} 0V${H}` : `M${X(i)} 0C${X(i)} ${H * 0.55} ${X(oi)} ${H * 0.45} ${X(oi)} ${H}`, n.k);
+        oi++;
+      }
+    });
+    // A merge's other parents, on the lanes that lead to them.
+    for (let p = 1; p < item.parents.length; p++) {
+      let at = -1;
+      for (let j = output.length - 1; j >= 0; j--) if (output[j].id === item.parents[p]) { at = j; break; }
+      if (at >= 0) seg(`M${X(ci)} ${mid}C${X(at)} ${mid} ${X(at)} ${mid} ${X(at)} ${H}`, output[at].k);
+    }
+    if (found !== -1) seg(`M${X(ci)} 0V${mid}`, input[found].k);
+    if (item.parents.length) seg(`M${X(ci)} ${mid}V${H}`, kOf);
+    return `<svg class="lanes" width="${g.width}" height="${H}" viewBox="0 0 ${g.width} ${H}" aria-hidden="true">${d}${extra ? extra(X(ci), mid) : ''}${dot(X(ci), mid)}</svg>`;
+  }
+  // A row between commits: the lanes passing through, a flag on one of them.
+  function laneThrough(lanes, g, flagAt) {
+    const H = g.flagH;
+    let d = lanes.map((n, i) => `<path class="lane ${n.k}" d="M${g.pad + i * g.W} 0V${H}"/>`).join('');
+    if (flagAt >= 0) { const x = g.pad + flagAt * g.W, y = H / 2; d += `<path class="flag" d="M${x - 4.5} ${y - 6}h9v12l-4.5-3.4-4.5 3.4z"/>`; }
+    return `<svg class="lanes" width="${g.width}" height="${H}" viewBox="0 0 ${g.width} ${H}" aria-hidden="true">${d}</svg>`;
+  }
+  // A commit's dot: amber with changes to review, a check when they're reviewed, hollow when
+  // nothing of it is left at the head; an old head's, dashed.
+  const dotSvg = (st) => (x, y) => (st === 'left' ? `<circle class="dot left" cx="${x}" cy="${y}" r="4.5"/>`
+    : st === 'done' ? `<circle class="dot done" cx="${x}" cy="${y}" r="5.5"/><path class="dot-check" d="M${x - 2.6} ${y}l1.8 1.9 3.4-3.6"/>`
+      : `<circle class="dot ${st === 'ghost' ? 'ghost' : 'gone'}" cx="${x}" cy="${y}" r="4.5"/>`);
+  // Where a merge's other parent comes from: outside the review, folded into a stub.
+  const stubSvg = (g) => (x, y) => `<path class="lane stub" d="M${x} ${y}C${x + g.W * 0.9} ${y} ${x + g.W} ${y + 4} ${x + g.W} ${g.H - 7}"/><rect class="stub-end" x="${x + g.W - 3}" y="${g.H - 10}" width="6" height="6" rx="1.2" transform="rotate(45 ${x + g.W} ${g.H - 7})"/>`;
+
+  // The graph's rows: the commits, and the old heads (a force push's, or the one of your review
+  // when the branch no longer has it) at their time, above where they left the branch.
+  function graphItems() {
+    const items = HISTORY.commits.map((c, i) => ({ id: c.sha, parents: c.parents, c, i }));
+    ((HX.live && HX.live.ghosts) || []).forEach((gh) => {
+      const item = { id: 'g:' + gh.sha, parents: gh.fork ? [gh.fork] : [], ghost: gh };
+      let at = items.findIndex((x) => (x.c ? x.c.at : x.ghost.at) < gh.at);
+      at = Math.max(1, at < 0 ? items.length : at);
+      const fi = gh.fork ? items.findIndex((x) => x.id === gh.fork) : -1;
+      if (fi >= 0 && fi < at) at = fi;
+      items.splice(at, 0, item);
+    });
+    return laneModels(items);
+  }
+  // Your last review of another head, when that head is in the branch: its flag's place.
+  const reviewInBranch = () => { const rv = HX.live && HX.live.review; return rv && rv.inBranch && rv.here ? rv : null; };
+  const isReviewLens = () => !!state.lens && state.lens.kind === 'since' && state.lens.why === 'review';
+  const commitInLens = (ci) => { const d = lensData(); return !!d && !!d.set && d.set.has(ci); };
+
+  function commitRowHtml(vm, g) {
+    const it = vm.item;
+    if (it.ghost) return ghostRowHtml(vm, g, 'cm-row');
+    const c = it.c, st = commitState(it.i), sub = subjectOf(c), on = commitInLens(it.i);
+    const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
+    const cnt = st.state === 'left' ? `<span class="cm-n left">${st.open}</span>` : st.state === 'done' ? `<span class="cm-n ok">${ICON.check}</span>` : '<span class="cm-n">—</span>';
+    const meta = c.brought ? `<code>${shortSha(c.sha)}</code> · brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${dayOf(c.at)}`;
+    const left = st.total ? `${plural(st.total, 'change')}${st.open ? `, ${st.open} to review` : ', all reviewed'}` : 'Nothing of it is left at the head';
+    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}. Click for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${esc(sub.text)}</span><span class="cm-m">${meta}</span>${cnt}</button>`;
+  }
+  function ghostRowHtml(vm, g, cls) {
+    const gh = vm.item.ghost, on = !!state.lens && state.lens.kind === 'since' && state.lens.from === gh.sha;
+    const who = gh.actor ? `Force-pushed by ${esc(gh.actor)}` : 'Your review, of a head the branch no longer has';
+    const meta = `<code>${shortSha(gh.sha)}</code> · ${dayOf(gh.at)}${gh.replaced ? ` · ${plural(gh.replaced, 'commit')} replaced` : ''}${gh.yours && gh.actor ? ' · your review' : ''}`;
+    const title = gh.here ? `The head before${gh.actor ? ' this force push' : ''}: ${shortSha(gh.sha)}. Click for what changed since.` : 'GitHub no longer has this head';
+    const inner = `${laneSvg(vm, g, dotSvg('ghost'))}<span class="${cls === 'cm-row' ? 'cm-s' : 'hs-s'}">${who}</span><span class="${cls === 'cm-row' ? 'cm-m' : 'hs-m'}">${meta}</span>`;
+    return `<button type="button" class="${cls} ghost${on ? ' in' : ''}" data-act="lens-ghost" data-sha="${gh.sha}" data-why="${gh.yours ? 'review' : 'push'}" aria-pressed="${on}"${gh.here ? '' : ' disabled'} title="${esc(title)}">${inner}${cls === 'cm-row' ? '<span class="cm-n"></span>' : ''}</button>`;
+  }
+  function flagRowHtml(vm, g, cls) {
+    const rv = reviewInBranch();
+    return `<button type="button" class="${cls}${isReviewLens() ? ' in' : ''}" data-act="lens-review" title="Show only what changed since your last review, at ${shortSha(rv.head)}">${laneThrough(vm.input, g, vm.input.findIndex((n) => n.id === rv.head))}<span>Your review</span><b>${whenOf(rv.at)}</b></button>`;
+  }
+  const preset = (act, label, n, on, title) => `<button type="button" class="sb-row cm-pre" data-act="${act}" aria-pressed="${on}" title="${esc(title)}"><i class="rd"></i><span class="nm ui">${label}</span><span class="cnt">${n || ''}</span></button>`;
+  // The open changes since an older head (its rows loaded), as a lens there would count them.
+  function sinceOpen(from) {
+    const rows = HX.since.get(from);
+    if (!rows) return 0;
+    let n = 0;
+    M().files.forEach((f) => {
+      const r = rows[f.idx];
+      if (r) (f.blocks || []).forEach((b) => {
+        const hr = r[b.hunk];
+        if (!hr || !b.edits.length || done(b)) return;
+        for (let ri = b.first; ri < b.first + b.len; ri++) if (hr.has(ri)) { n++; break; }
+      });
+    });
+    return n;
+  }
+  // The sidebar's Commits tab: the History view, the lens's two presets, then the graph.
+  function commitsTabHtml() {
+    const models = graphItems(), g = laneGeom(models, 12, 40, 8, 26);
+    const rv = HX.live && HX.live.review;
+    const all = withoutLens(() => stats(M().files.flatMap((f) => f.blocks)));
+    let h = `<button type="button" class="sb-row map" data-act="history-open"${state.view.kind === 'history' ? ' aria-current="true"' : ''} title="Every commit, with what it touched, its checks and its reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt"></span></button>`;
+    h += '<div class="sb-group"><span>Changes from</span></div>';
+    h += preset('lens-all', 'All changes', all.open, !state.lens, 'Every change of the pull request');
+    if (rv && rv.here) h += preset('lens-review', 'Since your review', sinceOpen(rv.head), isReviewLens(), `What changed since the head of your last review, ${shortSha(rv.head)} (${whenOf(rv.at)})`);
+    h += `<div class="sb-group"><span>Commits</span><span>${HISTORY.commits.length}</span></div><div class="cm-list" role="group" aria-label="The commits, newest first">`;
+    const rvb = reviewInBranch();
+    models.forEach((vm) => {
+      if (rvb && vm.item.id === rvb.head) h += flagRowHtml(vm, g, 'cm-flag');
+      h += commitRowHtml(vm, g);
+    });
+    const last = HISTORY.commits[HISTORY.commits.length - 1];
+    if (last.outside[0]) h += `<div class="cm-start" title="The branch starts after ${esc(last.outside[0])}">Branched from <code>${shortSha(last.outside[0])}</code></div>`;
+    return h + '</div>';
+  }
+
+  // ---------- the History view: each commit in full, what it touched, its checks and reviews
+  const CHECK = { SUCCESS: ['ok', 'Checks passed'], FAILURE: ['bad', 'Checks failed'], ERROR: ['bad', 'Checks errored'], PENDING: ['wait', 'Checks running'], EXPECTED: ['wait', 'Checks expected'] };
+  const REVIEW_WORD = { APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes', COMMENTED: 'commented', DISMISSED: 'dismissed' };
+  function histRowHtml(vm, g) {
+    const it = vm.item;
+    if (it.ghost) return `<div class="hs-row ghost">${ghostRowHtml(vm, g, 'hs-main')}</div>`;
+    const c = it.c, st = commitState(it.i), sub = subjectOf(c), on = commitInLens(it.i), m = M();
+    const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
+    // The chains it touched, the most first.
+    const perChain = new Map();
+    commitParts()[it.i].forEach((b) => (m.chainsOf.get(b.id) || []).forEach((id) => perChain.set(id, (perChain.get(id) || 0) + 1)));
+    const top = [...perChain].sort((x, y) => y[1] - x[1] || x[0] - y[0]).slice(0, 2);
+    const chips = top.map(([id, n]) => { const ch = m.chains[id], nm = splitName(ch.name); return `<button type="button" class="hs-chip" data-act="lens-chain" data-sha="${c.sha}" data-chain-id="${id}" title="${esc(ch.name)}: open it, through this commit"><i class="${stats(blocksOf(ch.blocks)).open ? '' : 'ok'}"></i>${esc(trunc(nm.name, 26))}<em>${n}</em></button>`; }).join('');
+    const facts = HX.live && HX.live.github;
+    const ck = facts && facts.checks[c.sha] && CHECK[facts.checks[c.sha]];
+    const reviews = new Map();
+    (facts ? facts.reviews : []).forEach((r) => { if (r.sha !== c.sha) return; const k = r.author.login + ' ' + r.state; if (!reviews.has(k)) reviews.set(k, { ...r, n: 0 }); reviews.get(k).n++; });
+    const rv = [...reviews.values()].map((r) => `<a class="hs-rev ${r.state === 'APPROVED' ? 'ok' : r.state === 'CHANGES_REQUESTED' ? 'bad' : ''}" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" title="${esc(r.author.login)} ${REVIEW_WORD[r.state] || r.state.toLowerCase()} on this commit${r.n > 1 ? `, ${r.n} times` : ''}">${r.author.avatar ? `<img src="${esc(r.author.avatar)}&s=32" alt="" width="16" height="16">` : ''}${esc(r.author.login)} ${REVIEW_WORD[r.state] || ''}${r.n > 1 ? ` ×${r.n}` : ''}</a>`).join('');
+    const what = c.brought ? `brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : st.total ? `${plural(st.total, 'change')} ${perChain.size ? 'in ' + plural(perChain.size, 'chain') : 'outside chains'}` : 'nothing of it left at the head';
+    const meta = `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${esc(c.author)} · ${dayOf(c.at)} · ${what}`;
+    const cnt = st.state === 'left' ? `<span class="hs-n left" title="${st.open} of its changes to review">${st.open}</span>` : st.state === 'done' ? `<span class="hs-n ok" title="All of it reviewed">${ICON.check}</span>` : '<span class="hs-n">—</span>';
+    const open = HX.open.has(c.sha);
+    const more = c.brought && CONFIG.served ? `<button type="button" class="btn xs" data-act="brought" data-sha="${c.sha}" aria-expanded="${open}">${open ? 'Hide them' : 'Show them'}</button>` : '';
+    return `<div class="hs-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}"><button type="button" class="hs-main" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}${c.body ? '\n\n' + c.body : ''}\n\n${shortSha(c.sha)} · ${c.author} <${c.email}> · ${whenOf(c.at)}. Click for its changes; Shift-click for a range.`)}">${svg}<span class="hs-s">${esc(sub.text)}</span><span class="hs-m">${meta}</span></button>`
+      + `<span class="hs-x">${rv}${more}${chips}</span><span class="hs-ci${ck ? ' ' + ck[0] : ''}"${ck ? ` title="${ck[1]}"` : ''}>${ck ? (ck[0] === 'ok' ? ICON.check : ck[0] === 'bad' ? ICON.close : '•') : ''}</span>${cnt}</div>`;
+  }
+  // The commits a merge brought from the base's branch, under it.
+  function broughtHtml(vm, g) {
+    const sha = vm.item.c.sha, got = HX.brought.get(sha);
+    const lanes = laneThrough(vm.output, { ...g, flagH: 30 }, -1);
+    if (!got) return `<div class="hs-sub">${lanes}<span class="muted">Loading…</span></div>`;
+    if (got.error) return `<div class="hs-sub">${lanes}<span class="muted">${esc(got.error)}</span></div>`;
+    return got.commits.map((x) => `<div class="hs-sub" title="${esc(x.subject)}">${lanes}<code>${shortSha(x.sha)}</code><span class="hs-sub-s">${esc(x.subject)}</span><span class="muted">${esc(x.author)} · ${dayOf(x.at)}</span></div>`).join('')
+      + (got.more ? `<div class="hs-sub">${lanes}<span class="muted">and more: the first ${got.commits.length} are listed</span></div>` : '');
+  }
+  function renderHistory() {
+    if (!hxOn()) return headerHtml({ crumbs: '<b class="ui">History</b>' }) + '<div class="empty">git couldn’t tell this review’s commits.</div>';
+    const models = graphItems(), g = laneGeom(models, 16, 56, 12, 30);
+    const list = HISTORY.commits, merges = list.filter((c) => c.brought).length;
+    const pushes = ((HX.live && HX.live.ghosts) || []).filter((x) => x.actor).length;
+    const lensOpen = state.lens ? stats(M().files.flatMap((f) => f.blocks)).open : 0;
+    const rv = HX.live && HX.live.review, fresh = !state.lens && rv && rv.here ? sinceOpen(rv.head) : 0;
+    const action = lensOpen ? `<button type="button" class="btn primary" data-act="lens-go" title="The first chain with changes in the lens">Review these changes · ${lensOpen}</button>`
+      : fresh ? `<button type="button" class="btn primary" data-act="lens-review" data-go="1" title="What changed since your last review, from the first chain with some">Review what’s new · ${fresh}</button>` : '';
+    const span = list.length > 1 && dayOf(list[list.length - 1].at) !== dayOf(list[0].at) ? `${dayOf(list[list.length - 1].at)} – ${dayOf(list[0].at)}` : dayOf(list[0].at);
+    let h = headerHtml({
+      crumbs: '<b class="ui">History</b>',
+      facts: `${plural(list.length, 'commit')}${merges ? ` · ${plural(merges, 'merge')} from ${esc(baseName())}` : ''}${pushes ? ` · ${plural(pushes, 'force push')}` : ''} · ${span}`,
+      action,
+    });
+    const gh = HX.live && HX.live.githubError ? `<span class="d" title="${esc(HX.live.githubError)}">GitHub didn’t answer: no checks or reviews</span>` : '';
+    h += `<div class="hs-legend"><span><i class="lg-left"></i>has changes to review</span><span><i class="lg-done"></i>reviewed</span><span><i class="lg-gone"></i>nothing of it left at the head</span><span><i class="lg-ghost"></i>a head before a force push</span>${gh}<span class="sp"></span><span>Newest first</span></div><div class="hist">`;
+    const rvb = reviewInBranch();
+    models.forEach((vm) => {
+      if (rvb && vm.item.id === rvb.head) h += `<div class="hs-row">${flagRowHtml(vm, g, 'hs-flag')}</div>`;
+      h += histRowHtml(vm, g);
+      if (vm.item.c && vm.item.c.brought && HX.open.has(vm.item.c.sha)) h += broughtHtml(vm, g);
+    });
+    const last = list[list.length - 1];
+    if (last.outside[0]) h += `<div class="hs-start">Branched from ${esc(baseName())} at <code>${shortSha(last.outside[0])}</code></div>`;
+    return h + '</div>';
+  }
+
+  // ---------- the lens: chip, labels, and what turns it on
+  function lensLabel() {
+    const ln = state.lens;
+    if (!ln) return '';
+    if (ln.kind === 'since') {
+      const k = HX.index.get(ln.from);
+      if (ln.why === 'review') return k ? `Since your review · ${plural(k, 'commit')}` : 'Since your review';
+      return `Since ${shortSha(ln.from)}, before the force push`;
+    }
+    if (ln.shas.length === 1) { const c = HISTORY.commits[HX.index.get(ln.shas[0])]; return `${shortSha(ln.shas[0])} · ${trunc(subjectOf(c).text, 30)}`; }
+    return `${ln.shas.length} commits`;
+  }
+  // The header's chip: the lens while one is on, else an offer of what's new since your review.
+  const LENS_VIEWS = new Set(['chain', 'file', 'standalone', 'group', 'map', 'history']);
+  function lensChipHtml() {
+    if (!hxOn() || !LENS_VIEWS.has(state.view.kind)) return '';
+    if (state.lens) return `<span class="lens-chip"><button type="button" data-act="commits-open" title="Only these changes count: the Commits tab">${esc(lensLabel())}</button><button type="button" class="x" data-act="lens-clear" title="Back to every change (Esc)" aria-label="Back to every change">${ICON.close}</button></span>`;
+    const rv = HX.live && HX.live.review;
+    const n = rv && rv.here && state.view.kind !== 'history' ? sinceOpen(rv.head) : 0;
+    return n ? `<button type="button" class="lens-offer" data-act="lens-review" title="Show only what changed since the head of your last review, ${shortSha(rv.head)}">New since your review<i>${n}</i></button>` : '';
+  }
+  function setLens(lens) {
+    state.lens = lens;
+    lensMemo = null;
+    navAt = null;
+    render();
+  }
+  function lensCommit(sha, range) {
+    const i = HX.index.get(sha);
+    if (i == null) return;
+    if (range && HX.anchor != null && HX.anchor !== i) {
+      const a = Math.min(HX.anchor, i), b = Math.max(HX.anchor, i);
+      return setLens({ kind: 'commits', shas: HISTORY.commits.slice(a, b + 1).map((c) => c.sha) });
+    }
+    HX.anchor = i;
+    const cur = state.lens;
+    if (cur && cur.kind === 'commits' && cur.shas.length === 1 && cur.shas[0] === sha) return setLens(null);
+    setLens({ kind: 'commits', shas: [sha] });
+  }
+  function fetchSince(from) {
+    if (HX.since.has(from)) return Promise.resolve(HX.since.get(from));
+    return api('since?from=' + from).then((r) => r.json()).then((j) => {
+      if (!j.rows) throw new Error(j.error || 'not available');
+      const rows = {};
+      Object.entries(j.rows).forEach(([fi, hs]) => { rows[fi] = {}; Object.entries(hs).forEach(([hi, list]) => { rows[fi][hi] = new Set(list); }); });
+      HX.since.set(from, rows);
+      return rows;
+    });
+  }
+  function lensSince(from, why, go) {
+    if (!CONFIG.served) return;
+    fetchSince(from).then(() => { state.lens = { kind: 'since', from, why }; lensMemo = null; navAt = null; if (go) lensGo(); else render(); }, (e) => toast(`Can’t show what changed since ${shortSha(from)}: ${e.message}`));
+  }
+  // The first chain (or the changes outside chains) with something in the lens to review.
+  function lensGo() {
+    const nx = nextUnreviewed();
+    if (!nx) { render(); return toast('Nothing left to review in the lens'); }
+    state.view = nx; state.peek = null; state.focus = null;
+    if (state.tab !== 'commits') state.tab = 'chains';
+    render({ top: true });
+  }
+  // What the graph learns from untangle: your last review's head, GitHub's checks, reviews and
+  // force pushes. Asked when the page opens and again when the graph shows, at most once a minute.
+  function loadCommits(force) {
+    if (!hxOn() || !CONFIG.served) return;
+    if (HX.loading || (!force && HX.liveAt && Date.now() - HX.liveAt < 60000)) return;
+    HX.loading = api('history').then((r) => r.json()).then((j) => {
+      if (j.error) throw new Error(j.error);
+      HX.live = j;
+      HX.liveAt = Date.now();
+      if (j.review && j.review.here) return fetchSince(j.review.head).catch(() => {});
+    }).catch(() => { HX.liveAt = Date.now(); }).then(() => { HX.loading = null; render(); });
+  }
+
   // ---------- sidebar
   // A row's mark: amber while it has changes to review, a check once they're all reviewed.
-  const markHtml = (st) => (st.open ? '<i class="mk"></i>' : `<i class="mk ok">${ICON.check}</i>`);
+  const markHtml = (st) => (st.open ? '<i class="mk"></i>' : outOfLens(st) ? '<i class="mk out"></i>' : `<i class="mk ok">${ICON.check}</i>`);
   function renderSide() {
     const m = M();
     const all = m.files.flatMap((f) => f.blocks);
@@ -2127,20 +2575,24 @@
     let h = `<div class="sb-top"><div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
       + (t.open ? `<b>${t.open}</b><span>change${t.open === 1 ? '' : 's'} to review</span>` : `<b>${ICON.check}</b><span>All ${t.total} changes reviewed</span>`)
       + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where your marks are kept" aria-label="Marks" aria-haspopup="dialog" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
-      + `<div class="sb-tabs" role="tablist">${tab('chains', 'Chains', m.chains.length)}${tab('files', 'Files', m.files.length)}${GH.on ? tab('comments', 'Threads', openThreads) : ''}</div></div>`;
-    if (state.tab === 'comments') {
+      // Four tabs fit the sidebar without their counts: they show when it's wider.
+      + `<div class="sb-tabs${GH.on && hxOn() ? ' four' : ''}" role="tablist">${tab('chains', 'Chains', m.chains.length)}${tab('files', 'Files', m.files.length)}${GH.on ? tab('comments', 'Threads', openThreads) : ''}${hxOn() ? tab('commits', 'Commits', HISTORY.commits.length) : ''}</div></div>`;
+    if (state.tab === 'commits' && hxOn()) {
+      h += commitsTabHtml();
+    } else if (state.tab === 'comments') {
       h += commentsTabHtml(v);
-    } else if (state.tab === 'chains') {
+    } else if (state.tab === 'chains' || state.tab === 'commits') {
       // `next`: the depth of the row after it, for its guides.
       const row = (c, depth, next) => {
         const st = stats(blocksOf(c.blocks));
         const on = v.kind === 'chain' && v.id === c.id;
         const n = splitName(c.name), d = Math.min(depth, 6);
-        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
+        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
       };
       const linked = m.families.filter((f) => f.chains.length > 1);
       const lone = m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
       h += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
+      if (hxOn()) h += `<button type="button" class="sb-row map" data-act="history-open"${v.kind === 'history' ? ' aria-current="true"' : ''} title="The commits: each one, what it touched, its checks and reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt">${HISTORY.commits.length}</span></button>`;
       linked.forEach((f) => { h += `<div class="sb-group"><span title="${esc(f.top.name)}">The ${esc(trunc(f.top.name, 34))} family</span></div>` + f.chains.map((c, k) => row(c, c.depth, k + 1 < f.chains.length ? f.chains[k + 1].depth : -1)).join(''); });
       if (lone.length) h += '<div class="sb-group"><span>Unlinked</span></div>' + lone.map((c) => row(c, 0, 0)).join('');
       const st = stats(m.standalone);
@@ -2457,7 +2909,7 @@
     renderReviewBar();
     const v = state.view;
     try {
-      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : renderFile(v.path);
+      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : v.kind === 'history' ? renderHistory() : renderFile(v.path);
     } catch (e) {
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
@@ -2525,7 +2977,7 @@
     const head = (CONFIG.head || M().raw.right || '').slice(0, 7);
     const h = (CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`)
       + (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
-      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
+      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="commits-open" title="${state.lens ? esc(lensLabel()) + ': the Commits tab' : 'The commits: review some of them'}">${state.lens ? esc(lensLabel()) : esc(head)}</button>` : esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
       + '<span class="t-unsaved" title="untangle doesn’t answer: is it still running?">Marks not saved</span>';
     if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
   }
@@ -2579,7 +3031,7 @@
   const rowOf = (el) => el.closest('.ln, .sl, .hh');
   const markId = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
   // A chain shows other chains' changes in its context lines: j, k and the pill skip them.
-  const changeMarks = (open) => [...main.querySelectorAll(open ? '.tick[data-block]:not(.on), .hh[data-nav]' : '.tick[data-block], .hh[data-nav]')].filter((el) => !open || !el.closest('.other'));
+  const changeMarks = (open) => [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav]')].filter((el) => !open || !el.closest('.other'));
   // Where a change is put when you go to it: a little below the header.
   const readY = () => main.getBoundingClientRect().top + headH() + 48;
   const follows = (a, b) => { const p = a.compareDocumentPosition(b); return !!(p & Node.DOCUMENT_POSITION_FOLLOWING) && !(p & Node.DOCUMENT_POSITION_CONTAINED_BY); };
@@ -2669,9 +3121,10 @@
     const band = bandOf(el);
     const btn = sec ? sec.querySelector('.sec-h [data-act="mark-blocks"]') : band && band.querySelector('[data-act="mark-blocks"]');
     if (!btn) return false;
-    const blocks = blocksOf(btn.dataset.blocks.split(' ')).filter((b) => b && b.edits.length && !done(b));
+    const blocks = blocksOf(btn.dataset.blocks.split(' ')).filter((b) => b && b.edits.length && blockIn(b) && !doneL(b));
     if (!blocks.length) return false;
-    setEdits(blocks.flatMap((b) => b.edits), true);
+    if (commitLens()) markCommitLines(blocks, true);
+    else setEdits(blocks.flatMap((b) => b.edits), true);
     blocks.forEach((b) => state.blockDiff.delete(b.id));
     const secId = sec && sec.id, key = band && band.dataset.sec;
     hint({ mark: blocks.map((b) => b.id) });
@@ -2710,7 +3163,7 @@
         h = `${iconBtn(ICON.chevronLeft, 'Previous change to review (k)', 'data-act="pill-step" data-step="-1"')}<span class="pill-n" aria-live="polite"><b>${n}</b> of ${total}</span>${iconBtn(ICON.chevronRight, 'Next change to review (j)', 'data-act="pill-step" data-step="1"')}<span class="pill-sep"></span><button type="button" class="pill-act" data-act="mark-next" title="Mark the change you’re on reviewed, and go to the next one">Mark and go to the next<kbd>Space</kbd></button>`;
       } else {
         const nx = nextUnreviewed();
-        h = `<span class="pill-msg">All reviewed here</span>${nx ? '<button type="button" class="pill-act" data-act="next-open" title="The next chain with changes to review">Next chain<kbd>n</kbd></button>' : ''}`;
+        h = `<span class="pill-msg">${lensOn() && !main.querySelector('.tick[data-block]:not(.lens-out)') ? 'Nothing in the lens here' : 'All reviewed here'}</span>${nx ? '<button type="button" class="pill-act" data-act="next-open" title="The next chain with changes to review">Next chain<kbd>n</kbd></button>' : ''}`;
       }
     }
     el.hidden = !h;
@@ -2762,7 +3215,7 @@
       keysEl.innerHTML = '<h2>Keys</h2><dl>'
         + [[k('j', 'k'), 'Next and previous change to review'], [k('Space'), 'Mark the change reviewed and go to the next one'], [k('Shift', 'Space'), 'Mark the hunk, or the member in a chain'],
           [k('n', 'p'), 'Next and previous chain with changes to review'], [k(MOD, 'K'), 'Jump to a chain, file, symbol or thread'],
-          [k('c'), 'Comment on the line you’re on'], [k(MOD, 'B'), 'Show or hide the sidebar'], [k('Esc'), 'Close the peek, the palette or a menu'], [k('?'), 'These keys']]
+          [k('c'), 'Comment on the line you’re on'], [k(MOD, 'B'), 'Show or hide the sidebar'], [k('Esc'), 'Close the peek, the palette or a menu; then show every change again (the lens off)'], [k('?'), 'These keys']]
           .map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('') + '</dl>';
       viewer.appendChild(keysEl);
     }
@@ -2951,7 +3404,7 @@
   }
   function reloadHere() {
     const v = state.view;
-    const r = { tab: state.tab, kind: v.kind, path: v.path || null, chain: v.kind === 'chain' && M().chains[v.id] ? M().chains[v.id].name : null, from: CONFIG.head || null };
+    const r = { tab: state.tab, kind: v.kind, path: v.path || null, chain: v.kind === 'chain' && M().chains[v.id] ? M().chains[v.id].name : null, from: CONFIG.head || null, lens: state.lens ? { ...state.lens } : null };
     try { sessionStorage.setItem(RESUME, JSON.stringify(r)); } catch (e) { /* storage unavailable */ }
     flushSave();
     location.reload();
@@ -3273,7 +3726,7 @@
     if (k != null) { setDraft(k, e.target.value); if (GH.on) mentionUpdate(e.target); }
   });
   viewer.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],.ref');
+    const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],.ref');
     if (t && t.closest('.menu')) closeMenu();
     if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
@@ -3282,7 +3735,7 @@
     if (d.act === 'menu') return toggleMenu(d.menu);
     if (d.compare) {
       if (state.compare === d.compare) return;
-      state.compare = d.compare; state.peek = null;
+      state.compare = d.compare; state.peek = null; state.lens = null; lensMemo = null;
       state.view = { kind: 'map', family: null }; state.focus = null;
       return render({ top: true });
     }
@@ -3293,7 +3746,7 @@
       if (again) again.focus();
       return;
     }
-    if (d.tab) { state.tab = d.tab; return render(); }
+    if (d.tab) { state.tab = d.tab; if (d.tab === 'commits') loadCommits(); return render(); }
     if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
     if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
     if (d.node !== undefined && !d.act) {
@@ -3326,12 +3779,38 @@
       state.peek = same ? null : { path, n, col, ti: defs ? defs.get(col) : undefined, usageKey: d.usage };
       return render();
     }
+    // A commit: its changes become the lens (Shift: the commits from the last one clicked).
+    if (d.commit && !d.act) return lensCommit(d.commit, e.shiftKey);
     if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); }
     if (d.standalone) { state.view = { kind: 'standalone' }; state.peek = null; return render({ top: true }); }
     if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
     if (act === 'jump') return palOpen();
+    if (act === 'commits-open') { state.tab = 'commits'; if (UI.sideOff) toggleSide(); loadCommits(); return render(); }
+    if (act === 'history-open') { state.view = { kind: 'history' }; state.peek = null; state.focus = null; loadCommits(); return render({ top: true }); }
+    if (act === 'lens-all' || act === 'lens-clear') return setLens(null);
+    if (act === 'lens-review') { const rv = HX && HX.live && HX.live.review; if (rv) lensSince(rv.head, 'review', d.go === '1'); return; }
+    if (act === 'lens-ghost') return lensSince(d.sha, d.why === 'review' ? 'review' : 'push');
+    if (act === 'lens-go') return lensGo();
+    if (act === 'lens-chain') {
+      state.lens = { kind: 'commits', shas: [d.sha] };
+      lensMemo = null; navAt = null; HX.anchor = HX.index.get(d.sha);
+      state.view = { kind: 'chain', id: Number(d.chainId) }; state.peek = null; state.focus = null;
+      return render({ top: true });
+    }
+    if (act === 'brought') {
+      const sha = d.sha;
+      if (HX.open.has(sha)) HX.open.delete(sha);
+      else {
+        HX.open.add(sha);
+        if (!HX.brought.has(sha)) {
+          api('brought?sha=' + sha).then((r) => r.json()).then((j) => { HX.brought.set(sha, j.commits ? j : { error: j.error || 'not available' }); render(); })
+            .catch((err) => { HX.brought.set(sha, { error: err.message }); render(); });
+        }
+      }
+      return render();
+    }
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
     if (act === 'graph-show') return showGraph();
@@ -3445,6 +3924,7 @@
       if (MENU.open) return closeMenu();
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
       if (state.peek) { state.peek = null; return render(); }
+      if (state.lens) return setLens(null);
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey || typingIn(e.target) || PAL.open) return;
@@ -3571,7 +4051,7 @@
         const c = el.classList;
         if (c.contains('ln') || c.contains('sl')) {
           row.k = c.contains('add') || el.querySelector(':scope > .half.add') ? 'add' : c.contains('del') ? 'del' : c.contains('mv') || c.contains('mv-head') ? 'mv' : 'ctx';
-          row.rv = c.contains('rvd') || c.contains('rvd-quiet') || c.contains('gone');
+          row.rv = c.contains('rvd') || c.contains('rvd-quiet') || c.contains('gone') || c.contains('lens-out');
           row.todo = !row.rv && (row.k === 'add' || row.k === 'del' || !!el.querySelector(':scope > .half.del'));
           const tx = el.querySelector('.half.r .tx') || el.querySelector('.tx');
           const text = tx ? tx.textContent : '';
@@ -3704,7 +4184,7 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollMetrics(); });
   }
 
-  let glowFrom = null;
+  let glowFrom = null, resumeSince = null;
   try {
     const r = JSON.parse(sessionStorage.getItem(RESUME) || 'null');
     sessionStorage.removeItem(RESUME);
@@ -3715,7 +4195,10 @@
       else if (c) state.view = { kind: 'chain', id: c.id };
       else if (r.kind === 'conversation' && GH.on) state.view = { kind: 'conversation' };
       else if (r.kind === 'standalone') state.view = { kind: 'standalone' };
+      else if (r.kind === 'history' && HX) state.view = { kind: 'history' };
       if (r.from && CONFIG.head && r.from !== CONFIG.head) glowFrom = r.from;
+      if (r.lens && HX && r.lens.kind === 'commits') { const shas = (r.lens.shas || []).filter((x) => HX.index.has(x)); if (shas.length) state.lens = { kind: 'commits', shas }; }
+      else if (r.lens && HX && r.lens.kind === 'since' && r.lens.from) resumeSince = r.lens;
     }
   } catch (e) { /* storage unavailable */ }
   if (CONFIG.served) {
@@ -3729,6 +4212,10 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !GH.busy && Date.now() - GH.at > 20000) ghLoad(true); });
   }
   render({ top: true });
+  // The commits' live part (your last review, GitHub's checks and force pushes), and a lens kept
+  // through a reload.
+  loadCommits();
+  if (resumeSince) lensSince(resumeSince.from, resumeSince.why);
   // Reloaded on newer commits: the lines they changed glow once.
   if (glowFrom && CONFIG.served) {
     api('changed?from=' + encodeURIComponent(glowFrom)).then((r) => r.json()).then((j) => {

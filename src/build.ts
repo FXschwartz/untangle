@@ -12,6 +12,7 @@ import { definitions, slim, type Definitions, type SlimDefinitions } from './pip
 import { exportDiff, generatedPatterns } from './pipeline/diff.js';
 import { changedUsages, overrides, testCalls } from './pipeline/links.js';
 import { headPositions, oldPositions } from './pipeline/positions.js';
+import type { History } from './history.js';
 import type { Target } from './target.js';
 import { ROOT, VERSION } from './version.js';
 
@@ -21,6 +22,8 @@ export interface ReviewData {
   defs: SlimDefinitions;
   refs: ReturnType<typeof changedUsages>;
   defsOld: Record<string, SlimDefinitions>;
+  /** The commits, and which wrote each changed line (not cached with the rest: see history.ts). */
+  history?: History | null;
 }
 
 export interface Progress {

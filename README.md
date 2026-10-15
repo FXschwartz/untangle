@@ -139,6 +139,24 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
   untangle builds the new review while the page keeps working on the current one, then the page
   reloads on the same view, with marks carried over and unsent comments kept. A page left on the
   old review, in another tab, is told to reload instead of saving marks onto the new one.
+- **The commits, as a lens.** The sidebar's Commits tab draws the pull request's commits as a
+  graph, newest on top: each with its message, its date and what's left to review of it (a check
+  when it's all reviewed, a hollow dot when none of its lines made it to the head). The head
+  commit in the top bar opens it.
+  - **A lens:** click a commit (Shift-click another for a range) and every view shows the
+    review through it. Lines from other commits fade, and the counts, the review pill, the
+    minimap and j and k go through what's in it. Under a commit's lens, marking a change marks
+    the lines that commit wrote: a change is reviewed once all its commits are. The header's
+    chip names the lens; × or Esc turns it off. `git blame` over the pull request's commits says
+    which commit wrote each line, once per review.
+  - **Since your review:** after new commits, a chip offers what changed since the head your last
+    save recorded (on the marks branch), and the graph flags that commit. Marks there cover whole
+    changes, since you saw the rest before.
+  - **The History view** (from the tab, or under the chain map) shows each commit in full: what it
+    touched, the commits a merge brought from the base (listed under it), and from GitHub, its
+    checks and the reviews made on it. A force push draws the head before it as a dashed lane,
+    with a lens of what changed since. The lanes are drawn as VS Code's Source Control Graph
+    draws them.
 - **Marks on a branch.** Your review is a local git branch, `untangle/pr-<number>` (or
   `untangle/<branch>`): the base plus every change you marked reviewed, a commit per save.
   `git diff untangle/pr-123 <head>` shows what's left. Marks come back from the branch's

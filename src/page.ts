@@ -84,6 +84,7 @@ export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'ex
     ['/*DEFS*/', inline(data.defs)],
     ['/*REFS*/', inline(data.refs)],
     ['/*DEFSOLD*/', inline(data.defsOld)],
+    ['/*HISTORY*/', inline(data.history ?? null)],
     ['/*VIEWER*/', viewer],
   ];
   // One pass over the template, so text in the data that looks like a placeholder stays as it is.
