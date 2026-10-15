@@ -116,7 +116,7 @@ describe('Given a served review where report mentions price, ', { skip, timeout:
     });
 
     it('then price opens.', () => {
-      assert.equal(opened.includes('price'), true);
+      assert.equal(opened, 'Map/price');
     });
   });
 
@@ -134,7 +134,7 @@ describe('Given a served review where report mentions price, ', { skip, timeout:
     });
 
     it('then report opens.', () => {
-      assert.equal(opened.includes('report(short)'), true);
+      assert.equal(opened, 'Map/report(short)');
     });
   });
 });

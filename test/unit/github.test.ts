@@ -356,7 +356,7 @@ describe('Given a new thread GitHub rejects after starting an empty pending revi
     });
 
     it('then the empty pending review is dropped and the rejection stands.', () => {
-      assert.equal(`${mutation(gh!.calls(), 'deletePullRequestReview')}\n${error.includes('rejected') ? 'rejected' : error}`, '{"pullRequestReviewId":"PEND"}\nrejected');
+      assert.equal(`${mutation(gh!.calls(), 'deletePullRequestReview')}\n${error}`, '{"pullRequestReviewId":"PEND"}\nrejected');
     });
   });
 });

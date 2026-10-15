@@ -150,7 +150,9 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     await page!.until(`!!document.querySelector(${JSON.stringify(`.code[data-p="${file}"]`)})`);
   }
 
+  // The page is reloaded first: a save it still had waiting lands before the reset, not after.
   async function startOver(layout: 'unified' | 'split'): Promise<void> {
+    await page!.goto(url);
     await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout, showReviewedDiff: false } });
     await page!.goto(url);
     await page!.until(`!!document.querySelector('.t-head')`, 30_000);
@@ -218,6 +220,7 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
       await page!.click('[data-act="menu"][data-menu="view"]');
       await page!.until(`!!document.querySelector('[data-act="layout"]')`);
       await page!.click('[data-act="layout"]');
+      await waitForSave(page!);
       await page!.until(`!!document.querySelector('.code[data-p="lib/a.dart"] .sl.gone')`);
       gone = await read(page!, `[...document.querySelector('.code[data-p="lib/a.dart"] .sl.gone').querySelectorAll('.tick, .tx, .bdgs')].map((el) => el.matches('.tick') ? 'mark ' + el.getAttribute('aria-pressed') : el.textContent).join(' | ')`);
     });

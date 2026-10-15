@@ -173,7 +173,9 @@ describe('Given a served review of feature, its pull request, a merge of two com
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
+  // The page is reloaded first: a save it still had waiting lands before the reset, not after.
   async function resetMarks(): Promise<void> {
+    await page!.goto(url);
     await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [] } });
     await page!.goto(url);
     await page!.until(`!!document.querySelector('.t-head')`, 30_000);

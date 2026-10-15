@@ -309,13 +309,18 @@ describe('Given reviewed marks whose base changes the same line, and mergiraf is
       restore = usePath(mergiraf!.path);
       const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
-      asked = fs.readFileSync(mergiraf!.log, 'utf8');
+      // Each call's arguments, with its temporary files by name.
+      asked = fs.readFileSync(mergiraf!.log, 'utf8').trim().split('\n').map((line) => (JSON.parse(line) as string[]).map((arg) => (path.isAbsolute(arg) ? path.basename(arg) : arg)).join(' ')).join('\n');
     });
 
     after(() => restore());
 
-    it('then mergiraf keeps the mark and is asked about the file.', () => {
-      assert.equal(`${result}\n${asked.includes('lib/a.dart') ? 'lib/a.dart' : asked}`, 'reviewed the-change\nconflicts none\nlib/a.dart');
+    it('then the mark is kept.', () => {
+      assert.equal(result, 'reviewed the-change\nconflicts none');
+    });
+
+    it('then mergiraf merges the file\'s three versions once.', () => {
+      assert.equal(asked, 'merge base.dart ours.dart theirs.dart -o merged.dart -p lib/a.dart');
     });
   });
 });

@@ -138,7 +138,9 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     await page!.until(`!!document.querySelector('.t-head')`, 30_000);
   }
 
+  // The page is reloaded first: a save it still had waiting lands before the reset, not after.
   async function clearMarks(): Promise<void> {
+    await page!.goto(url);
     await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [] } });
     await fresh();
   }
@@ -914,20 +916,19 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await page!.click('[data-act="menu"][data-menu="view"]');
       await page!.until(`!!document.querySelector('[data-act="layout"]')`);
       await page!.click('[data-act="layout"]');
+      await waitForSave(page!);
       await page!.until(`document.querySelector('#viewer')?.classList.contains('split') && !!document.querySelector('.half')`);
-      layout = await read(page!, `document.querySelector('#viewer')?.classList.contains('split') && document.querySelector('.half') ? 'split' : 'unified'`);
+      layout = await read(page!, `[document.querySelector('#viewer')?.classList.contains('split') ? 'split' : 'unified', document.querySelectorAll('.code .sl .half.l').length === document.querySelectorAll('.code .sl .half.r').length ? 'left and right halves' : 'uneven halves'].join(', ')`);
     });
 
     after(async () => {
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="layout"]')`);
-      const on = await read(page!, `document.querySelector('[data-act="layout"]')?.getAttribute('aria-checked') ?? ''`);
-      if (on === 'true') await page!.click('[data-act="layout"]');
-      else await page!.key('Escape');
+      await client!.call('state', { method: 'PUT', body: { rev: { base: [] }, cmarks: [], layout: 'unified', showReviewedDiff: false } });
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
     });
 
     it('then the change is shown in two columns.', () => {
-      assert.equal(layout, 'split');
+      assert.equal(layout, 'split, left and right halves');
     });
   });
 

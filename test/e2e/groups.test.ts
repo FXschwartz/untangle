@@ -8,7 +8,7 @@ import { reviewClient, waitForReview, type ReviewClient } from '../helpers/http.
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
-import { read, rest } from './page.ts';
+import { read, rest, waitForSave } from './page.ts';
 
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
@@ -108,6 +108,7 @@ describe('Given a served review where two classes rename their field count to to
       await page!.until(`!!document.querySelector('.t-head')`, 30_000);
       await openGroupOfTheReads();
       await page!.click('.sym-h [data-act="mark-edits"]');
+      await waitForSave(page!);
       await page!.until(`(document.querySelector('.fv-head .facts')?.textContent || '').includes('to review')`);
       facts = await read(page!, `document.querySelector('.fv-head .facts')?.textContent ?? ''`);
       declarations = await read(page!, `[...document.querySelectorAll('.sym-h')].map((el) => [...el.children].map((child) => child.textContent).filter(Boolean).join(' | ')).join('\\n')`);

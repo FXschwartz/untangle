@@ -101,11 +101,21 @@ describe('Given a served review of a renamed parameter and its caller, with the 
       await page!.until(`!!document.querySelector('[data-act="peek-use"]')`);
       await page!.click('[data-act="peek-use"]');
       await page!.until(`(document.querySelector('.peek')?.textContent || '').includes('Usage')`);
-      peek = await read(page!, `document.querySelector('.peek')?.textContent ?? ''`);
+      peek = await read(page!, `[[...document.querySelector('.peek .pk-h').children].map((part) => part.textContent).filter(Boolean).join(' | '), ...[...document.querySelectorAll('.peek .pk-code .pk-ln')].map((row) => (row.matches('.hit') ? '> ' : '  ') + row.querySelector('.no')?.textContent + ' ' + (row.querySelector('.sg')?.textContent || ' ') + ' ' + row.querySelector('.tx')?.textContent)].join('\\n')`);
     });
 
     it('then the peek shows that usage.', () => {
-      assert.equal(peek.includes('Usage') && peek.includes('greet'), true);
+      assert.equal(peek, [
+        'Usage 1 of 1 | lib/app.dart:6 | not reviewed | Back to definition | Go to it | Close',
+        '  2 +   print(title);',
+        '  3   }',
+        '  4   ',
+        '  5   void main() {',
+        "> 6 +   greet('Ada');",
+        '  7   }',
+        '  8   ',
+        '  9   // pad 1',
+      ].join('\n'));
     });
   });
 
@@ -126,7 +136,7 @@ describe('Given a served review of a renamed parameter and its caller, with the 
     });
 
     it('then they are reviewed.', () => {
-      assert.equal(marked.includes('unreviewed'), true);
+      assert.equal(marked, 'Mark them unreviewed');
     });
   });
 

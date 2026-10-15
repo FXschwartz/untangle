@@ -38,17 +38,24 @@ function line(log: string, side: 'head' | 'base'): string {
   return match ? match[1] : '';
 }
 
+/** The worktree untangle makes in the cache for a commit of a directory. */
+function worktree(cache: string, directory: string, sha: string): RegExp {
+  const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped(path.join(cache, 'worktrees', 'local', path.basename(directory)))}-[0-9a-f]{8}${escaped(path.sep)}${sha.slice(0, 12)}$`);
+}
+
 describe('Given a directory on its head commit whose packages are resolved, ', { skip: skipDart }, () => {
   let repo: TempRepo;
   let cache = '';
   let directory = '';
+  let start = '';
 
   before(() => {
     const author = ada('2020-06-01T15:00:00Z');
     repo = TempRepo.create();
     repo.write('pubspec.yaml', pubspec);
     repo.write('lib/app.dart', source);
-    repo.commit({ subject: 'Start the package', author, committer: author });
+    start = repo.commit({ subject: 'Start the package', author, committer: author });
     repo.branch('feature');
     repo.write('lib/app.dart', source.replace('hi', 'hello'));
     repo.commit({ subject: 'Change the greeting', author, committer: author });
@@ -75,10 +82,12 @@ describe('Given a directory on its head commit whose packages are resolved, ', {
       }
     });
 
-    it('then the head is that directory and the base is a worktree.', () => {
-      const head = line(log, 'head');
-      const base = line(log, 'base');
-      assert.equal(`${head}\n${base.includes(`${path.sep}worktrees${path.sep}`) && base !== head ? 'worktree' : base}`, `${directory}\nworktree`);
+    it('then the head is that directory.', () => {
+      assert.equal(line(log, 'head'), directory);
+    });
+
+    it('then the base is a worktree of the base commit in the cache.', () => {
+      assert.match(line(log, 'base'), worktree(cache, directory, start));
     });
 
     it('then pub get is not run in that directory.', () => {
@@ -162,6 +171,7 @@ describe('Given a directory with uncommitted changes, ', { skip: skipDart }, () 
   let repo: TempRepo;
   let cache = '';
   let directory = '';
+  let change = '';
 
   before(() => {
     const author = ada('2020-06-01T15:00:00Z');
@@ -171,7 +181,7 @@ describe('Given a directory with uncommitted changes, ', { skip: skipDart }, () 
     repo.commit({ subject: 'Start the package', author, committer: author });
     repo.branch('feature');
     repo.write('lib/app.dart', source.replace('hi', 'hello'));
-    repo.commit({ subject: 'Change the greeting', author, committer: author });
+    change = repo.commit({ subject: 'Change the greeting', author, committer: author });
     fs.mkdirSync(path.join(repo.dir, '.dart_tool'), { recursive: true });
     fs.writeFileSync(path.join(repo.dir, '.dart_tool', 'package_config.json'), '{"configVersion":2,"packages":[]}\n');
     repo.write('lib/app.dart', source.replace('hi', 'hey'));
@@ -196,9 +206,8 @@ describe('Given a directory with uncommitted changes, ', { skip: skipDart }, () 
       }
     });
 
-    it('then the head is a worktree.', () => {
-      const head = line(log, 'head');
-      assert.equal(head !== directory && head.includes(`${path.sep}worktrees${path.sep}`) ? 'worktree' : head, 'worktree');
+    it('then the head is a worktree of the head commit in the cache.', () => {
+      assert.match(line(log, 'head'), worktree(cache, directory, change));
     });
 
     it('then pub get is not run in that directory.', () => {

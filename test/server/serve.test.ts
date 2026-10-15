@@ -16,6 +16,8 @@ interface Model {
   compares: { base: { files: Array<{ blocks: Array<{ edits: number[] }> }> } };
 }
 
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 function dartRepo(): { repo: TempRepo; head: string } {
   const repo = TempRepo.create();
   repo.write('pubspec.yaml', pubspec);
@@ -31,13 +33,14 @@ describe('Given a served review and an editor command, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
   let run: UntangleRun | undefined;
+  let client: ReviewClient | undefined;
   let cache = '';
   let dir = '';
-  let opened = '';
+  let log = '';
 
   before(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-editor-'));
-    const log = path.join(dir, 'opened.txt');
+    log = path.join(dir, 'opened.txt');
     const stub = path.join(dir, 'edit');
     fs.writeFileSync(stub, `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.writeFileSync(${JSON.stringify(log)}, process.argv.slice(2).join('\\n'));\n`, { mode: 0o755 });
     const built = dartRepo();
@@ -45,12 +48,8 @@ describe('Given a served review and an editor command, ', () => {
     gh = stubGh();
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
     run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh, args: ['-editor', `${stub} {file} {line} {col}`] });
-    const client = reviewClient(run.url);
+    client = reviewClient(run.url);
     await waitForReview(client);
-    await client.call('open', { method: 'POST', body: { side: 'head', p: 'lib/a.dart', l: 2, c: 3 } });
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline && !fs.existsSync(log)) await new Promise((resolve) => setTimeout(resolve, 50));
-    opened = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
   });
 
   after(async () => {
@@ -61,53 +60,84 @@ describe('Given a served review and an editor command, ', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('then the editor is run with the file, the line and the column.', () => {
-    const lines = opened.split('\n');
-    assert.equal(`${lines[0]?.endsWith(`${path.sep}lib${path.sep}a.dart`) ? 'file' : opened}\n${lines[1]}\n${lines[2]}`, 'file\n2\n4');
+  describe('when line 2, column 3 of lib/a.dart is opened in the editor, ', () => {
+    let opened = '';
+    let head = '';
+
+    before(async () => {
+      await client!.call('open', { method: 'POST', body: { side: 'head', p: 'lib/a.dart', l: 2, c: 3 } });
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline && !fs.existsSync(log)) await new Promise((resolve) => setTimeout(resolve, 50));
+      opened = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'the editor did not run';
+      head = ((await client!.call('roots')).data as { head: string }).head;
+    });
+
+    it('then the editor is run with the file in the head checkout, the line, and the column counted from 1.', () => {
+      assert.equal(opened, `${path.join(head, 'lib', 'a.dart')}\n2\n4`);
+    });
   });
 });
 
-describe('Given a review opened again from the cache, ', () => {
+describe('Given a review untangle built once, into its cache, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let first: UntangleRun | undefined;
-  let second: UntangleRun | undefined;
   let cache = '';
-  let roots = '';
-  let file = '';
+  let head = '';
+  let base = '';
 
   before(async () => {
     const built = dartRepo();
     repo = built.repo;
+    head = built.head;
+    base = repo.rev('main');
     gh = stubGh();
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    first = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
-    await waitForReview(reviewClient(first.url));
-    await first.stop();
-    first = undefined;
-    second = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
-    const client = reviewClient(second.url);
-    await waitForReview(client);
-    const root = await client.call('roots');
-    const data = root.data as { head?: string; base?: string };
-    const headOk = !!data.head && fs.existsSync(data.head);
-    const baseOk = !!data.base && fs.existsSync(data.base);
-    roots = headOk && baseOk ? 'open' : JSON.stringify(data);
-    const source = await client.call('file', { query: { side: 'head', p: 'lib/a.dart' } });
-    const text = (source.data as { text?: string }).text ?? '';
-    file = text.includes("print('hello')") ? 'file' : text;
+    const first = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
+    try {
+      await waitForReview(reviewClient(first.url));
+    } finally {
+      await first.stop();
+    }
   });
 
-  after(async () => {
-    await first?.stop();
-    await second?.stop();
+  after(() => {
     gh?.remove();
     repo?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
-  it('then whole files and the editor’s checkouts still open.', () => {
-    assert.equal(`${roots}\n${file}`, 'open\nfile');
+  describe('when untangle opens it again, ', () => {
+    let run: UntangleRun | undefined;
+    let roots = '';
+    let onDisk = '';
+    let text = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh });
+      const client = reviewClient(run.url);
+      await waitForReview(client);
+      const dirs = (await client.call('roots')).data as { head: string; base: string };
+      roots = `${dirs.head}\n${dirs.base}`;
+      onDisk = `${fs.existsSync(dirs.head)} ${fs.existsSync(dirs.base)}`;
+      text = ((await client.call('file', { query: { side: 'head', p: 'lib/a.dart' } })).data as { text: string }).text;
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then its checkouts are the worktrees of its head and its base in the cache.', () => {
+      const worktree = (sha: string) => `${escaped(path.join(cache, 'worktrees', 'local', path.basename(repo!.dir)))}-[0-9a-f]{8}${escaped(path.sep)}${sha.slice(0, 12)}`;
+      assert.match(roots, new RegExp(`^${worktree(head)}\\n${worktree(base)}$`));
+    });
+
+    it('then both checkouts are on disk.', () => {
+      assert.equal(onDisk, 'true true');
+    });
+
+    it('then a whole file opens from the head.', () => {
+      assert.equal(text, "void greet() {\n  print('hello');\n}\n");
+    });
   });
 });
 
@@ -224,20 +254,20 @@ describe('Given reviewed marks on a file the new base deletes, and the branch re
   });
 });
 
-describe('Given a force push whose old head is not in the review, ', () => {
+describe('Given a pull request force-pushed over a commit the review no longer has, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let run: UntangleRun | undefined;
   let cache = '';
-  let ghost = '';
   let old = '';
+  let head = '';
 
-  before(async () => {
+  before(() => {
     const built = dartRepo();
     repo = built.repo;
     repo.write('lib/a.dart', "void greet() {\n  print('dropped');\n}\n");
     old = repo.commit({ subject: 'dropped', author: ada('2020-06-03T00:00:00Z'), committer: ada('2020-06-03T00:00:00Z') });
     repo.checkout('HEAD~1');
+    head = repo.rev('HEAD');
     gh = pullRequestGh({
       number: 7,
       title: 'Add a greeting',
@@ -245,38 +275,46 @@ describe('Given a force push whose old head is not in the review, ', () => {
       base: 'main',
       baseSha: repo.rev('main'),
       head: 'feature',
-      headSha: repo.rev('HEAD'),
-      pushes: [{ actor: 'ada', before: old, after: repo.rev('HEAD'), at: '2020-06-03T15:00:00Z' }],
+      headSha: head,
+      pushes: [{ actor: 'ada', before: old, after: head, at: '2020-06-03T15:00:00Z' }],
     });
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    run = await startUntangle(repo.dir, { cacheDir: cache, gh });
-    const client: ReviewClient = reviewClient(run.url);
-    await waitForReview(client);
-    const history = await client.call('history');
-    const data = history.data as { ghosts?: Array<{ sha: string }> };
-    ghost = (data.ghosts ?? []).some((item) => item.sha === old) ? 'listed' : JSON.stringify(data.ghosts ?? history.data);
   });
 
-  after(async () => {
-    await run?.stop();
+  after(() => {
     gh?.remove();
     repo?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
-  it('then that old head is listed with the commits.', () => {
-    assert.equal(ghost, 'listed');
+  describe('when its history is asked for, ', () => {
+    let run: UntangleRun | undefined;
+    let ghosts = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { cacheDir: cache, gh });
+      const client: ReviewClient = reviewClient(run.url);
+      await waitForReview(client);
+      const history = (await client.call('history')).data as { ghosts?: unknown };
+      ghosts = JSON.stringify(history.ghosts);
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then that old head is listed: pushed over by ada, replaced by one commit, and still in the clone.', () => {
+      assert.equal(ghosts, JSON.stringify([{ sha: old, at: Date.parse('2020-06-03T15:00:00Z') / 1000, actor: 'ada', after: head, yours: false, here: true, fork: head, replaced: 1 }]));
+    });
   });
 });
 
 describe('Given a package whose dependency cannot be resolved, ', () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let run: UntangleRun | undefined;
   let cache = '';
-  let progress = '';
 
-  before(async () => {
+  before(() => {
     repo = TempRepo.create();
     repo.write('pubspec.yaml', ['name: sample', 'environment:', '  sdk: ">=3.0.0 <4.0.0"', 'dependencies:', '  missing:', '    path: ../missing_pkg', ''].join('\n'));
     repo.write('lib/a.dart', "void greet() {\n  print('hi');\n}\n");
@@ -286,21 +324,39 @@ describe('Given a package whose dependency cannot be resolved, ', () => {
     repo.commit({ subject: 'change', author: ada('2020-06-02T00:00:00Z'), committer: ada('2020-06-02T00:00:00Z') });
     gh = stubGh();
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh, quiet: false });
-    const html = await waitForReview(reviewClient(run.url));
-    const out = run.output();
-    progress = out.includes('pub get failed') && html.includes('id="d-model"') ? 'failed and served' : out;
   });
 
-  after(async () => {
-    await run?.stop();
+  after(() => {
     gh?.remove();
     repo?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
-  it('then the progress says pub get failed and the review is still served.', () => {
-    assert.equal(progress, 'failed and served');
+  describe('when it is reviewed, ', () => {
+    let run: UntangleRun | undefined;
+    let failures = '';
+    let files = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh, quiet: false });
+      const html = await waitForReview(reviewClient(run.url));
+      failures = run.output().split('\n').filter((line) => line.includes('pub get failed')).map((line) => line.trim()).sort().join('\n');
+      files = (jsonScript(html, 'd-model') as { compares: { base: { files: Array<{ p: string }> } } }).compares.base.files.map((file) => file.p).join(' ');
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the progress says pub get failed in each checkout, whose code then resolves partly.', () => {
+      const failed = (sha: string) => `pub get failed in ${escaped(path.join(cache, 'worktrees', 'local', path.basename(repo!.dir)))}-[0-9a-f]{8}${escaped(path.sep)}${sha.slice(0, 12)}; its code resolves partly`;
+      const lines = [repo!.rev('feature'), repo!.rev('main')].map(failed).sort();
+      assert.match(failures, new RegExp(`^(${lines[0]}\\n${lines[1]}|${lines[1]}\\n${lines[0]})$`));
+    });
+
+    it('then the review is still served, with its changed file.', () => {
+      assert.equal(files, 'lib/a.dart');
+    });
   });
 });
 
@@ -334,7 +390,7 @@ describe('Given a served review whose branch has not moved, ', () => {
     before(async () => {
       const refresh = await client!.call('refresh', { method: 'POST' });
       const data = refresh.data as { state?: string };
-      answer = `${data.state ?? JSON.stringify(refresh.data)}\n${run!.output().includes('up to date') ? 'up to date' : run!.output()}`;
+      answer = `${data.state ?? JSON.stringify(refresh.data)}\n${run!.output().split('\n').filter((line) => line.includes('up to date')).map((line) => line.trim()).join('\n')}`;
     });
 
     it('then it answers current and the progress says up to date.', () => {

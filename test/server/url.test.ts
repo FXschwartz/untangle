@@ -9,6 +9,7 @@ import { stubGh, type GhStub } from '../helpers/gh.ts';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
+import { slowGit, type SlowGit } from '../helpers/slow-git.ts';
 
 const ada: Person = { name: 'Ada Review', email: 'ada@example.com', date: '2020-06-01T00:00:00Z' };
 const later: Person = { ...ada, date: '2020-06-02T00:00:00Z' };
@@ -45,104 +46,171 @@ async function progressOf(client: ReviewClient): Promise<string[]> {
   throw new Error(`the review did not become ready\n${seen.join('\n')}`);
 }
 
-describe('Given a pull request URL whose repository is a local bare repo, ', () => {
-  let work: TempRepo | undefined;
-  let mirror = '';
-  let cache = '';
-  let gh: GhStub | undefined;
-  let first: UntangleRun | undefined;
-  let second: UntangleRun | undefined;
-  let base = '';
-  let head = '';
-  let next = '';
-  let env: NodeJS.ProcessEnv = {};
-  let firstProgress: string[] = [];
-  let secondProgress: string[] = [];
-  let offered = '';
+/**
+ * A repository that stands in for github.com/acme/sample: a bare repo with main and the heads of
+ * pull requests 7 and 8, and the git settings that send https://github.com/ there.
+ */
+function sampleOnGitHub(): { work: TempRepo; env: NodeJS.ProcessEnv; base: string; head: string; remove(): void } {
+  const mirror = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-mirror-'));
+  const bare = path.join(mirror, 'acme', 'sample.git');
+  fs.mkdirSync(path.dirname(bare), { recursive: true });
+  execFileSync('git', ['init', '--bare', '-b', 'main', bare], { stdio: 'ignore' });
+  const work = TempRepo.create();
+  work.write('pubspec.yaml', pubspec);
+  work.write('lib/a.dart', "void greet() {\n  print('hi');\n}\n");
+  const base = work.commit({ subject: 'start', author: ada, committer: ada });
+  work.branch('feature');
+  work.write('lib/a.dart', "void greet() {\n  print('hello');\n}\n");
+  const head = work.commit({ subject: 'change', author: later, committer: later });
+  work.remoteAdd('origin', bare);
+  work.push('origin', 'main');
+  execFileSync('git', ['-C', work.dir, 'push', 'origin', 'HEAD:refs/pull/7/head'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', work.dir, 'push', 'origin', 'HEAD:refs/pull/8/head'], { stdio: 'ignore' });
+  const env = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${mirror}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' };
+  return { work, env, base, head, remove: () => { work.remove(); fs.rmSync(mirror, { recursive: true, force: true }); } };
+}
 
-  before(async () => {
-    mirror = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-mirror-'));
-    const bare = path.join(mirror, 'acme', 'sample.git');
-    fs.mkdirSync(path.dirname(bare), { recursive: true });
-    execFileSync('git', ['init', '--bare', '-b', 'main', bare], { stdio: 'ignore' });
-    work = TempRepo.create();
-    work.write('pubspec.yaml', pubspec);
-    work.write('lib/a.dart', "void greet() {\n  print('hi');\n}\n");
-    work.commit({ subject: 'start', author: ada, committer: ada });
-    base = work.rev('HEAD');
-    work.branch('feature');
-    work.write('lib/a.dart', "void greet() {\n  print('hello');\n}\n");
-    head = work.commit({ subject: 'change', author: later, committer: later });
-    work.remoteAdd('origin', bare);
-    work.push('origin', 'main');
-    execFileSync('git', ['-C', work.dir, 'push', 'origin', `HEAD:refs/pull/7/head`], { stdio: 'ignore' });
-    execFileSync('git', ['-C', work.dir, 'push', 'origin', `HEAD:refs/pull/8/head`], { stdio: 'ignore' });
+describe('Given a pull request URL whose repository untangle has not cloned yet, ', () => {
+  let sample: ReturnType<typeof sampleOnGitHub> | undefined;
+  let gh: GhStub | undefined;
+  let git: SlowGit | undefined;
+  let cache = '';
+
+  before(() => {
+    sample = sampleOnGitHub();
+    gh = stubGh([{ match: ['pr', 'view'], stdout: view(7, sample.base, sample.head) }]);
+    git = slowGit(['clone', 'fetch']);
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    env = {
-      GIT_CONFIG_COUNT: '1',
-      GIT_CONFIG_KEY_0: `url.file://${mirror}/.insteadOf`,
-      GIT_CONFIG_VALUE_0: 'https://github.com/',
-    };
-    gh = stubGh([{ match: ['pr', 'view'], stdout: view(7, base, head) }]);
-    first = await startUntangle('https://github.com/acme/sample/pull/7', { cacheDir: cache, gh, env, quiet: false });
-    firstProgress = await progressOf(reviewClient(first.url));
   });
 
-  after(async () => {
-    await second?.stop();
-    await first?.stop();
+  after(() => {
     gh?.remove();
-    work?.remove();
-    if (mirror) fs.rmSync(mirror, { recursive: true, force: true });
+    git?.remove();
+    sample?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
   describe('when the pull request is reviewed, ', () => {
-    it('then the review is served from a clone of that repository.', () => {
-      const clone = path.join(cache, 'repos', 'github.com', 'acme', 'sample.git');
-      const lines = firstProgress.join('\n');
-      assert.equal(
-        `${first!.url.startsWith('http://127.0.0.') ? 'served' : first!.url}\n${fs.existsSync(clone) ? 'cloned' : 'missing'}\n${lines.includes('cloning acme/sample') ? 'cloning' : lines}`,
-        'served\ncloned\ncloning',
-      );
+    let run: UntangleRun | undefined;
+    let progress: string[] = [];
+    let where = '';
+    let cloned = '';
+
+    before(async () => {
+      run = await startUntangle('https://github.com/acme/sample/pull/7', { cacheDir: cache, gh, env: { ...sample!.env, PATH: `${git!.dir}${path.delimiter}${gh!.env.PATH}` }, quiet: false });
+      const client = reviewClient(run.url);
+      progress = await progressOf(client);
+      where = (jsonScript(await waitForReview(client), 'd-config') as { where: string }).where;
+      cloned = fs.existsSync(path.join(cache, 'repos', 'github.com', 'acme', 'sample.git')) ? 'cloned' : 'missing';
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the progress says it clones acme/sample, then fetches the pull request and main.', () => {
+      assert.equal(progress.filter((line) => /clon|fetch/.test(line)).join('\n'), 'cloning acme/sample (blobs on demand)\nfetching #7\nfetching main');
+    });
+
+    it('then the repository is cloned into the cache.', () => {
+      assert.equal(cloned, 'cloned');
+    });
+
+    it('then the review of that pull request is served.', () => {
+      assert.equal(where, `acme/sample · main ${sample!.base.slice(0, 7)} → ${sample!.head.slice(0, 7)}`);
     });
   });
+});
 
-  describe('when a second pull request of the same repository is reviewed, ', () => {
+describe('Given a repository untangle cloned for one of its pull requests, ', () => {
+  let sample: ReturnType<typeof sampleOnGitHub> | undefined;
+  let gh: GhStub | undefined;
+  let git: SlowGit | undefined;
+  let cache = '';
+
+  before(async () => {
+    sample = sampleOnGitHub();
+    gh = stubGh([{ match: ['pr', 'view'], stdout: view(7, sample.base, sample.head) }]);
+    git = slowGit(['clone', 'fetch']);
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    const first = await startUntangle('https://github.com/acme/sample/pull/7', { cacheDir: cache, gh, env: sample.env });
+    try {
+      await waitForReview(reviewClient(first.url));
+    } finally {
+      await first.stop();
+    }
+  });
+
+  after(() => {
+    gh?.remove();
+    git?.remove();
+    sample?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when another of its pull requests is reviewed, ', () => {
+    let run: UntangleRun | undefined;
+    let progress: string[] = [];
+
     before(async () => {
-      gh!.setReplies([{ match: ['pr', 'view'], stdout: view(8, base, head) }]);
-      second = await startUntangle('https://github.com/acme/sample/pull/8', { cacheDir: cache, gh, env, quiet: false });
-      secondProgress = await progressOf(reviewClient(second.url));
+      gh!.setReplies([{ match: ['pr', 'view'], stdout: view(8, sample!.base, sample!.head) }]);
+      run = await startUntangle('https://github.com/acme/sample/pull/8', { cacheDir: cache, gh, env: { ...sample!.env, PATH: `${git!.dir}${path.delimiter}${gh!.env.PATH}` }, quiet: false });
+      progress = await progressOf(reviewClient(run.url));
     });
 
-    it('then it fetches the pull request and does not clone again.', () => {
-      const lines = secondProgress.join('\n');
-      assert.equal(`${lines.includes('fetching') ? 'fetching' : lines}\n${lines.includes('cloning') ? 'cloned again' : 'not cloned'}`, 'fetching\nnot cloned');
+    after(async () => {
+      await run?.stop();
     });
+
+    it('then it fetches that pull request and main, without cloning again.', () => {
+      assert.equal(progress.filter((line) => /clon|fetch/.test(line)).join('\n'), 'fetching #8\nfetching main');
+    });
+  });
+});
+
+describe('Given a served review of a pull request, ', () => {
+  let sample: ReturnType<typeof sampleOnGitHub> | undefined;
+  let gh: GhStub | undefined;
+  let run: UntangleRun | undefined;
+  let cache = '';
+
+  before(async () => {
+    sample = sampleOnGitHub();
+    gh = stubGh([{ match: ['pr', 'view'], stdout: view(7, sample.base, sample.head) }]);
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle('https://github.com/acme/sample/pull/7', { cacheDir: cache, gh, env: sample.env });
+    await waitForReview(reviewClient(run.url));
+  });
+
+  after(async () => {
+    await run?.stop();
+    gh?.remove();
+    sample?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
   describe('when the pull request gains a commit, ', () => {
+    let next = '';
+    let offered = '';
+
     before(async () => {
-      work!.write('lib/a.dart', "void greet() {\n  print('hello');\n  print('again');\n}\n");
-      next = work!.commit({ subject: 'again', author: newest, committer: newest });
-      execFileSync('git', ['-C', work!.dir, 'push', '--force', 'origin', `HEAD:refs/pull/7/head`], { stdio: 'ignore' });
-      gh!.setReplies([{ match: ['pr', 'view'], stdout: view(7, base, next) }]);
-      const client = reviewClient(first!.url);
+      sample!.work.write('lib/a.dart', "void greet() {\n  print('hello');\n  print('again');\n}\n");
+      next = sample!.work.commit({ subject: 'again', author: newest, committer: newest });
+      execFileSync('git', ['-C', sample!.work.dir, 'push', '--force', 'origin', 'HEAD:refs/pull/7/head'], { stdio: 'ignore' });
+      gh!.setReplies([{ match: ['pr', 'view'], stdout: view(7, sample!.base, next) }]);
+      const client = reviewClient(run!.url);
       await client.open();
       const deadline = Date.now() + 60_000;
-      let latest = '';
       while (Date.now() < deadline) {
         const answer = await client.call('refresh', { query: { check: '1' } });
-        const data = answer.data as { latest?: string };
-        latest = data.latest ?? '';
-        if (latest === next) break;
+        offered = (answer.data as { latest?: string }).latest ?? '';
+        if (offered === next) break;
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      offered = latest === next ? 'offered' : latest;
     });
 
-    it('then the review offers those new commits.', () => {
-      assert.equal(offered, 'offered');
+    it('then the review offers that new head.', () => {
+      assert.equal(offered, next);
     });
   });
 });

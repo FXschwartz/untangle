@@ -164,11 +164,11 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await rest(page!);
       await openApp();
       await page!.until(`(document.querySelector('[data-thread="THREAD_1"]')?.textContent || '').includes('Why this name?')`);
-      under = await read(page!, `[...document.querySelectorAll('.th')].map((el) => el.textContent).join('\\n')`);
+      under = await read(page!, `[...document.querySelectorAll('.th')].map((th) => th.matches('.resolved') ? 'resolved: ' + (th.querySelector('.th-fold')?.textContent ?? '').replace(/\\s+/g, ' ').trim() : 'open: ' + [...th.querySelectorAll('.cm')].map((cm) => [cm.querySelector('.cm-who')?.textContent ?? '', ...[...cm.querySelectorAll('.cm-tag')].map((tag) => '(' + tag.textContent + ')'), '- ' + (cm.querySelector('.cm-body')?.textContent ?? '').trim()].join(' ')).join(' / ')).join('\\n')`);
     });
 
     it('then the open thread sits under the call and the resolved one is folded.', () => {
-      assert.equal(under.includes('Why this name?') && under.includes('Resolved by ada'), true);
+      assert.equal(under, 'resolved: Resolved by ada· line 2 · 1 comment\nopen: grace (Author) - Why this name?');
     });
   });
 
@@ -217,12 +217,12 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await fill(page!, '[data-thread="THREAD_1"] textarea[data-draft="reply:THREAD_1"]', 'Because it reads clearly.');
       await page!.click('[data-thread="THREAD_1"] [data-act="gh-reply"][data-mode="single"]');
       await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'Reply posted'`);
-      thread = await read(page!, `document.querySelector('[data-thread="THREAD_1"]')?.textContent ?? ''`);
+      thread = await read(page!, `(() => { const th = document.querySelector('[data-thread="THREAD_1"]'); return [...th.querySelectorAll('.cm')].map((cm) => [cm.querySelector('.cm-who')?.textContent ?? '', ...[...cm.querySelectorAll('.cm-tag')].map((tag) => '(' + tag.textContent + ')'), '- ' + (cm.querySelector('.cm-body')?.textContent ?? '').trim()].join(' ')).join('\\n'); })()`);
       sent = posted(gh!, 'addPullRequestReviewThreadReply');
     });
 
     it('then the reply is under the thread.', () => {
-      assert.equal(thread.includes('Why this name?') && thread.includes('Because it reads clearly.'), true);
+      assert.equal(thread, 'grace (Author) - Why this name?\nada - Because it reads clearly.');
     });
 
     it('then GitHub is asked to reply on that thread.', () => {
@@ -390,11 +390,11 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
       await fill(page!, '.th.new textarea.cmp-ta', '@');
       await page!.until(`document.querySelector('.mn-pop') && !document.querySelector('.mn-pop').hidden && (document.querySelector('.mn-pop')?.textContent || '').includes('grace')`);
-      suggestions = await read(page!, `document.querySelector('.mn-pop')?.textContent ?? ''`);
+      suggestions = await read(page!, `[...document.querySelectorAll('.mn-pop [data-mn]')].map((item) => [...item.children].map((part) => part.textContent).filter(Boolean).join(' | ') || item.textContent).join('\\n')`);
     });
 
     it('then the people on the pull request are suggested.', () => {
-      assert.equal(suggestions.includes('grace'), true);
+      assert.equal(suggestions, 'grace');
     });
   });
 
@@ -408,11 +408,11 @@ describe('Given a served review of pull request 7, with an open thread on the ca
       await page!.until(`!!document.querySelector('.th.new textarea.cmp-ta')`);
       await fill(page!, '.th.new textarea.cmp-ta', '#12');
       await page!.until(`(document.querySelector('.mn-pop')?.textContent || '').includes('The name')`);
-      suggestions = await read(page!, `document.querySelector('.mn-pop')?.textContent ?? ''`);
+      suggestions = await read(page!, `[...document.querySelectorAll('.mn-pop [data-mn]')].map((item) => [...item.children].map((part) => part.textContent).filter(Boolean).join(' | ') || item.textContent).join('\\n')`);
     });
 
     it('then issue 12 is suggested.', () => {
-      assert.equal(suggestions.includes('#12') && suggestions.includes('The name'), true);
+      assert.equal(suggestions, '#12 | The name');
     });
   });
 

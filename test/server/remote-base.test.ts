@@ -9,6 +9,7 @@ import { stubGh, type GhStub } from '../helpers/gh.ts';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
+import { slowGit, type SlowGit } from '../helpers/slow-git.ts';
 
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
 
@@ -58,25 +59,11 @@ function staleClone(origin: TempRepo): { repo: TempRepo; oldMain: string; newMai
   return { repo, oldMain, newMain };
 }
 
-/** A git that pauses on fetch, so the progress line stays up long enough to read. */
-function slowGit(): { dir: string; remove(): void } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-git-'));
-  const real = execFileSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-  const script = [
-    '#!/usr/bin/env bash',
-    'for arg in "$@"; do if [ "$arg" = fetch ]; then sleep 0.3; break; fi; done',
-    `exec ${JSON.stringify(real)} "$@"`,
-    '',
-  ].join('\n');
-  fs.writeFileSync(path.join(dir, 'git'), script, { mode: 0o755 });
-  return { dir, remove: () => fs.rmSync(dir, { recursive: true, force: true }) };
-}
-
 describe('Given a clone whose origin main has moved and whose branch has no pull request, ', () => {
   let origin: TempRepo | undefined;
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
-  let gitBin: ReturnType<typeof slowGit> | undefined;
+  let gitBin: SlowGit | undefined;
   let cache = '';
   let newMain = '';
 
@@ -86,7 +73,7 @@ describe('Given a clone whose origin main has moved and whose branch has no pull
     repo = built.repo;
     newMain = built.newMain;
     gh = stubGh();
-    gitBin = slowGit();
+    gitBin = slowGit(['fetch']);
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
   });
 

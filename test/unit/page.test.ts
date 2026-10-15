@@ -33,11 +33,17 @@ describe('Given a review whose data contains "</script>", ', () => {
       html = reviewPage(data, 'A <review>', 'served')(config);
     });
 
-    it('then the review is one document and that text cannot close the script.', () => {
-      const model = modelScript(html);
-      assert.equal(model.includes('<'), false);
-      assert.equal(model.includes('\\u003c/script>'), true);
-      assert.equal(html.includes('id="d-history"'), true);
+    it('then that text cannot close the script it is in.', () => {
+      assert.equal(modelScript(html).includes('<'), false);
+    });
+
+    it('then the text reads back as it was.', () => {
+      const model = JSON.parse(modelScript(html)) as { compares: { base: { note: string } } };
+      assert.equal(model.compares.base.note, '</script><script>alert(1)</script>');
+    });
+
+    it('then every data script is still in the one document, in order.', () => {
+      assert.equal([...html.matchAll(/<script[^>]*id="([^"]+)"/g)].map((match) => match[1]).join(' '), 'd-config d-model d-defs d-refs d-defs-old d-history');
     });
 
     it('then every placeholder is replaced.', () => {
@@ -45,7 +51,7 @@ describe('Given a review whose data contains "</script>", ', () => {
     });
 
     it('then the title is in the document.', () => {
-      assert.equal(html.includes('<title>A &lt;review&gt; · untangle</title>'), true);
+      assert.equal(/<title>([^<]*)<\/title>/.exec(html)?.[1], 'A &lt;review&gt; · untangle');
     });
   });
 });
