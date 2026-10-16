@@ -1222,8 +1222,9 @@
   // the editor's URL template.
   function editorTarget(loc) {
     if (!CONFIG.served || !CONFIG.editor) return null;
+    if (CONFIG.editor.mode === 'orca' && (!loc.side || !loc.p)) return null;
     const line = loc.line || 1, col = loc.col || 0;
-    if (CONFIG.editor.mode === 'command') return { data: { act: 'open-editor', side: loc.side || '', p: loc.p || '', ext: loc.ext != null ? loc.ext : '', line, col } };
+    if (CONFIG.editor.mode === 'command' || CONFIG.editor.mode === 'orca') return { data: { act: 'open-editor', side: loc.side || '', p: loc.p || '', ext: loc.ext != null ? loc.ext : '', line, col } };
     let abs = loc.abs || null;
     if (!abs && loc.side && loc.p) {
       if (!CONFIG.roots) {
@@ -1239,9 +1240,11 @@
   function editorHtml(loc) {
     const t = editorTarget(loc);
     if (!t) return '';
-    return t.href ? `<a class="btn xs" href="${esc(t.href)}" title="${esc(t.title)}">Open in editor</a>` : `<button type="button" class="btn xs"${dataAttrs(t.data)}>Open in editor</button>`;
+    const label = editorLabel();
+    return t.href ? `<a class="btn xs" href="${esc(t.href)}" title="${esc(t.title)}">Open in editor</a>` : `<button type="button" class="btn xs"${dataAttrs(t.data)}>${label}</button>`;
   }
-  const editorItem = (loc) => { const t = editorTarget(loc); return t ? { label: 'Open in editor', icon: ICON.goToFile, href: t.href, title: t.title, data: t.data } : null; };
+  const editorLabel = () => CONFIG.editor && CONFIG.editor.mode === 'orca' ? 'Open working copy in Orca' : 'Open in editor';
+  const editorItem = (loc) => { const t = editorTarget(loc); return t ? { label: editorLabel(), icon: ICON.goToFile, href: t.href, title: t.title, data: t.data } : null; };
 
   // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains, the head commit's "Changes
   // from". One at a time, under the button that opened it; items are the page's usual buttons

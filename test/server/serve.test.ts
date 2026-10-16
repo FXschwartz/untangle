@@ -48,7 +48,7 @@ describe('Given a served review and an editor command, ', () => {
     repo = built.repo;
     gh = stubGh();
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh, args: ['-editor', `${stub} {file} {line} {col}`] });
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh, args: ['-editor', `${stub} {file} {line} {col}`], env: { ORCA_CLI_COMMAND: 'must-not-run' } });
     client = reviewClient(run.url);
     await waitForReview(client);
   });

@@ -8,7 +8,7 @@ import { Metrics } from './metrics.js';
 import type { PageConfig } from './page.js';
 import { ghReady, GitHubError, PullRequestConversation, type Action, type CommitFacts } from './github.js';
 import { broughtBy, hasCommit, reviewedHead, sinceRows, type History } from './history.js';
-import { gitAsync, gitMaybe } from './exec.js';
+import { gitAsync, gitMaybe, runAsync } from './exec.js';
 import { fileHunks, generatedPatterns } from './pipeline/diff.js';
 import { writeAtomic } from './server.js';
 import { Snapshot, snapshotBranch } from './snapshot.js';
@@ -24,12 +24,14 @@ interface Edit { id: number; b: string }
 interface Block { id: string; edits: number[] }
 
 /** How the page opens a location in the editor: a link it builds, or a command untangle runs. */
-export type Editor = { mode: 'uri'; template: string } | { mode: 'command'; template: string };
+export type Editor = { mode: 'uri'; template: string } | { mode: 'command'; template: string } | { mode: 'orca'; command: string };
 
-/** The editor from -editor or UNTANGLE_EDITOR, else VS Code's link (through WSL when untangle runs in it). */
+/** Explicit editor settings win; inside Orca use its CLI, otherwise a VS Code link. */
 export function editorFrom(option: string | null): Editor {
   const t = option || process.env.UNTANGLE_EDITOR || '';
   if (t) return t.includes('://') ? { mode: 'uri', template: t } : { mode: 'command', template: t };
+  const orca = process.env.ORCA_CLI_COMMAND || (process.env.ORCA_DEV_REPO_ROOT ? 'orca-dev' : process.env.ORCA_WORKTREE_ID ? (process.platform === 'linux' ? 'orca-ide' : 'orca') : null);
+  if (orca) return { mode: 'orca', command: orca };
   const wsl = process.env.WSL_DISTRO_NAME;
   return { mode: 'uri', template: wsl ? `vscode://vscode-remote/wsl+${wsl}{file}:{line}:{col}` : 'vscode://file{file}:{line}:{col}' };
 }
@@ -174,7 +176,7 @@ export class ReviewSession {
       where: this.page.where,
       state: { rev: { base: this.rev() }, cmarks: [...this.cmarks], layout: this.view.layout, showReviewedDiff: this.view.showReviewedDiff },
       roots,
-      editor: this.editor.mode === 'uri' ? { mode: 'uri', template: this.editor.template } : { mode: 'command' },
+      editor: this.editor.mode === 'uri' ? { mode: 'uri', template: this.editor.template } : { mode: this.editor.mode },
       snapshot: this.snapshotInfo,
       lines: this.lines,
       github: !this.target.pr ? null : this.github ? { number: this.target.pr.number, url: this.target.pr.url } : { off: 'Comments from GitHub need the gh command line, logged in (gh auth login).' },
@@ -260,8 +262,25 @@ export class ReviewSession {
       return { data: { files: changedSince(this.target.repo, from, this.target.headSha) } };
     }
     if (route === 'open' && method === 'POST') {
-      if (this.editor.mode !== 'command') return { status: 400, data: { error: 'no editor command: start untangle with -editor' } };
+      if (this.editor.mode === 'uri') return { status: 400, data: { error: 'no editor command: start untangle with -editor' } };
       const b = (body || {}) as { side?: string; p?: string; ext?: number; l?: number; c?: number };
+      if (this.editor.mode === 'orca') {
+        // Orca opens files inside a managed worktree, not the cached analysis checkouts.
+        // Select the reviewed repository explicitly: the terminal may belong to a different one.
+        if (!b.p || (b.side !== 'head' && b.side !== 'base') || path.isAbsolute(b.p) || b.p.split(/[\\/]/).includes('..')) {
+          return { status: 400, data: { error: 'Orca can open the working copy of a file in this review’s repository.' } };
+        }
+        const file = path.join(this.target.repo, b.p);
+        if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+          return { status: 404, data: { error: 'This file is absent from the working copy. Its reviewed version is available in the review page.' } };
+        }
+        try {
+          await runAsync(this.editor.command, ['file', 'open', '--path', b.p, '--worktree', 'path:' + this.target.repo, '--focus', '--json'], { cwd: this.target.repo });
+          return { data: { opened: file } };
+        } catch (e) {
+          return { status: 502, data: { error: `Orca could not open the file: ${(e as Error).message}` } };
+        }
+      }
       const file = await this.live.absolute(b);
       if (!file) return { status: 404, data: { error: 'not a file of this review' } };
       openInEditor(this.editor.template, file, b.l || 1, b.c || 0);
