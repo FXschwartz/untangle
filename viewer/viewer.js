@@ -1257,7 +1257,7 @@
     const label = editorLabel();
     return t.href ? `<a class="btn xs" href="${esc(t.href)}" title="${esc(t.title)}">Open in editor</a>` : `<button type="button" class="btn xs"${dataAttrs(t.data)}>${label}</button>`;
   }
-  const editorLabel = () => CONFIG.editor && CONFIG.editor.mode === 'orca' ? 'Open working copy in Orca' : 'Open in editor';
+  const editorLabel = () => CONFIG.editor && CONFIG.editor.mode === 'orca' ? 'Open in Orca' : 'Open in editor';
   const editorItem = (loc) => { const t = editorTarget(loc); return t ? { label: editorLabel(), icon: ICON.goToFile, href: t.href, title: t.title, data: t.data } : null; };
 
   // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains, the head commit's "Changes
