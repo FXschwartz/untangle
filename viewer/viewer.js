@@ -912,8 +912,8 @@
   // Every peek uses the same bounded code viewport. Served reviews fill it with the whole
   // file, keeping the saved snippet useful while the file (or an external path) is loading.
   function peekCodeHtml(t, fallback, usage) {
-    const v = { side: t.side, path: t.p, ext: t.ext };
-    const canLoad = CONFIG.served && (t.side || t.ext != null);
+    const v = { side: t.side, path: t.p, ext: t.ext, commit: t.commit };
+    const canLoad = CONFIG.served && (t.side || t.ext != null || t.commit);
     const source = canLoad ? loadSource(v, true) : null;
     const full = source && source.status === 'ok';
     const lines = full ? source.lines : t.code || [];
@@ -925,7 +925,7 @@
       const ln = start + i;
       const row = usage && M().head.get(t.p + ':' + ln);
       const added = row && row.r.t === '+';
-      const live = canLoad ? { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } : null;
+      const live = canLoad && !t.commit ? { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } : null;
       return `<div class="pk-ln${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
     }).join('');
     const note = source && source.status === 'error' ? `<div class="pk-foot">${esc(source.error)} · showing the saved snippet</div>` : '';
@@ -978,7 +978,18 @@
     if (t.side === 'head' && M().head.has(t.p + ':' + t.l)) h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
     return h;
   }
+  function historyPeekHtml(p) {
+    const v = p.history;
+    const s = CONFIG.served ? loadSource({ commit: v.sha, path: v.path }, true) : { status: 'error', error: 'This saved page does not contain files at earlier commits. Open the served review to read them.' };
+    const where = s.deleted ? `Before deletion in ${shortSha(v.sha)}` : `At ${shortSha(v.sha)}`;
+    const head = `<div class="pk-h"><b>File</b><span class="pk-loc">${esc(v.path)}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`;
+    if (s.status !== 'ok') return head + `<div class="pk-foot">${s.status === 'loading' ? 'Loading the file…' : esc(s.error)}</div>`;
+    const code = peekCodeHtml({ p: v.path, commit: v.sha, l: s.line });
+    const current = M().files.some((f) => f.p === v.path) || M().generated.some((f) => f.p === v.path);
+    return head + code + (current ? `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(v.path)}">Go to it in this review</button></div>` : '');
+  }
   function peekHtml(p) {
+    if (p.history) return '<div class="peek" role="region" aria-label="Peek">' + historyPeekHtml(p) + '</div>';
     if (p.live) return '<div class="peek" role="region" aria-label="Peek">' + livePeekHtml(p) + '</div>';
     let h = '<div class="peek" role="region" aria-label="Peek">';
     const hasDef = p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti);
@@ -1353,7 +1364,7 @@
   }
   function closeMenu() { if (MENU.open) { MENU.open = null; renderMenu(); } }
   const sources = new Map();
-  const srcKey = (v) => (v.ext != null ? 'ext:' + v.ext : v.side + ':' + v.path);
+  const srcKey = (v) => (v.commit ? 'commit:' + v.commit + ':' + v.path : v.ext != null ? 'ext:' + v.ext : v.side + ':' + v.path);
   let pendingLine = null;
   // A whole file from untangle. When it arrives, the view that showed it loading shows it, with
   // the line on screen kept where it was. `wanted`: a view is waiting for it (else it's loaded ahead).
@@ -1366,11 +1377,11 @@
     }
     const s = { status: 'loading', wanted: !!wanted };
     sources.set(key, s);
-    const q = new URLSearchParams(v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
-    api('file?' + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+    const q = new URLSearchParams(v.commit ? { sha: v.commit, p: v.path } : v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
+    api((v.commit ? 'commit-file?' : 'file?') + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => {
         const lines = j.text === '' ? [] : j.text.replace(/\r?\n$/, '').split(/\r?\n/);
-        Object.assign(s, { status: 'ok', text: j.text, lines, count: lines.length, abs: j.abs, generated: j.generated });
+        Object.assign(s, { status: 'ok', text: j.text, lines, count: lines.length, abs: j.abs, generated: j.generated, line: j.line, deleted: j.deleted, revision: j.revision });
       })
       .catch((e) => Object.assign(s, { status: 'error', error: e.message }))
       .then(() => {
@@ -2629,18 +2640,6 @@
   }
   // The first line a commit wrote in a file, at the head (a removed line's: the line after it, or
   // the line before it when the file ends there).
-  function firstLineOf(f, ci) {
-    for (let hi = 0; hi < f.hunks.length; hi++) {
-      const h = f.hunks[hi];
-      for (let ri = 0; ri < h.rows.length; ri++) {
-        if (h.rows[ri][0] === ' ' || rowCommit(f, hi, ri) !== ci) continue;
-        for (let k = ri; k < h.meta.length; k++) if (h.meta[k].n != null) return h.meta[k].n;
-        for (let k = ri - 1; k >= 0; k--) if (h.meta[k].n != null) return h.meta[k].n;
-        return null;
-      }
-    }
-    return null;
-  }
   const FILE_STATUS = { A: 'added', M: 'changed', D: 'deleted', R: 'renamed', C: 'copied', T: 'changed in type' };
   function detailFileHtml(x, sha, depth, g, flat) {
     const at = x.p.lastIndexOf('/');
@@ -2652,8 +2651,7 @@
     const title = `${x.p}${x.from ? `, from ${x.from}` : ''}: ${FILE_STATUS[x.s] || x.s}, ${where}`;
     const inner = `${g}${mark}<span class="nm">${name}${from}</span><span class="cnt">${lines}</span>`;
     const cls = `sb-row tr s-${x.s.toLowerCase()}${x.gen ? ' gen' : ''}`;
-    if (!x.f && !x.gen) return `<div class="${cls} away" style="--d:${depth}" title="${esc(title)}">${inner}</div>`;
-    return `<button type="button" class="${cls}" data-act="hd-open" data-p="${esc(x.p)}" data-sha="${sha}" style="--d:${depth}" title="${esc(title + (x.total ? '. Click for them, this commit’s lines alone' : '. Click to open it'))}">${inner}</button>`;
+    return `<button type="button" class="${cls}${!x.f && !x.gen ? ' away' : ''}" data-act="hd-open" data-p="${esc(x.p)}" data-sha="${sha}" style="--d:${depth}" title="${esc(title + '. Click to read the file here, at this commit')}">${inner}</button>`;
   }
   // As a tree, folders first; a folder that holds only a folder shows with it, as in the Files tab.
   function detailFilesHtml(list, sha) {
@@ -2697,7 +2695,7 @@
     const fh = `<div class="hd-fh">${plural(list.length + (c.more || 0), 'file')}${list.length && !c.more ? ` · <span class="a">+${fmt(adds)}</span> <span class="d">−${fmt(dels)}</span>` : ''}${against}</div>`;
     const files = list.length ? detailFilesHtml(list, c.sha) + (c.more ? `<div class="hd-more">and ${fmt(c.more)} more</div>` : '') : '<div class="hd-more">No files changed</div>';
     const rail = `<div class="hd-rail">${iconBtn(ICON.close, 'Close (Esc)', 'data-act="hd-close"')}${iconBtn(ICON.listTree, 'Files as a tree', 'data-act="hd-view" data-v="tree"', { label: 'Files as a tree', on: !UI.filesList })}${iconBtn(ICON.listFlat, 'Files as a list', 'data-act="hd-view" data-v="list"', { label: 'Files as a list', on: !!UI.filesList })}</div>`;
-    return `<div class="hs-detail" data-detail-of="${c.sha}">${lanes}<div class="hd-in"><div class="hd-info"><dl class="hd-facts">${facts}</dl>${msg}${acts}</div><div class="hd-files">${fh}<div role="group" aria-label="The files it changed">${files}</div></div>${rail}</div></div>`;
+    return `<div class="hs-detail" data-detail-of="${c.sha}">${lanes}<div class="hd-in"><div class="hd-info"><dl class="hd-facts">${facts}</dl>${msg}${acts}</div><div class="hd-files">${fh}<div role="group" aria-label="The files it changed">${files}</div></div>${rail}${state.peek && state.peek.history && state.peek.history.sha === c.sha ? peekHtml(state.peek) : ''}</div></div>`;
   }
   function renderHistory() {
     if (!hxOn()) return headerHtml({ crumbs: '<b class="ui">History</b>' }) + '<div class="empty">git couldn’t tell this review’s commits.</div>';
@@ -4137,12 +4135,13 @@
       return setLens(cur && cur.kind === 'commits' && cur.shas.length === 1 && cur.shas[0] === d.sha ? null : { kind: 'commits', shas: [d.sha] });
     }
     if (act === 'hd-review') { state.lens = { kind: 'commits', shas: [d.sha] }; lensMemo = null; navAt = null; HX.anchor = HX.index.get(d.sha); return lensGo(); }
-    // A commit's file: its lines from that commit, the commit as the lens.
+    // Read a commit's file in place; the graph, expanded commit and current lens stay put.
     if (act === 'hd-open') {
-      const ci = HX.index.get(d.sha), f = M().files.find((x) => x.p === d.p);
-      if (!f || ci == null || !commitParts()[ci].some((b) => b.file === f)) return openFile(d.p);
-      state.lens = { kind: 'commits', shas: [d.sha] }; lensMemo = null; navAt = null; HX.anchor = ci;
-      return openFile(d.p, f.s === 'D' ? null : firstLineOf(f, ci));
+      state.peek = { history: { sha: d.sha, path: d.p } };
+      render();
+      const peek = main.querySelector('.hs-detail .peek');
+      if (peek) peek.scrollIntoView({ block: 'nearest' });
+      return;
     }
     if (act === 'brought') {
       const sha = d.sha;

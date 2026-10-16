@@ -493,8 +493,8 @@ describe('Given a served review of feature, its pull request, a merge of two com
       assert.equal(header, `2 files ${dot} +2 ${minus}0 ${dot} against ${short('Add a binary')}, its first parent`);
     });
 
-    it('then files outside the review are dimmed and not clickable.', () => {
-      assert.equal(files, 'DIV away extra.dart\nDIV away note.dart');
+    it('then files outside the final diff are dimmed and can be read at this commit.', () => {
+      assert.equal(files, 'BUTTON away extra.dart\nBUTTON away note.dart');
     });
   });
 
@@ -505,12 +505,12 @@ describe('Given a served review of feature, its pull request, a merge of two com
       await rest(page!);
       await details(page!, sha['Add a nested file']);
       await page!.click('[data-act="hd-open"][data-p="lib/only/nested/added.dart"]');
-      await page!.until(`(() => { const main = document.querySelector('#vw-main')?.getBoundingClientRect(); const row = document.querySelector('.code[data-p="lib/only/nested/added.dart"] [data-n="1"]')?.getBoundingClientRect(); return !!main && !!row && row.top >= main.top - 2 && row.top < main.top + 280; })()`);
-      opened = await read(page!, `[${topBar}, 'on screen'].join('\\n')`);
+      await page!.until(`!!document.querySelector('.hs-detail .peek .pk-ln[data-n="1"]')`);
+      opened = await read(page!, `[document.querySelector('.fv-head .crumbs')?.textContent, document.querySelector('.peek .pk-loc')?.textContent, document.querySelector('.peek .pk-src')?.textContent].join('\\n')`);
     });
 
-    it('then the file opens under that commit\'s lens, at its first line.', () => {
-      assert.equal(opened, `${short('Add a nested file')} ${dot} Add a nested file\non screen`);
+    it('then the file opens inside the expanded commit, keeping History in view.', () => {
+      assert.equal(opened, `History\nlib/only/nested/added.dart\nAt ${short('Add a nested file')}`);
     });
   });
 

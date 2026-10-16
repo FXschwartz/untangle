@@ -217,6 +217,22 @@ export class ReviewSession {
       const target = await this.live.definition(where(), Number(q.get('l')), Number(q.get('c')));
       return { data: { target } };
     }
+    if (route === 'commit-file' && method === 'GET') {
+      const p = q.get('p') || '';
+      const commit = this.history?.commits.find((c) => c.sha === q.get('sha'));
+      const file = commit?.files.find((f) => this.history!.paths[f[0]] === p);
+      if (!commit || !file) return { status: 404, data: { error: 'not a file changed by this commit' } };
+      const deleted = file[1] === 'D';
+      const parent = gitMaybe(this.target.repo, 'rev-parse', `${commit.sha}^1`)?.trim();
+      const revision = deleted && parent ? parent : commit.sha;
+      const out = this.live.fileAt(revision, p);
+      if ('error' in out) return { status: 404, data: out };
+      const hunk = parent ? fileHunks(this.target.repo, parent, commit.sha, p)[0] : null;
+      let line = hunk ? (deleted ? hunk.o : hunk.n) : 1;
+      if (hunk) for (const row of hunk.l) { if (row[0] !== ' ') break; line++; }
+      line = Math.max(1, Math.min(line, out.text.replace(/\n$/, '').split('\n').length));
+      return { data: { ...out, revision, deleted, line } };
+    }
     if (route === 'file' && method === 'GET') {
       const w = where();
       const out = await this.live.file(w);

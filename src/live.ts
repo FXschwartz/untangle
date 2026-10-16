@@ -168,13 +168,21 @@ export class LiveSession {
     }
     if ((where.side !== 'head' && where.side !== 'base') || !where.p) return { error: 'which file?' };
     const sha = where.side === 'head' ? this.target.headSha : this.target.baseSha;
-    const size = Number(gitMaybe(this.target.repo, 'cat-file', '-s', `${sha}:${where.p}`)?.trim());
-    if (!size && size !== 0) return { error: `${where.p} doesn't exist at ${sha.slice(0, 7)}` };
-    if (size > MAX_FILE) return { error: `${Math.round(size / 1024)} KB: too large to show` };
-    const text = git(this.target.repo, 'show', `${sha}:${where.p}`);
-    if (text.slice(0, 8000).includes('\0')) return { error: 'a binary file' };
+    const out = this.fileAt(sha, where.p);
+    if ('error' in out) return out;
     const abs = this.dirs ? path.join(where.side === 'head' ? this.dirs.headDir : this.dirs.baseDir, where.p) : null;
-    return { text, abs };
+    return { ...out, abs };
+  }
+
+  /** A file at a revision already authorized by the session, also used by commit peeks. */
+  fileAt(sha: string, p: string): { text: string; abs: null } | { error: string } {
+    const rawSize = gitMaybe(this.target.repo, 'cat-file', '-s', `${sha}:${p}`);
+    if (rawSize == null) return { error: `${p} doesn't exist at ${sha.slice(0, 7)}` };
+    const size = Number(rawSize.trim());
+    if (size > MAX_FILE) return { error: `${Math.round(size / 1024)} KB: too large to show` };
+    const text = git(this.target.repo, 'show', `${sha}:${p}`);
+    if (text.slice(0, 8000).includes('\0')) return { error: 'a binary file' };
+    return { text, abs: null };
   }
 
   /**
