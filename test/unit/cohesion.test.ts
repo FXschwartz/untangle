@@ -60,7 +60,7 @@ void main() {
     it('then the cross-file dependency and recursive helpers form one connected chain of whole units.', () => {
       assert.ok(chain);
       assert.deepEqual(new Set(chain.graph.nodes.map((node: any) => node.member)), new Set([
-        'Reader', 'Decoder', '_first', '_second', 'A reader decodes text',
+        'Reader', 'Decoder', '_first', '_second', 'A reader decodes text', 'Setup and groups',
       ]));
       assert.equal(chain.files, 3);
       for (const node of chain.graph.nodes) {
@@ -143,10 +143,12 @@ void main() {
 
     after(() => review?.remove());
 
-    it('then shared use of the new API does not manufacture a change-propagation chain.', () => {
-      assert.equal(model.chains.length, 0);
+    it('then both scenarios attach to one implementation chain as complete reading units.', () => {
+      assert.equal(model.chains.length, 1);
       assert.deepEqual(model.units.filter((unit: any) => unit.kind === 'test').map((unit: any) => unit.name), ['Read once', 'Read again']);
-      assert.ok(model.units.some((unit: any) => unit.name === 'Source'));
+      const chain = model.chains[0];
+      assert.equal(chain.name, 'Source');
+      assert.ok(model.units.every((unit: any) => unit.blocks.every((id: string) => chain.blocks.includes(id))));
     });
   });
 });
@@ -354,11 +356,14 @@ void main() {
       assert.notEqual(tests[0].id, tests[1].id);
     });
 
-    it('then the shared fixture remains a reading unit instead of owning its consumers.', () => {
+    it('then the shared fixture and both scenarios follow the implementation they validate.', () => {
       const fixture = model.units.find((u: any) => u.name === 'Fixture');
+      const chain = model.chains.find((chain: any) => chain.name === 'value');
 
       assert.ok(fixture);
-      assert.equal(model.chains.some((chain: any) => chain.blocks.some((id: string) => fixture.blocks.includes(id))), false);
+      assert.ok(chain);
+      assert.ok(fixture.blocks.every((id: string) => chain.blocks.includes(id)));
+      assert.ok(model.units.filter((unit: any) => unit.kind === 'test').every((unit: any) => unit.blocks.every((id: string) => chain.blocks.includes(id))));
       assert.equal(model.chains.some((chain: any) => chain.name === 'value_test.dart'), false);
     });
   });
@@ -388,6 +393,221 @@ describe('Given a custom generator mapping and a new model with two fields, ', {
 
       assert.equal(unit.kind, 'model');
       assert.deepEqual(new Set(unit.blocks), new Set(blocks.map((block: any) => block.id)));
+    });
+  });
+});
+
+describe('Given independent APIs with nested setup, shared helpers, and a test of both APIs, ', { skip }, () => {
+  describe('when their new tests are attached to implementations, ', () => {
+    let review: BuiltReview;
+    let model: any;
+    let left: any;
+    let right: any;
+
+    before(async () => {
+      review = await buildDartReview({
+        base: {
+          'test/support.dart': `void test(String name, void Function() body) {}
+void group(String name, void Function() body) {}
+void setUp(void Function() body) {}
+`,
+        },
+        head: {
+          'lib/left.dart': 'class Left {\n  int read() => 1;\n}\n',
+          'lib/right.dart': 'class Right {\n  int read() => 2;\n}\n',
+          'test/behavior_test.dart': `import '../lib/left.dart';
+import '../lib/right.dart';
+import 'support.dart';
+
+int readLeft() => Left().read();
+
+int readRight() => Right().read();
+
+void verify(int value) {
+  print(value);
+}
+
+void main() {
+  group('Shared context', () {
+    final inherited = 10;
+
+    group('Left behavior', () {
+      late int result;
+
+      setUp(() {
+        result = readLeft();
+      });
+
+      test('Left result', () {
+        verify(result + inherited);
+      });
+
+      test('Second left result', () {
+        verify(result);
+      });
+    });
+
+    group('Right behavior', () {
+      late int result;
+
+      setUp(() {
+        result = readRight();
+      });
+
+      test('Right result', () {
+        verify(result + inherited);
+      });
+    });
+
+    test('Both behaviors', () {
+      verify(readLeft() + readRight());
+    });
+  });
+}
+`,
+          'test/unrelated_test.dart': `import 'support.dart';
+
+void main() {
+  test('Left behavior', () {
+    print(42);
+  });
+}
+`,
+        },
+      });
+      model = review.data.model.compares.base;
+      left = model.chains.find((chain: any) => chain.name === 'Left');
+      right = model.chains.find((chain: any) => chain.name === 'Right');
+    });
+
+    after(() => review?.remove());
+
+    const names = (chain: any) => chain.graph.nodes.map((node: any) => node.member);
+
+    it('then each assertion-only scenario follows its own setup and helper to the relevant API.', () => {
+      assert.ok(left);
+      assert.ok(right);
+      assert.ok(names(left).includes('Left result'));
+      assert.ok(names(left).includes('Second left result'));
+      assert.ok(names(left).includes('Setup: Left behavior'));
+      assert.ok(names(left).includes('readLeft'));
+      assert.ok(names(right).includes('Right result'));
+      assert.ok(names(right).includes('Setup: Right behavior'));
+      assert.ok(names(right).includes('readRight'));
+      assert.ok(!names(left).includes('Right result'));
+      assert.ok(!names(left).includes('Setup: Right behavior'));
+      assert.ok(!names(right).includes('Left result'));
+      assert.ok(!names(right).includes('Setup: Left behavior'));
+    });
+
+    it('then the shared scenario and assertion helper are complete in both implementation chains.', () => {
+      const shared = model.units.filter((unit: any) => ['Both behaviors', 'verify', 'Setup: Shared context'].includes(unit.name));
+      assert.equal(shared.length, 3);
+      for (const unit of shared) {
+        assert.ok(unit.blocks.every((id: string) => left.blocks.includes(id)));
+        assert.ok(unit.blocks.every((id: string) => right.blocks.includes(id)));
+      }
+    });
+
+    it('then shared validation does not merge independent implementations or their families.', () => {
+      assert.equal(model.chains.length, 2);
+      assert.notEqual(left.family, right.family);
+      assert.deepEqual(left.uses, []);
+      assert.deepEqual(right.uses, []);
+      assert.deepEqual(left.shares, []);
+      assert.deepEqual(right.shares, []);
+      assert.ok(!names(left).includes('Right'));
+      assert.ok(!names(right).includes('Left'));
+    });
+
+    it('then a similarly named test without a dependency stays outside both chains.', () => {
+      const unrelated = model.units.filter((unit: any) => unit.file === 'test/unrelated_test.dart');
+      assert.ok(unrelated.some((unit: any) => unit.kind === 'test'));
+      assert.ok(unrelated.every((unit: any) => unit.blocks.every((id: string) => !left.blocks.includes(id) && !right.blocks.includes(id))));
+    });
+  });
+});
+
+describe('Given existing scenarios with matching assertion edits and separate changed setups, ', { skip }, () => {
+  describe('when the existing behaviors and assertions change, ', () => {
+    let review: BuiltReview;
+    let model: any;
+    let left: any;
+    let right: any;
+
+    before(async () => {
+      const tests = `import '../lib/left.dart';
+import '../lib/right.dart';
+import 'support.dart';
+
+void main() {
+  group('Left', () {
+    late int result;
+
+    setUp(() {
+      result = 1;
+    });
+
+    test('Left result', () {
+      print(result + 10);
+    });
+  });
+
+  group('Right', () {
+    late int result;
+
+    setUp(() {
+      result = 3;
+    });
+
+    test('Right result', () {
+      print(result + 10);
+    });
+  });
+
+  test('Direct left', () {
+    print(left() + 10);
+  });
+}
+`;
+      review = await buildDartReview({
+        base: {
+          'lib/left.dart': 'int left() => 1;\n',
+          'lib/right.dart': 'int right() => 3;\n',
+          'test/support.dart': `void test(String name, void Function() body) {}
+void group(String name, void Function() body) {}
+void setUp(void Function() body) {}
+`,
+          'test/behavior_test.dart': tests,
+        },
+        head: {
+          'lib/left.dart': 'int left() => 2;\n',
+          'lib/right.dart': 'int right() => 4;\n',
+          'test/behavior_test.dart': tests.replace('result = 1;', 'result = left();')
+            .replace('result = 3;', 'result = right();').replaceAll('+ 10', '+ 20'),
+        },
+      });
+      model = review.data.model.compares.base;
+      left = model.chains.find((chain: any) => chain.name === 'left');
+      right = model.chains.find((chain: any) => chain.name === 'right');
+    });
+
+    after(() => review?.remove());
+
+    const scenarios = (chain: any) => new Set(model.files.flatMap((file: any) => file.blocks)
+      .filter((block: any) => chain.blocks.includes(block.id) && block.test).map((block: any) => block.test));
+
+    it('then each assertion follows only its own changed setup despite the identical edit.', () => {
+      assert.ok(left);
+      assert.ok(right);
+      assert.ok(scenarios(left).has('Left result'));
+      assert.ok(!scenarios(left).has('Right result'));
+      assert.deepEqual(scenarios(right), new Set(['Right result']));
+      assert.notEqual(left.family, right.family);
+    });
+
+    it('then an unchanged call on a changed assertion line still links to its changed implementation.', () => {
+      assert.ok(scenarios(left).has('Direct left'));
     });
   });
 });

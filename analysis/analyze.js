@@ -766,7 +766,10 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
       const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
       const u = plusRow.get(p + ':' + line);
-      if (!u || !tpath.startsWith(HEAD) || !(changedCol(u.r, col) || rebound(u, col))) continue;
+      if (!u || !u.b.atoms.length || !tpath.startsWith(HEAD)) continue;
+      // Updating an expectation still validates the call beside it, even if the call's
+      // spelling stayed the same. Production ripples still require a changed reference.
+      if (!(isTestFile(p) || changedCol(u.r, col) || rebound(u, col))) continue;
       const rel = tpath.slice(HEAD.length);
       const gl = genLink(tpath, HEAD, tl + 1, tc);
       if (gl !== undefined) {
@@ -775,7 +778,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         continue;
       }
       const d = plusRow.get(rel + ':' + (tl + 1));
-      if (d) {
+      if (d?.b.atoms.length) {
         if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc));
         else {
           // A parameter used only inside its own change: no use, but it can still name the
@@ -1222,6 +1225,20 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       return false;
     });
 
+    // Scoped setup is a test dependency, not an implementation owner. Add it after the
+    // existing-code ripple pass so group registration cannot combine unrelated behaviors.
+    const addSetup = (block, context) => {
+      for (const setup of context || []) {
+        const key = 'setup:' + setup.id;
+        addUse({ b: block }, key, () => ({
+          key, name: setup.name, kind: 'setup', member: setup.name,
+          block: [...setup.blocks][0], users: new Set(), file: setup.file, line: setup.start,
+        }));
+      }
+    };
+    for (const unit of units) addSetup([...unit.blocks][0], unit.context);
+    for (const block of allBlocks) addSetup(block, block.context);
+
     // These are candidate nodes, not sidebar entries. Complete declarations and scenarios
     // enter chains only through dependencies; sharing a file does not establish a chain.
     for (const unit of units) {
@@ -1245,7 +1262,10 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     const owned = new Set(chains.flatMap((chain) => [...chain.blocks]));
     byMember.forEach((blocks) => {
       const remaining = blocks.filter((block) => !owned.has(block));
-      const callsNew = remaining.some((block) => [...(usesOf.get(block) || new Map()).keys()].some((key) => decls.get(key).block.unit));
+      const callsNew = remaining.some((block) => [...(usesOf.get(block) || new Map()).keys()].some((key) => {
+        const declaration = decls.get(key);
+        return declaration.kind !== 'setup' && declaration.block.unit;
+      }));
       const calledByNew = [...decls.values()].some((declaration) => remaining.includes(declaration.block) && [...declaration.users].some((block) => block.unit));
       if (!callsNew && !calledByNew) return;
       const first = remaining[0];
@@ -1260,7 +1280,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     chains.forEach((chain) => {
       chain.support = chain.root ? isTestFile(chain.root.file) : [...chain.blocks].every((block) => isTestFile(block.file.p));
     });
-    chains = assembleIntroducedChains(chains, usesOf, decls);
+    chains = assembleIntroducedChains(chains, usesOf, decls, isTestFile, files.flatMap((file) => file.blocks));
 
     const namesOf = (c) => {
       const out = new Set();
@@ -1309,6 +1329,27 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     chains.sort((x, y) => y.blocks.size - x.blocks.size || (x.name < y.name ? -1 : 1));
     chains.forEach((c, i) => { c.id = i; c.files = new Set([...c.blocks].map((b) => b.file.p)).size; });
 
+    // Shared validation appears in several chains. Index its changed references once;
+    // rescanning every token for every dependency in every chain repeats the same work.
+    const referenceLines = new Map();
+    const changedReferences = (block) => {
+      if (referenceLines.has(block)) return referenceLines.get(block);
+      const targets = new Map();
+      for (const row of block.rows) {
+        if (row.type !== '+') continue;
+        for (const token of row.toks) {
+          if (!token.atom) continue;
+          const target = defsRaw[`${block.file.p}:${row.n}:${token.c}`];
+          if (!target?.[0].startsWith(HEAD)) continue;
+          const key = `${target[0].slice(HEAD.length)}:${target[1] + 1}`;
+          if (!targets.has(key)) targets.set(key, new Set());
+          targets.get(key).add(row.n);
+        }
+      }
+      referenceLines.set(block, targets);
+      return targets;
+    };
+
     // Graph per chain: nodes are members; blocks whose edits are all one same-change group
     // that appears 3+ times in the chain collapse into one node, and the tests of one test file
     // are one node.
@@ -1351,10 +1392,9 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         (usesOf.get(b) || new Map()).forEach((_, dk) => {
           const d = decls.get(dk);
           if (!c.blocks.has(d.block)) return;
-          b.rows.forEach((r) => {
-            if (r.type !== '+') return;
-            if (r.toks.some((tk) => tk.atom && defsRaw[`${b.file.p}:${r.n}:${tk.c}`] && defsRaw[`${b.file.p}:${r.n}:${tk.c}`][0] === HEAD + d.file && defsRaw[`${b.file.p}:${r.n}:${tk.c}`][1] === d.line - 1)) (c.focus[b.id] = c.focus[b.id] || new Set()).add(r.n);
-          });
+          for (const line of changedReferences(b).get(`${d.file}:${d.line}`) || []) {
+            (c.focus[b.id] = c.focus[b.id] || new Set()).add(line);
+          }
         });
       });
       const rootKey = c.root ? nodeOf.get(c.root.block) : [...nodes.keys()][0];
@@ -1392,13 +1432,13 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       });
       c.links = [...links].sort((x, y) => x - y);
       c.shares = new Set();
-      chains.forEach((o) => { if (o !== c && [...c.blocks].some((b) => o.blocks.has(b))) c.shares.add(o.id); });
+      chains.forEach((o) => { if (o !== c && [...c.blocks].some((b) => !isTestFile(b.file.p) && o.blocks.has(b))) c.shares.add(o.id); });
     });
     // A chain's core is the changes of its root's member (all its changes when it has no root).
     // Chain A uses chain B when A's core uses a function, method, field or type of B's core.
     chains.forEach((c) => {
       const mk = c.root ? c.root.block.memberKey : null;
-      c.core = new Set([...c.blocks].filter((b) => b.unit || !mk || b.memberKey === mk));
+      c.core = new Set([...c.blocks].filter((b) => (c.support || !isTestFile(b.file.p)) && (b.unit || !mk || b.memberKey === mk)));
     });
     chains.forEach((c) => {
       c.uses = new Set();

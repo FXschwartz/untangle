@@ -181,16 +181,19 @@ void main() {
 
   describe('when its first scenario is folded with neighboring code in view, ', () => {
     let pill: string;
+    let setup: number;
 
     before(async () => {
       await browser.click(`[data-chain="${suite}"]`);
       const key = await read(browser, `[...document.querySelectorAll('.sec-h > b')].find(el => el.textContent === 'The same title').closest('.sec').querySelector('[data-act="toggle-hunk"]').dataset.key`);
       await browser.click(`[data-act="toggle-hunk"][data-key="${key}"]`);
       pill = await read(browser, `document.querySelector('.pill-n').textContent`);
+      setup = Number(await browser.eval(`[...document.querySelectorAll('.sec-h > b')].filter(el => el.textContent === 'Setup and groups').length`));
     });
 
-    it('then the function and the two scenarios still count as three tasks.', () => {
-      assert.match(pill, /^\d of 3$/);
+    it('then the function, setup, and two scenarios each count once.', () => {
+      assert.equal(setup, 1);
+      assert.match(pill, /^\d of 4$/);
     });
   });
 });

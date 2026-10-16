@@ -159,12 +159,45 @@ export function readingUnits(files, modelPatterns = []) {
 
     units.push(...outer.filter((unit) => [...unit.blocks].some((block) => block.edits.length)));
 
-    if (isTestFile && file.s === 'A') {
-      const blocks = file.blocks.filter((block) => !block.unit);
-      if (blocks.some((block) => block.edits.length)) {
-        const setup = { id: `${file.p}:setup`, file: file.p, kind: 'setup', name: 'Setup and groups', start: 1, end: source.length, blocks: new Set(blocks) };
-        blocks.forEach((block) => { block.unit = setup; });
-        units.push(setup);
+    if (isTestFile) {
+      const groups = file.structure
+        ? file.structure.scenarios.filter((scenario) => scenario.name === 'group')
+        : file.newTree.rootNode.descendantsOfType('expression_statement').flatMap((node) => {
+          const call = testCall(node);
+          return call?.kind === 'group' ? [{ title: call.title, startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 }] : [];
+        });
+      const scopes = [
+        ...groups.sort((a, b) => (a.endLine - a.startLine) - (b.endLine - b.startLine)),
+        { title: null, startLine: 1, endLine: source.length },
+      ];
+      const setups = new Map();
+      const setupBlocks = file.blocks.filter((block) => block.edits.length && !block.unit && !block.move && !block.movedTo
+        && !block.test && (!block.member || block.member === 'main')
+        && block.rows.some((row) => row.type === '+'));
+      for (const block of setupBlocks) {
+        const rows = block.rows.filter((row) => row.type === '+' && !/^[\s{}();,]*$/.test(row.text));
+        const scope = scopes.find((scope) => rows.length && rows.every((row) => row.n >= scope.startLine && row.n <= scope.endLine)) || scopes.at(-1);
+        if (!setups.has(scope)) setups.set(scope, {
+          id: `${file.p}:setup${scope.title == null ? '' : ':' + scope.startLine}`, file: file.p,
+          kind: 'setup', name: scope.title == null ? 'Setup and groups' : 'Setup: ' + scope.title,
+          start: scope.startLine, end: scope.endLine, blocks: new Set(),
+        });
+        const setup = setups.get(scope);
+        block.unit = setup;
+        setup.blocks.add(block);
+      }
+      units.push(...[...setups.values()].filter((setup) => [...setup.blocks].some((block) => block.edits.length)));
+
+      // A scenario runs with its enclosing group's setup, including inherited setup.
+      // Sibling groups never become dependencies merely because they share a file.
+      for (const unit of units.filter((unit) => unit.file === file.p && ['test', 'setup'].includes(unit.kind))) {
+        unit.context = [...setups.values()].filter((setup) => setup !== unit && setup.start <= unit.start && setup.end >= unit.end
+          && [...setup.blocks].some((block) => block.edits.length));
+      }
+      for (const block of file.blocks.filter((block) => !block.unit && block.test)) {
+        const lines = block.rows.filter((row) => row.type === '+').map((row) => row.n);
+        block.context = [...setups.values()].filter((setup) => lines.length && lines.every((line) => line >= setup.start && line <= setup.end)
+          && [...setup.blocks].some((block) => block.edits.length));
       }
     }
   }

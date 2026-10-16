@@ -1,6 +1,6 @@
 // A reading unit is not a chain. Assemble introduced units through resolved dependencies,
 // stopping at shared dependencies so a utility does not collect independent consumers.
-export function assembleIntroducedChains(chains, usesOf, decls) {
+export function assembleIntroducedChains(chains, usesOf, decls, isTestFile, allBlocks) {
   const owner = new Map(chains.map((chain) => [chain, chain]));
   const current = (chain) => {
     while (owner.get(chain) !== chain) {
@@ -20,12 +20,13 @@ export function assembleIntroducedChains(chains, usesOf, decls) {
   const dependencies = new Map(chains.map((chain) => [chain, new Set()]));
   const unownedUsers = new Set();
   for (const [block, uses] of usesOf) {
-    const consumers = blockOwners.get(block);
+    const consumers = new Set([...(blockOwners.get(block) || [])].filter((chain) => !!chain.support === isTestFile(block.file.p)));
     for (const key of uses.keys()) {
       const declaration = decls.get(key);
       // String matches and common overrides do not establish implementation ownership.
       if (declaration.str || declaration.overrides) continue;
       for (const provider of blockOwners.get(declaration.block) || []) {
+        if (!!provider.support !== isTestFile(declaration.block.file.p)) continue;
         if (!consumers?.size) unownedUsers.add(provider);
         for (const consumer of consumers || []) {
           if (consumer !== provider) dependencies.get(consumer).add(provider);
@@ -44,17 +45,15 @@ export function assembleIntroducedChains(chains, usesOf, decls) {
   };
   const graph = () => {
     const active = chains.filter((chain) => current(chain) === chain);
-    const uses = new Map(active.map((chain) => [chain, new Set()]));
     const users = new Map(active.map((chain) => [chain, new Set()]));
     for (const [consumer, providers] of dependencies) {
       for (const provider of providers) {
         const from = current(consumer), to = current(provider);
         if (from === to) continue;
-        uses.get(from).add(to);
         users.get(to).add(from);
       }
     }
-    return { active, uses, users };
+    return { active, users };
   };
 
   // Mutually dependent new declarations belong together. Condensing cycles first makes
@@ -115,19 +114,60 @@ export function assembleIntroducedChains(chains, usesOf, decls) {
     }
   }
 
-  // A complete new scenario can follow a changed existing behavior. For entirely new
-  // code, require an exclusive relationship in both directions: many tests using a new
-  // fixture or API do not make one change-propagation chain.
-  const { active, uses, users } = graph();
-  for (const chain of active) {
-    if (chain.kind !== 'declaration' || !chain.support) continue;
-    if (![...chain.blocks].some((block) => block.unit?.kind === 'test')) continue;
-    const targets = new Set([...uses.get(chain)].map(current).filter((target) => !target.support));
-    if (targets.size !== 1) continue;
-    const target = [...targets][0];
-    if (target.kind === 'declaration' && [...users.get(target)].filter((user) => user.support).length !== 1) continue;
-    merge(chain, target);
+  // Validation follows scenarios and helpers, not test chains: a same-change group can
+  // contain independent scenarios, and is not a dependency between those scenarios.
+  const { active } = graph();
+  const supportNodes = new Map(), supportOf = new Map(), implementations = new Map();
+  for (const block of allBlocks) {
+    if (!isTestFile(block.file.p)) continue;
+    const member = block.test || (block.member && block.member !== 'main');
+    const key = block.unit || (member ? block.memberKey : block);
+    if (!supportNodes.has(key)) supportNodes.set(key, { blocks: new Set(), uses: new Set(), targets: new Set() });
+    const node = supportNodes.get(key);
+    node.blocks.add(block);
+    supportOf.set(block, node);
+  }
+  for (const chain of active.filter((chain) => !chain.support)) {
+    for (const block of chain.blocks) {
+      if (isTestFile(block.file.p)) continue;
+      if (!implementations.has(block)) implementations.set(block, new Set());
+      implementations.get(block).add(chain);
+    }
+  }
+  for (const [block, uses] of usesOf) {
+    const node = supportOf.get(block);
+    if (!node) continue;
+    for (const key of uses.keys()) {
+      const declaration = decls.get(key);
+      if (declaration.str || declaration.overrides) continue;
+      const support = supportOf.get(declaration.block);
+      if (support && support !== node) node.uses.add(support);
+      for (const target of implementations.get(declaration.block) || []) node.targets.add(target);
+    }
   }
 
-  return chains.filter((chain) => current(chain) === chain);
+  // A shared test validates each implementation independently. Include its complete
+  // test context, but stop before following any implementation's own dependencies.
+  const attached = new Set();
+  for (const node of supportNodes.values()) {
+    const context = new Set(), targets = new Set(), pending = [node];
+    while (pending.length) {
+      const dependency = pending.pop();
+      if (context.has(dependency)) continue;
+      context.add(dependency);
+      pending.push(...dependency.uses);
+      for (const target of dependency.targets) targets.add(target);
+    }
+
+    for (const target of targets) {
+      for (const support of context) {
+        for (const block of support.blocks) {
+          target.blocks.add(block);
+          attached.add(block);
+        }
+      }
+    }
+  }
+
+  return active.filter((chain) => !chain.support || ![...chain.blocks].every((block) => attached.has(block)));
 }

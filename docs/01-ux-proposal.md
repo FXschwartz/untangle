@@ -117,6 +117,8 @@ From the review of v11:
    to new declarations inside existing files too. Fully added `test(...)` and `testWidgets(...)`
    calls are complete scenarios, identified by source position and labeled with the whole
    title, including adjacent string literals.
+   - Changed test setup is grouped by its enclosing `group(...)` scope. Nested scenarios
+     inherit enclosing setup; sibling groups retain separate context.
    - Existing declarations retain their smaller change blocks. Rewriting all their lines
      does not make them introduced declarations; moved code keeps its move representation.
    - Reading units sit above the original blocks and edits. Their IDs, saved review marks,
@@ -184,13 +186,16 @@ From the review of v11:
       one component before ownership is evaluated. Shared dependencies do not combine
       their otherwise independent consumers. No file name, PR metadata or size target
       determines membership.
-    - Test scenarios and helpers are whole units too. Test infrastructure does not own
-      production code. A scenario can join the changed existing behavior it exercises
-      when that target is unambiguous. For a wholly new implementation, the test and its
-      production target must also have an exclusive relationship; shared use of a new
-      fixture or API does not establish change propagation.
-    - A unit can belong to at most one chain and is never split between chains. Units
-      outside chains remain available by file, with the same saved marks and navigation.
+    - Validation is independent of implementation ownership. Scenarios follow resolved
+      references through their scoped setup and helpers, stopping at each changed
+      implementation. Multiple tests can validate one API, and one test can validate
+      multiple APIs. An unchanged call on a changed assertion line still counts.
+    - Implementation units have one owner. A complete test or helper can appear in each
+      implementation chain it validates, retaining the same block IDs and review marks.
+      Shared test context does not merge production chains or their families. Traversal
+      follows individual scenarios and helpers, never a same-change group's membership.
+    - Units are never split between chains. Units without a resolved connection remain
+      available by file, with the same saved marks and navigation.
     - A removed type's member chains still fold into that type, scoped to its file.
 11. **Overrides.** The language server says what each changed method overrides
     (`dart/textDocument/super`).

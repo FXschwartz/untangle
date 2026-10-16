@@ -22,6 +22,8 @@ if (!manifestPath || !outputPath || !baselineModule) {
 const baselineAnalyze = (await import(pathToFileURL(path.resolve(baselineModule)).href)).analyze;
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { cases: Case[] };
 fs.mkdirSync(outputPath, { recursive: true });
+const isTestFile = (file: string) => !/\.(md|markdown|rst|pen)$/i.test(file)
+  && /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/.test(file);
 
 function metrics(model: any, reviewed: Set<string>) {
   const blocks = model.files.flatMap((file: any) => file.blocks).filter((block: any) => block.edits.length);
@@ -43,6 +45,9 @@ function metrics(model: any, reviewed: Set<string>) {
     singleNodeChains: model.chains.filter((chain: any) => chain.graph.nodes.length === 1).length,
     newCodeFileLocalChains: model.chains.filter((chain: any) => chain.kind === 'declaration' && chain.files === 1).length,
     outside: reading(blocks.filter((block: any) => !linked.has(block.id))),
+    outsideTests: reading(model.files.filter((file: any) => isTestFile(file.p)).flatMap((file: any) => file.blocks)
+      .filter((block: any) => block.edits.length && !linked.has(block.id))),
+    outsideScenarios: model.units.filter((unit: any) => unit.kind === 'test' && unit.blocks.every((id: string) => !linked.has(id))).length,
     largestFamily: Math.max(0, ...families.values()),
     largestChains: model.chains.map((chain: any) => ({
       name: chain.name, files: chain.files,
@@ -63,17 +68,19 @@ function atomIdentity(model: any) {
 }
 
 function verifyUnits(model: any) {
-  const blocks = new Map<string, any>(model.files.flatMap((file: any) => file.blocks.map((block: any) => [block.id, block])));
+  const blocks = new Map<string, any>(model.files.flatMap((file: any) => file.blocks.map((block: any) => [block.id, { ...block, file: file.p }])));
   for (const unit of model.units) {
     const owners = model.chains.filter((chain: any) => chain.blocks.some((id: string) => unit.blocks.includes(id)));
-    assert.ok(owners.length <= 1, `${unit.file}: ${unit.name} must not be duplicated across chains`);
+    assert.ok(isTestFile(unit.file) || owners.length <= 1, `${unit.file}: ${unit.name} must not have multiple implementation owners`);
     assert.ok(unit.blocks.every((id: string) => blocks.get(id)?.unit === unit.id), `${unit.name} must retain its block ownership`);
     if (!owners.length) continue;
 
-    assert.ok(unit.blocks.every((id: string) => owners[0].blocks.includes(id)), `${unit.name} must be complete`);
-    const nodes = owners[0].graph.nodes.filter((node: any) => node.unit === unit.id);
-    assert.equal(nodes.length, 1, `${unit.name} must be one graph node`);
-    assert.deepEqual(new Set(nodes[0].blocks), new Set(unit.blocks));
+    for (const owner of owners) {
+      assert.ok(unit.blocks.every((id: string) => owner.blocks.includes(id)), `${unit.name} must be complete`);
+      const nodes = owner.graph.nodes.filter((node: any) => node.unit === unit.id);
+      assert.equal(nodes.length, 1, `${unit.name} must be one graph node`);
+      assert.deepEqual(new Set(nodes[0].blocks), new Set(unit.blocks));
+    }
   }
   for (const chain of model.chains) {
     assert.ok(chain.graph.nodes.length > 1, `${chain.name} must connect more than one node`);
@@ -81,7 +88,7 @@ function verifyUnits(model: any) {
     assert.ok(changes.size > 1, `${chain.name} must contain more than one reading unit`);
     if (chain.kind !== 'declaration') continue;
 
-    assert.ok(chain.blocks.every((id: string) => blocks.get(id)?.unit), `${chain.name} must contain complete introduced units`);
+    assert.ok(chain.blocks.every((id: string) => blocks.get(id)?.unit || isTestFile(blocks.get(id)?.file || '')), `${chain.name} must contain complete introduced implementation units`);
     assert.ok(chain.files > 1, `${chain.name}: file-local new code is not a chain`);
     const reached = new Set<string>([chain.graph.root]);
     let previous = 0;
@@ -150,11 +157,16 @@ for (const [index, item] of manifest.cases.entries()) {
   const answers = JSON.parse(fs.readFileSync(item.answers, 'utf8'));
   const input = {
     repo: answers.headDir, headDir: answers.headDir, diff: answers.diff,
-    defsRaw: answers.defs.raw, old: { base: { dir: answers.baseDir, raw: answers.defsOld.raw } },
+    defsRaw: answers.defs.raw, structure: answers.structure,
+    old: { base: { dir: answers.baseDir, raw: answers.defsOld.raw, structure: answers.structureOld } },
     calls: answers.calls, supers: answers.supers,
   };
+  const started = performance.now();
   const before = (await baselineAnalyze(input)).compares.base;
+  const baselineMs = performance.now() - started;
+  const changed = performance.now();
   const after = (await analyze(input)).compares.base;
+  const analysisMs = performance.now() - changed;
   const failures: string[] = [];
   let introducedTypes = 0;
   try {
@@ -171,7 +183,7 @@ for (const [index, item] of manifest.cases.entries()) {
   const comparison = answers.diff.compares.base;
   const result = {
     name: item.name, base: comparison.left, head: comparison.right,
-    answers: path.resolve(item.answers),
+    answers: path.resolve(item.answers), baselineMs, analysisMs,
     before: metrics(before, reviewed), after: metrics(after, reviewed), introducedTypes, failures,
     examples: after.units.filter((unit: any) => unit.kind === 'type' || unit.kind === 'model').slice(0, 12),
   };

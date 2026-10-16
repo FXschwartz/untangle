@@ -2828,5 +2828,257 @@
       "pill": "1 of 3",
       "progress": "88changes to review"
     }
-  ]
+  ],
+  "testAttachmentValidation": {
+    "date": "2026-10-16",
+    "baseline": "b5a8360",
+    "method": "Replay the same retained analyzer or LSP facts on all 13 pinned public PR snapshots. Preserve atomic edits and marks; allow complete test units in multiple validation contexts while keeping one owner per implementation unit.",
+    "sourceHashes": {
+      "analysis/analyze.js": "40c4163aa831175efbc4e5c6d9986f17551525ed3a43e82d8b5e5a5344669559",
+      "analysis/chains.js": "b45f3675fc856bbc7f8f84b32a0be2db136131679afccf2a713784a46b9cbbd1",
+      "analysis/units.js": "39a375db52f641ee020850fcd37e81b4b0f51a1973e1206040075ddc7e569e6d",
+      "bench/cohesion.ts": "a5b60d7f47459dddadef00f4bdea923a0d3bbcfa838b634a86b6104f7cbb7983",
+      "viewer/viewer.js": "99c6f6a6d1dad50c0356bfba48367bcc61896640da07d6b29745c17d7c83b025"
+    },
+    "samples": [
+      {
+        "name": "fix/sync-merge-admission against main · 30c5b79",
+        "base": "ebf93852c73477ebd057f39fe6227071e38f7680",
+        "head": "30c5b79e9031dbdab3594ca0fe5b07375561e6c7",
+        "before": {
+          "chains": 10,
+          "outsideTests": 17,
+          "outsideScenarios": 13
+        },
+        "after": {
+          "chains": 10,
+          "outsideTests": 0,
+          "outsideScenarios": 0
+        },
+        "failures": []
+      },
+      {
+        "name": "#5866 feat: Add `serverpod doctor` command · b70d235",
+        "base": "7645c5b5d9fcd5fa7adb24ceff342368ed9628a3",
+        "head": "b70d2354aa2a85e6b21644336f1fdb23a02b3459",
+        "before": {
+          "chains": 4,
+          "outsideTests": 74,
+          "outsideScenarios": 51
+        },
+        "after": {
+          "chains": 6,
+          "outsideTests": 8,
+          "outsideScenarios": 3
+        },
+        "failures": []
+      },
+      {
+        "name": "#5869 feat: Add passwordless OTP login to the email identity provider · 20822a0",
+        "base": "c738d28aace22c3bea6e6a9e6c05b398ce035f31",
+        "head": "20822a0dbea4544304334e0d2db0c69104db181d",
+        "before": {
+          "chains": 28,
+          "outsideTests": 52,
+          "outsideScenarios": 44
+        },
+        "after": {
+          "chains": 36,
+          "outsideTests": 0,
+          "outsideScenarios": 0
+        },
+        "failures": []
+      },
+      {
+        "name": "#5868 Reuse the cached upgrade prompt only for the CLI version that wrote it · 974a676",
+        "base": "c738d28aace22c3bea6e6a9e6c05b398ce035f31",
+        "head": "974a676947dbdbb553a8db3dc5fc14074ca4d9cf",
+        "before": {
+          "chains": 1,
+          "outsideTests": 4,
+          "outsideScenarios": 2
+        },
+        "after": {
+          "chains": 1,
+          "outsideTests": 4,
+          "outsideScenarios": 2
+        },
+        "failures": []
+      },
+      {
+        "name": "#5864 feat: Expose the runner log file through a `tail_runner_logs` MCP tool · 5a3750e",
+        "base": "d65d22e0ede6318fbd10e2df6291b1d3b1e048b2",
+        "head": "5a3750e4feea045ec1df8efd057de73bb3cfd429",
+        "before": {
+          "chains": 7,
+          "outsideTests": 3,
+          "outsideScenarios": 3
+        },
+        "after": {
+          "chains": 6,
+          "outsideTests": 0,
+          "outsideScenarios": 0
+        },
+        "failures": []
+      },
+      {
+        "name": "#5864 feat: Expose the runner log file through a `tail_runner_logs` MCP tool · ac5ee48",
+        "base": "d65d22e0ede6318fbd10e2df6291b1d3b1e048b2",
+        "head": "ac5ee483441009492411585799b1b9aec69560de",
+        "before": {
+          "chains": 5,
+          "outsideTests": 1,
+          "outsideScenarios": 1
+        },
+        "after": {
+          "chains": 4,
+          "outsideTests": 1,
+          "outsideScenarios": 1
+        },
+        "failures": []
+      },
+      {
+        "name": "offline_sync #168",
+        "base": "e0598c1577db2d55c9af7d0d165be6332256910d",
+        "head": "a45f9aee30bcb170b863373840e63a0e42a0092b",
+        "before": {
+          "chains": 40,
+          "outsideTests": 111,
+          "outsideScenarios": 63
+        },
+        "after": {
+          "chains": 40,
+          "outsideTests": 10,
+          "outsideScenarios": 0
+        },
+        "failures": []
+      },
+      {
+        "name": "offline_sync #157",
+        "base": "65bcfb72d7c76ffec79b603702f48b0a34f47131",
+        "head": "405e7097ea821207e66a95b35560aa1f4711464f",
+        "before": {
+          "chains": 8,
+          "outsideTests": 16,
+          "outsideScenarios": 10
+        },
+        "after": {
+          "chains": 8,
+          "outsideTests": 0,
+          "outsideScenarios": 0
+        },
+        "failures": []
+      },
+      {
+        "name": "offline_sync #166",
+        "base": "3a4ada5baf2b677156d4eae0cbe3f4d5b8255a39",
+        "head": "79f3cb5e3ca7f6c6ed041411a0f4971b9bbef12d",
+        "before": {
+          "chains": 6,
+          "outsideTests": 28,
+          "outsideScenarios": 15
+        },
+        "after": {
+          "chains": 3,
+          "outsideTests": 1,
+          "outsideScenarios": 0
+        },
+        "failures": []
+      },
+      {
+        "name": "offline_sync #162",
+        "base": "de3498aa209e852fd3c040b3572e64d155704fa4",
+        "head": "499dc1f49977f9b1f0042c13cc836f6927741856",
+        "before": {
+          "chains": 6,
+          "outsideTests": 22,
+          "outsideScenarios": 16
+        },
+        "after": {
+          "chains": 6,
+          "outsideTests": 19,
+          "outsideScenarios": 16
+        },
+        "failures": []
+      },
+      {
+        "name": "serverpod #5706",
+        "base": "c738d28aace22c3bea6e6a9e6c05b398ce035f31",
+        "head": "3040ac91bbb14279e81aa1a8879ed189852fb256",
+        "before": {
+          "chains": 25,
+          "outsideTests": 54,
+          "outsideScenarios": 31
+        },
+        "after": {
+          "chains": 29,
+          "outsideTests": 17,
+          "outsideScenarios": 2
+        },
+        "failures": []
+      },
+      {
+        "name": "serverpod #5471",
+        "base": "75758185b9d54d9980fbf32b8895790ddb7cba32",
+        "head": "c0c5219ad0b1003c5c556a4333fc99729ef0bbc3",
+        "before": {
+          "chains": 8,
+          "outsideTests": 36,
+          "outsideScenarios": 21
+        },
+        "after": {
+          "chains": 7,
+          "outsideTests": 8,
+          "outsideScenarios": 3
+        },
+        "failures": []
+      },
+      {
+        "name": "serverpod #5630",
+        "base": "2e30f60ef55cbad0ae796fbd6f954106eb5f3618",
+        "head": "0053e21ac9f518261cbdb0364139fde5d1e6fd79",
+        "before": {
+          "chains": 40,
+          "outsideTests": 39,
+          "outsideScenarios": 22
+        },
+        "after": {
+          "chains": 52,
+          "outsideTests": 14,
+          "outsideScenarios": 8
+        },
+        "failures": []
+      }
+    ],
+    "checks": {
+      "atomicEditsAndGeneratedHandlingUnchanged": true,
+      "completeUnitsInEveryOwningChain": true,
+      "oneImplementationOwnerPerUnit": true,
+      "introducedChainNodesConnected": true,
+      "singleChangeChains": 0,
+      "singleNodeChains": 0,
+      "newCodeFileLocalChains": 0,
+      "typecheck": "passed",
+      "completeSuite": {
+        "tests": 535,
+        "passed": 535,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "browserObservations": [
+      {
+        "name": "OfflineSyncSpaceManager.getOrCreateUserNode",
+        "sections": 137,
+        "pill": "1 of 138"
+      },
+      {
+        "name": "CustomClassAnalyzer",
+        "sections": 39,
+        "pill": "1 of 39"
+      }
+    ],
+    "limitations": "Test-related item counts also include setup, helpers, existing test edits, and fixture assets. A dependency link is static review context, not proof of runtime test coverage."
+  }
 }
