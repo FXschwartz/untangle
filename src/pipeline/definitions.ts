@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { RawDefinitions } from '../../analysis/analyze.js';
 import type { DartServer, Location } from '../lsp/dart.js';
 import type { Positions } from './positions.js';
+import { ModelDefinitions } from '../model-definitions.js';
 
 export interface Target {
   /** Path: relative to the checkout, inside a package, or dart:… for the SDK. */
@@ -63,8 +64,9 @@ export async function definitions(server: DartServer, root: string, positions: P
 /** Builds the compact peek index from resolved facts without retaining the analyzer AST. */
 export function definitionCollector(root: string): {
   data: Definitions;
-  add(p: string, line: number, col: number, len: number, res: Location): void;
+  add(p: string, line: number, col: number, len: number, res: Location | null): void;
 } {
+  const models = new ModelDefinitions(root);
   const targets: Target[] = [], index = new Map<string, number>(), files = new Map<string, string[] | null>();
   const lines = (file: string) => {
     if (!files.has(file)) {
@@ -81,18 +83,21 @@ export function definitionCollector(root: string): {
   return {
     data: { targets, defs, raw },
     add(p, line, col, len, res) {
+      const original = res;
+      res = models.resolve(path.join(root, p), line - 1, col, res) || res;
+      if (!res) return;
       const key = `${res.path}\n${res.line}\n${res.col}`;
       if (!index.has(key)) {
         const src = lines(res.path) || [];
         // The snippet starts at the doc comments and annotations above the definition.
         let start = res.line;
-        while (start > 0 && start > res.line - 6 && /^(\/\/\/|@)/.test((src[start - 1] || '').trim())) start--;
+        while (start > 0 && start > res.line - 6 && /^(\/\/\/|@|#)/.test((src[start - 1] || '').trim())) start--;
         const [p2, w] = short(res.path, root);
         index.set(key, targets.length);
         targets.push({ p: p2, w, l: res.line + 1, c: res.col, s: start + 1, code: src.slice(start, Math.min(src.length, res.line + 8)) });
       }
       ((defs[p] ??= {})[line] ??= []).push([col, len, index.get(key)!]);
-      raw[`${p}:${line}:${col}`] = [res.path, res.line, res.col];
+      if (original) raw[`${p}:${line}:${col}`] = [original.path, original.line, original.col];
     },
   };
 }

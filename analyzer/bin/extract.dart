@@ -39,6 +39,7 @@ class Facts extends GeneralizingAstVisitor<void> {
   final ResolvedUnitResult result;
   final declarations = <Json>[];
   final references = <String, Json>{};
+  final unresolved = <String, int>{};
   final calls = <String, Map<String, List<Object>>>{};
   final supers = <String, List<Object>>{};
   final scenarios = <Json>[];
@@ -91,8 +92,18 @@ class Facts extends GeneralizingAstVisitor<void> {
     int priority = 1,
   }) {
     final target = location(element);
-    if (target == null) return;
     final key = position(offset);
+    if (target == null) {
+      // Model classes can be unavailable when generated files are gitignored. Preserve
+      // real syntax positions so navigation can consult the tracked YAML definitions.
+      if (element == null &&
+          RegExp(
+            r'^[A-Z][A-Za-z0-9_]*$',
+          ).hasMatch(result.content.substring(offset, offset + length))) {
+        unresolved[key] = length;
+      }
+      return;
+    }
     if ((references[key]?['priority'] as int? ?? -1) > priority) return;
 
     references[key] = {
@@ -361,6 +372,7 @@ class Facts extends GeneralizingAstVisitor<void> {
         )
         .toList(),
     'references': references,
+    'unresolved': unresolved,
     'calls': calls.map((key, value) => MapEntry(key, value.values.toList())),
     'supers': supers,
     'scenarios': scenarios,

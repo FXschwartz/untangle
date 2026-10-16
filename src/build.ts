@@ -41,7 +41,7 @@ function fingerprint(files: string[]): string {
   for (const f of files) h.update(fs.readFileSync(path.join(ROOT, f)));
   return h.digest('hex').slice(0, 16);
 }
-const EXTRACTION_STAGE = ['dist/analyzer/client.js', 'dist/analyzer/extract.js', 'analyzer/bin/extract.dart', 'analyzer/pubspec.lock', 'dist/pipeline/diff.js', 'dist/pipeline/definitions.js', 'dist/pipeline/links.js', 'analysis/adapters.js'];
+const EXTRACTION_STAGE = ['dist/analyzer/client.js', 'dist/analyzer/extract.js', 'analyzer/bin/extract.dart', 'analyzer/pubspec.lock', 'dist/pipeline/diff.js', 'dist/pipeline/definitions.js', 'dist/pipeline/links.js', 'dist/model-definitions.js', 'analysis/adapters.js'];
 const MODEL_STAGE = ['analysis/analyze.js', 'analysis/dart.js', 'analysis/units.js', 'analysis/structure.js', 'analysis/chains.js'];
 
 const readJson = <T>(file: string): T | null => {

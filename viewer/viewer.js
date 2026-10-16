@@ -1475,9 +1475,21 @@
     return t ? { p: t.p, l: t.l, side: t.w === 'repo' ? (p.old ? 'base' : 'head') : null } : null;
   }
   const sameTarget = (a, b) => !!a && !!b && a.p === b.p && a.l === b.l && (a.side || null) === (b.side || null);
-  function liveLookup(el) {
+  function jumpToDefinition(q, el) {
+    const view = state.view;
+    el.classList.add('asking');
+    askDefinition(q).then((live) => {
+      el.classList.remove('asking');
+      if (state.view !== view) return;
+      if (live.status !== 'ok') return toast(live.status === 'none' ? 'No definition found for this name.' : live.error);
+      const t = live.target;
+      openSource({ side: t.side, p: t.side ? t.p : null, ext: t.ext, line: t.l, label: t.p, where: t.w });
+    });
+  }
+  function liveLookup(el, jump) {
     const d = el.dataset;
     const q = { side: d.ls || null, p: d.lp || null, ext: d.lx !== '' && d.lx != null ? Number(d.lx) : null, l: Number(d.ll), c: Number(d.lc) };
+    if (jump) return jumpToDefinition(q, el);
     const sameQ = (x) => x && x.side === q.side && x.p === q.p && x.ext === q.ext && x.l === q.l && x.c === q.c;
     if (el.closest('.peek') && state.peek) {
       // Asked from inside the peek: it stays as it is while the language server answers, then shows
@@ -4092,6 +4104,16 @@
       return render();
     }
     if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
+    if (t.classList.contains('ref') && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (t.classList.contains('live')) return liveLookup(t, true);
+      const old = d.o !== undefined;
+      const target = (old ? DEFS_OLD[state.compare] : defsNow()).targets[Number(d.ti)];
+      if (target.w === 'repo' && (CONFIG.served || M().files.some((f) => f.p === target.p))) {
+        return openSource({ side: old ? 'base' : 'head', p: target.p, line: target.l });
+      }
+      if (CONFIG.served) return jumpToDefinition({ side: old ? 'base' : 'head', p: d.path, l: Number(old ? d.o : d.n), c: Number(d.col) }, t);
+    }
     if (t.classList.contains('live')) return liveLookup(t);
     if (t.classList.contains('ref') && d.o !== undefined) {
       const path = d.path, o = Number(d.o), col = Number(d.col);

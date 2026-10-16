@@ -76,6 +76,11 @@ export async function extract(diff: Diff, head: string, base: string, progress: 
           arguments: current ? facts.arguments : [],
         };
 
+        for (const [position, length] of Object.entries(facts.unresolved)) {
+          const [line, col] = position.split(':').map(Number);
+          if (lines.has(line) && !facts.references[position]) collector.add(file.p, line, col, length, null);
+        }
+
         for (const [position, reference] of Object.entries(facts.references)) {
           const [line, col] = position.split(':').map(Number);
           if (!lines.has(line)) continue;

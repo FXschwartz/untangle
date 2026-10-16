@@ -53,6 +53,7 @@ export interface Structure {
 export interface FileFacts extends Structure {
   path: string;
   references: Record<string, { length: number; target: Location }>;
+  unresolved: Record<string, number>;
   calls: Record<string, Location[]>;
   supers: Record<string, Location>;
   diagnostics: Array<{ code: string; severity: string; offset: number; message: string }>;

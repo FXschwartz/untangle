@@ -11,6 +11,7 @@ import { DartServer, type Location } from './lsp/dart.js';
 import type { LspState } from './metrics.js';
 import type { Target } from './target.js';
 import { VERSION } from './version.js';
+import { ModelDefinitions } from './model-definitions.js';
 
 export type Side = 'head' | 'base';
 
@@ -41,6 +42,7 @@ export class LiveSession {
   private dirs: { headDir: string; baseDir: string } | null = null;
   // Files outside the repository that a definition led to: only these can be read by id.
   private readonly external: string[] = [];
+  private readonly models = new Map<string, ModelDefinitions>();
 
   constructor(
     private readonly target: Target,
@@ -114,6 +116,12 @@ export class LiveSession {
     // so an onward jump does not rebuild every context just to open another dependency.
     let loc: Location | null = await server.definition(file, line - 1, col, where.ext == null).catch(() => null);
     if (!loc && where.ext != null) loc = await server.definition(file, line - 1, col).catch(() => null);
+    if (where.side === 'head' || where.side === 'base') {
+      const roots = await this.checkouts();
+      const root = where.side === 'head' ? roots.headDir : roots.baseDir;
+      if (!this.models.has(root)) this.models.set(root, new ModelDefinitions(root));
+      loc = this.models.get(root)!.resolve(file, line - 1, col, loc) || loc;
+    }
     return loc && this.describe(loc);
   }
 
@@ -126,7 +134,7 @@ export class LiveSession {
       // A definition in a file that can't be read gets no snippet.
     }
     let start = loc.line;
-    while (start > 0 && start > loc.line - 6 && /^(\/\/\/|@)/.test((lines[start - 1] || '').trim())) start--;
+    while (start > 0 && start > loc.line - 6 && /^(\/\/\/|@|#)/.test((lines[start - 1] || '').trim())) start--;
     const snippet = { l: loc.line + 1, c: loc.col, s: start + 1, code: lines.slice(start, Math.min(lines.length, loc.line + 12)).map((x) => x.slice(0, 400)) };
     for (const [side, root] of [['head', headDir], ['base', baseDir]] as const) {
       if (loc.path.startsWith(root + '/')) return { side, p: loc.path.slice(root.length + 1), abs: loc.path, w: 'repo', ...snippet };
