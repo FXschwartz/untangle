@@ -4158,7 +4158,8 @@
     if (act === 'hd-review') { state.lens = { kind: 'commits', shas: [d.sha] }; lensMemo = null; navAt = null; HX.anchor = HX.index.get(d.sha); return lensGo(); }
     // Read a commit's file in place; the graph, expanded commit and current lens stay put.
     if (act === 'hd-open') {
-      state.peek = { history: { sha: d.sha, path: d.p } };
+      const current = state.peek && state.peek.history;
+      state.peek = current && current.sha === d.sha && current.path === d.p ? null : { history: { sha: d.sha, path: d.p } };
       render();
       const peek = main.querySelector('.hs-detail .peek');
       if (peek) peek.scrollIntoView({ block: 'nearest' });
@@ -4321,7 +4322,7 @@
   document.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; }, { passive: true, capture: true });
   document.addEventListener('click', (e) => {
     if (!state.peek || !main.querySelector('.peek') || !(e.target instanceof Element)) return;
-    if (e.target.closest('.peek, .ref, .menu, .pal, .scrim, .keys, .mn-pop')) return;
+    if (e.target.closest('.peek, .ref, [data-act="hd-open"], .menu, .pal, .scrim, .keys, .mn-pop')) return;
     if (downAt && e.detail && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
     state.peek = null;
     setTimeout(() => { if (!state.peek && main.querySelector('.peek')) render(); }, 0);

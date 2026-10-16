@@ -71,6 +71,12 @@ describe('Given a served review whose last commit removes the last two lines of 
     it('then the file opens at the deletion in a peek while History and its commit stay open.', () => {
       assert.equal(opened, `39\nHistory\n${trimmed}`);
     });
+
+    it('then clicking the same file again closes the window and leaves the commit open.', async () => {
+      await page!.click('[data-act="hd-open"][data-p="lib/notes.dart"]');
+      await page!.until(`!document.querySelector('.hs-detail .peek')`);
+      assert.equal(await read(page!, `document.querySelector('.hs-detail')?.dataset.detailOf`), trimmed);
+    });
   });
 
   describe('when an earlier version of the notes is opened, ', () => {
