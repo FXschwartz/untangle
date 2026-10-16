@@ -510,7 +510,7 @@ describe('Given a served review of feature, its pull request, a merge of two com
     });
 
     it('then the file opens inside the expanded commit, keeping History in view.', () => {
-      assert.equal(opened, `History\nlib/only/nested/added.dart\nAt ${short('Add a nested file')}`);
+      assert.equal(opened, `History\nlib/only/nested/added.dart\nCommit ${short('Add a nested file')}`);
     });
   });
 

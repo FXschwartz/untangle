@@ -981,10 +981,24 @@
   function historyPeekHtml(p) {
     const v = p.history;
     const s = CONFIG.served ? loadSource({ commit: v.sha, path: v.path }, true) : { status: 'error', error: 'This saved page does not contain files at earlier commits. Open the served review to read them.' };
-    const where = s.deleted ? `Before deletion in ${shortSha(v.sha)}` : `At ${shortSha(v.sha)}`;
-    const head = `<div class="pk-h"><b>File</b><span class="pk-loc">${esc(v.path)}</span><span class="pk-src">${where}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`;
-    if (s.status !== 'ok') return head + `<div class="pk-foot">${s.status === 'loading' ? 'Loading the file…' : esc(s.error)}</div>`;
-    const code = peekCodeHtml({ p: v.path, commit: v.sha, l: s.line });
+    const head = `<div class="pk-h"><b>Diff</b><span class="pk-loc">${esc(v.path)}</span><span class="pk-src">Commit ${shortSha(v.sha)}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`;
+    if (s.status !== 'ok') return head + `<div class="pk-foot">${s.status === 'loading' ? 'Loading the diff…' : esc(s.error)}</div>`;
+    const file = { p: v.path, lang: C.langOf(v.path) };
+    let first = true;
+    const body = s.hunks.map((h) => {
+      let old = h.o, next = h.n;
+      const rows = h.l.map((line) => [line[0], line.slice(1)]);
+      return `<div class="pk-hunk">@@ −${h.o} +${h.n} @@ ${esc(h.h)}</div>` + rows.map(([type, text], i) => {
+        const o = type === '+' ? null : old++;
+        const n = type === '-' ? null : next++;
+        const hit = first && type !== ' ';
+        if (hit) first = false;
+        return `<div class="pk-ln${type === '+' ? ' add' : type === '-' ? ' del' : ''}${file.lang === 'md' ? ' md' : ''}${hit ? ' hit' : ''}" data-o="${o ?? ''}" data-n="${n ?? ''}"><span class="no">${o ?? ''}</span><span class="no">${n ?? ''}</span><span class="sg">${type === '-' ? '−' : type === '+' ? '+' : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: rowColors(rows, v.path, i) })}</span></div>`;
+      }).join('');
+    }).join('');
+    const note = s.from ? `Renamed from ${s.from}` : s.binary ? 'Binary file changed' : s.change === 'A' ? 'Empty file added' : s.change === 'D' ? 'Empty file deleted' : 'File metadata changed';
+    const code = (s.from || !body ? `<div class="pk-foot">${esc(note)}</div>` : '')
+      + (body ? `<div class="pk-code" tabindex="0" aria-label="Diff in ${esc(v.path)}" data-peek-code="commit:${v.sha}:${esc(v.path)}:diff">${body}</div>` : '');
     const current = M().files.some((f) => f.p === v.path) || M().generated.some((f) => f.p === v.path);
     return head + code + (current ? `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(v.path)}">Go to it in this review</button></div>` : '');
   }
@@ -1383,6 +1397,10 @@
     const q = new URLSearchParams(v.commit ? { sha: v.commit, p: v.path } : v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
     api((v.commit ? 'commit-file?' : 'file?') + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
       .then((j) => {
+        if (v.commit) {
+          Object.assign(s, { ...j, change: j.status, status: 'ok' });
+          return;
+        }
         const lines = j.text === '' ? [] : j.text.replace(/\r?\n$/, '').split(/\r?\n/);
         Object.assign(s, { status: 'ok', text: j.text, lines, count: lines.length, abs: j.abs, generated: j.generated, line: j.line, deleted: j.deleted, revision: j.revision });
       })

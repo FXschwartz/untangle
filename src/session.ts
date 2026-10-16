@@ -8,8 +8,8 @@ import { Metrics } from './metrics.js';
 import type { PageConfig } from './page.js';
 import { ghReady, GitHubError, PullRequestConversation, type Action, type CommitFacts } from './github.js';
 import { broughtBy, hasCommit, reviewedHead, sinceRows, type History } from './history.js';
-import { gitAsync, gitMaybe, runAsync } from './exec.js';
-import { fileHunks, generatedPatterns } from './pipeline/diff.js';
+import { git, gitAsync, gitMaybe, runAsync } from './exec.js';
+import { fileHunks, generatedPatterns, parseHunks } from './pipeline/diff.js';
 import { writeAtomic } from './server.js';
 import { Snapshot, snapshotBranch } from './snapshot.js';
 import type { Target } from './target.js';
@@ -224,16 +224,15 @@ export class ReviewSession {
       const commit = this.history?.commits.find((c) => c.sha === q.get('sha'));
       const file = commit?.files.find((f) => this.history!.paths[f[0]] === p);
       if (!commit || !file) return { status: 404, data: { error: 'not a file changed by this commit' } };
-      const deleted = file[1] === 'D';
-      const parent = gitMaybe(this.target.repo, 'rev-parse', `${commit.sha}^1`)?.trim();
-      const revision = deleted && parent ? parent : commit.sha;
-      const out = this.live.fileAt(revision, p);
-      if ('error' in out) return { status: 404, data: out };
-      const hunk = parent ? fileHunks(this.target.repo, parent, commit.sha, p)[0] : null;
-      let line = hunk ? (deleted ? hunk.o : hunk.n) : 1;
-      if (hunk) for (const row of hunk.l) { if (row[0] !== ' ') break; line++; }
-      line = Math.max(1, Math.min(line, out.text.replace(/\n$/, '').split('\n').length));
-      return { data: { ...out, revision, deleted, line } };
+      if ((file[2] || 0) + (file[3] || 0) > GENERATED_MAX_LINES) {
+        return { status: 413, data: { error: 'More than 20,000 changed lines: too many to show here' } };
+      }
+      const parent = gitMaybe(this.target.repo, 'rev-parse', `${commit.sha}^1`)?.trim()
+        || git(this.target.repo, 'hash-object', '-t', 'tree', '--stdin').trim();
+      const from = file[4] == null ? null : this.history!.paths[file[4]];
+      const revisions = from ? [`${parent}:${from}`, `${commit.sha}:${p}`] : [parent, commit.sha, '--', p];
+      const diff = git(this.target.repo, '--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '-U3', ...revisions);
+      return { data: { hunks: parseHunks(diff), from, binary: file[2] < 0, status: file[1] } };
     }
     if (route === 'file' && method === 'GET') {
       const w = where();
