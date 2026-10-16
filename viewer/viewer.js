@@ -2613,7 +2613,7 @@
       nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((x) => rows.push({ depth: dp, html: (g) => detailFileHtml(x, sha, dp, g, false) }));
     };
     walk(fileTree(list), 0);
-    return rows.map((r, k) => r.html(guides(r.depth, k + 1 < rows.length ? rows[k + 1].depth : -1))).join('');
+    return treeRowsHtml(rows);
   }
   function detailHtml(vm, g) {
     const c = vm.item.c, ci = vm.item.i, st = commitState(ci), list = commitFilesOf(ci);
@@ -2868,6 +2868,27 @@
   // The lines that mark a row's levels. A level's line ends on the last row it holds (when the
   // next row, at depth `next`, is back at that level or above), turning toward the row (└).
   const guides = (depth, next) => Array.from({ length: depth }, (_, i) => `<i class="ig${next != null && next <= i ? (i === depth - 1 ? ' end elbow' : ' end') : ''}" style="left:${14 + i * 14}px"></i>`).join('');
+  function treeRowsHtml(rows) {
+    const following = [];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      while (following.length && following.at(-1).depth > row.depth) following.pop();
+      row.last = !following.length || following.at(-1).depth < row.depth;
+      following.push(row);
+    }
+
+    const continuing = [];
+    return rows.map((row) => {
+      continuing.length = row.depth;
+      if (row.depth) continuing[row.depth - 1] = !row.last;
+      const lines = continuing.map((more, level) => {
+        const own = level === row.depth - 1;
+        if (!own && !more) return '';
+        return `<i class="ig${own && row.last ? ' end elbow' : ''}" style="left:${14 + level * 14}px"></i>`;
+      }).join('');
+      return row.html(lines);
+    }).join('');
+  }
   // A tree's rows, as drawn, each knowing the depth of the row after it for its guides.
   function treeHtml(node, depth, o) {
     const rows = [];
@@ -2882,7 +2903,7 @@
       nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => rows.push({ depth: dp, html: (g) => o.file(f, dp, g) }));
     };
     walk(node, depth);
-    return rows.map((r, k) => r.html(guides(r.depth, k + 1 < rows.length ? rows[k + 1].depth : -1))).join('');
+    return treeRowsHtml(rows);
   }
 
   // ---------- motion: what changes moves from where it was to where it goes, fast enough not to
