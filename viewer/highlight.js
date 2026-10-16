@@ -24,6 +24,8 @@ import toml from 'shiki/langs/toml.mjs';
 import typescript from 'shiki/langs/typescript.mjs';
 import xml from 'shiki/langs/xml.mjs';
 import yaml from 'shiki/langs/yaml.mjs';
+// Serverpod's VS Code grammar; its BSD notice is retained in the grammar and bundle.
+import serverpod from './syntaxes/serverpod.tmLanguage.json';
 
 const THEME = 'dark-plus';
 const BY_EXT = {
@@ -44,7 +46,7 @@ let fg = '#D4D4D4';
 function load() {
   loading ??= createHighlighterCore({
     themes: [darkPlus],
-    langs: [css, dart, diff, dockerfile, groovy, html, ini, javascript, json, kotlin, make, markdown, proto, shellscript, sql, swift, toml, typescript, xml, yaml],
+    langs: [css, dart, diff, dockerfile, groovy, html, ini, javascript, json, kotlin, make, markdown, proto, shellscript, sql, swift, toml, typescript, xml, yaml, serverpod],
     engine: createJavaScriptRegexEngine({ forgiving: true }),
   }).then((h) => {
     highlighter = h;
@@ -57,6 +59,7 @@ function load() {
 /** The grammar for a path, or null for plain text. */
 function langFor(path) {
   const name = path.slice(path.lastIndexOf('/') + 1);
+  if (/\.spy(?:\.ya?ml)?$/i.test(name)) return 'serverpod';
   if (BY_NAME[name]) return BY_NAME[name];
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';
   return BY_EXT[ext] || null;
