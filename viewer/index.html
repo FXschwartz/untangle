@@ -664,6 +664,11 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .pk-code { max-height: min(360px, 45vh); overflow: auto; overscroll-behavior: contain; padding: 2px 0 8px; font: 400 12px/1.6 var(--code); }
 .pk-ln { display: flex; white-space: pre; }
 .pk-ln .no { width: 46px; flex: none; padding-right: 10px; text-align: right; color: var(--text-4); }
+/* Prose wraps within the available column, including long links, without adding line numbers. */
+.code:has(> .ln.md) { width: 100%; }
+.ln.md { width: 100%; max-width: 100cqw; }
+.ln.md > .tx, .pk-ln.md > .tx { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.half.md > .tx { word-break: normal; overflow-wrap: anywhere; }
 .pk-ln.hit { background: rgba(255, 255, 255, .05); box-shadow: inset 2px 0 0 var(--accent); }
 .pk-ln.hit.flash { animation: flashpk 1.1s var(--ease) 1; }
 @keyframes flashpk { 0% { background: rgba(233, 180, 76, .2); } 100% { background: rgba(255, 255, 255, .05); } }

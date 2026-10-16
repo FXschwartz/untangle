@@ -504,7 +504,7 @@
     const oldNo = meta.t === '-' ? meta.o : null;
     const c = o.c ? (meta.t === '-' ? (o.mv ? '' : 'L:' + meta.o) : n != null ? 'R:' + n : '') : '';
     const notes = (o.badges || '') + (o.toggle || '');
-    return `<div class="ln ${o.cls}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
+    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
   // Move annotations lead the snippet. Name the local lines so nearby import or other edits
   // cannot be mistaken for the moved declaration. The removed body stays collapsed.
@@ -617,7 +617,7 @@
     const oldNo = side === 'l' && meta.t === '-' ? meta.o : null;
     const c = o.c && num != null ? ` data-c="${side === 'l' ? 'L' : 'R'}:${num}"` : '';
     const notes = side === 'r' ? (o.badges || '') + (o.toggle || '') : '';
-    return `<span class="half ${side} ${o.cls || ''}"${c}><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</span>`;
+    return `<span class="half ${side} ${o.cls || ''}${f.lang === 'md' ? ' md' : ''}"${c}><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</span>`;
   }
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
@@ -926,7 +926,7 @@
       const row = usage && M().head.get(t.p + ':' + ln);
       const added = row && row.r.t === '+';
       const live = canLoad && !t.commit ? { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } : null;
-      return `<div class="pk-ln${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
+      return `<div class="pk-ln${file.lang === 'md' ? ' md' : ''}${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
     }).join('');
     const note = source && source.status === 'error' ? `<div class="pk-foot">${esc(source.error)} · showing the saved snippet</div>` : '';
     return `<div class="pk-code" tabindex="0" aria-label="Code in ${esc(t.p)}" data-peek-code="${esc(key)}">${body}</div>${note}`;
@@ -1421,7 +1421,7 @@
     h += '<div class="code src">';
     s.lines.forEach((text, i) => {
       const ln = i + 1, c = changed.has(ln);
-      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}" data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
+      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}${file.lang === 'md' ? ' md' : ''}" data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
       if (state.peek && state.peek.src && state.peek.src.key === key && state.peek.src.line === ln) h += peekHtml(state.peek);
     });
     return h + '</div>';
@@ -2323,7 +2323,7 @@
     let last = null;
     list.forEach((x) => {
       if (x.p !== last) { h += `<div class="inst-file">${sourceButton({ side, p: x.p }, esc(x.p), 'linkish')}${x.generated ? ' <span class="gen-tag">generated</span>' : ''}</div>`; last = x.p; }
-      h += `<div class="ln ctx"><span class="g"></span><span class="no wide">${sourceButton({ side, p: x.p, line: x.l }, String(x.l), 'linkish')}</span><span class="sg"></span><span class="tx">${markAll(x.text, q)}</span></div>`;
+      h += `<div class="ln ctx${C.langOf(x.p) === 'md' ? ' md' : ''}"><span class="g"></span><span class="no wide">${sourceButton({ side, p: x.p, line: x.l }, String(x.l), 'linkish')}</span><span class="sg"></span><span class="tx">${markAll(x.text, q)}</span></div>`;
     });
     if (r.truncated) h += `<div class="empty">The first ${r.results.length} matches. Make the search more precise for the rest.</div>`;
     return h + '</div>';
@@ -2349,7 +2349,7 @@
       if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; last = f; }
       const i = text.toLowerCase().indexOf(q);
       const line = meta.t !== '-' ? meta.n : meta.o;
-      h += `<div class="ln ${meta.t === '+' ? 'add' : 'del'}"><span class="g"></span><span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${meta.t !== '-' ? meta.n : ''}">${line}</button></span><span class="sg">${meta.t === '+' ? '+' : '−'}</span><span class="tx">${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}</span></div>`;
+      h += `<div class="ln ${meta.t === '+' ? 'add' : 'del'}${f.lang === 'md' ? ' md' : ''}"><span class="g"></span><span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${meta.t !== '-' ? meta.n : ''}">${line}</button></span><span class="sg">${meta.t === '+' ? '+' : '−'}</span><span class="tx">${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}</span></div>`;
     });
     if (!res.length) h += `<div class="empty">No changed line matches.${CONFIG.served ? ' “Repository” searches every file.' : ''}</div>`;
     return h + '</div>';

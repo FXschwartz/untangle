@@ -7,7 +7,7 @@
   function langOf(path) {
     if (/\.dart$/.test(path)) return 'dart';
     if (/\.(ya?ml|spy)$/.test(path)) return 'yaml';
-    if (/\.md$/.test(path)) return 'md';
+    if (/\.(md|markdown|mdown)$/i.test(path)) return 'md';
     if (/\.sql$/.test(path)) return 'sql';
     if (/\.json$/.test(path)) return 'json';
     return 'text';
