@@ -1,3 +1,4 @@
+import type { Structure } from '../src/analyzer/client.js';
 /** "path:line:col" (1-based line) -> [absolute target file, 0-based line, column]. */
 export type RawDefinitions = Record<string, [string, number, number]>;
 
@@ -29,7 +30,8 @@ export declare function analyze(input: {
   headDir: string;
   diff: Diff;
   defsRaw: RawDefinitions;
-  old?: Record<string, { dir: string; raw: RawDefinitions }>;
+  structure?: Record<string, Structure>;
+  old?: Record<string, { dir: string; raw: RawDefinitions; structure?: Record<string, Structure> }>;
   calls?: CallGraph | null;
   supers?: RawDefinitions | null;
   log?: (line: string) => void;

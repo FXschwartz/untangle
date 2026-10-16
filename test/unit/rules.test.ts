@@ -172,7 +172,7 @@ describe('Given an annotation between two methods, and both methods change, ', {
     after(() => review?.remove());
 
     it('then the annotation changes with the method after it.', () => {
-      assert.equal(blocksOf(review!), 'lib/a.dart#0 Box.greet +1 -1 standalone\nlib/a.dart#1 Box +2 -2 standalone');
+      assert.equal(blocksOf(review!), 'lib/a.dart#0 Box.greet +1 -1 standalone\nlib/a.dart#1 Box.wave +2 -2 standalone');
     });
   });
 });

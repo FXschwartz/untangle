@@ -4,7 +4,8 @@ Review a pull request chain by chain, in your browser.
 
 untangle opens a review on a map of chains: each chain follows one change across files (a new
 parameter, the calls that now pass it, the function that had to take a parameter in turn). Every
-chain, group and count comes from fixed rules over git, tree-sitter and the Dart analysis server.
+chain, group and count comes from fixed rules over git and Dart analyzer facts, with tree-sitter
+for fine-grained edit shapes.
 The rules and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md).
 
 New classes, models and functions are read whole. A reading unit is not automatically a chain:
@@ -31,7 +32,7 @@ it runs.
 
 ## Install
 
-Needs Node 22 or later, git 2.40 or later, and the Dart SDK (`dart` on `PATH`; Flutter's works).
+Needs Node 22 or later, git 2.40 or later, and Dart 3.12 or later (`dart` on `PATH`; Flutter's works).
 `gh` is optional: it finds a directory's pull request, reads private repositories, and carries the
 pull request's comments and reviews. untangle asks GitHub through `gh`, as your own login, so it
 never handles a token. Without `gh`, GitHub's public API answers for public repositories, without
@@ -39,9 +40,14 @@ comments.
 
 ```
 npm install
-npm run build   # the TypeScript, the highlighter (dist/highlight.js) and the fonts (dist/fonts.css)
+npm run build   # TypeScript, the native Dart extractor, the highlighter and the fonts
 npm link        # puts `untangle` on PATH
 ```
+
+The build resolves the extractor's pinned analyzer dependency and compiles `dist/dart-analyzer`
+(`.exe` on Windows). It recompiles only when its source, dependencies or build SDK changes.
+Review startup uses that executable directly, without compiling the extractor or resolving
+its dependencies. Rebuild after changing platforms or upgrading the build SDK.
 
 ## Tests
 
@@ -60,17 +66,20 @@ The tests use Node's runner (`node:test`) and need Node 22.18 or later, which ru
    repository. The head side is the directory itself when nothing in it is uncommitted and its
    packages are resolved; otherwise a worktree too. Worktrees get `dart pub get` (or `flutter pub
    get`); untangle never runs it in your own checkout.
-2. **Language server.** One Dart analysis server opens both checkouts. It answers where every
-   identifier on a changed line is defined (on both sides), what changed tests call, and what
-   changed methods override. Like an editor, it only analyzes the packages the review touches.
-3. **Analysis.** The rules in [analysis/analyze.js](analysis/analyze.js) build edits, same-change
-   groups, chains and the chain map.
-4. **Serving.** The page shows progress while the review builds, then the review. The language
-   server stays up for the page's live requests.
+2. **Dart analyzer.** A short-lived native process resolves changed files on both sides. It
+   streams declaration ranges, ownership, argument bindings, definitions, calls and overrides
+   from resolved Dart ASTs. Changed tests can extend extraction into the code they reach.
+   JavaScript retains the compact facts the review needs; the analyzer exits before grouping.
+3. **Analysis.** The rules in [analysis/analyze.js](analysis/analyze.js) use these facts to build
+   whole declaration reading units, chains and the chain map. Tree-sitter still supplies atomic
+   edit shapes, preserving edit identities and saved marks.
+4. **Serving.** The page shows progress while the review builds, then the review. The existing
+   language server starts after the review is ready to serve live navigation requests.
 
-The first review of a pair of commits takes from a few seconds to a few minutes, mostly the
-language server. Its answers and the analysis are cached per pair of commits, so opening the
-same review again is immediate.
+Analyzer facts and the completed analysis are cached per pair of commits, so reopening a review
+reuses the result. Changes to grouping rules can reuse the facts without starting an analyzer.
+Extractor source and dependency fingerprints invalidate stale extraction caches. Definition peeks reuse
+the same facts collected for grouping, including in exported reviews.
 
 ## In the page
 
@@ -218,7 +227,7 @@ in 1 MB.
 - `repos/`: clones made for pull request URLs (bare, blobs on demand).
 - `worktrees/`: checkouts of base and head commits. A worktree of your own repository is listed
   by `git worktree list`; `git worktree remove` or deleting the folder is safe.
-- `reviews/`: per pair of commits, the language server's answers (`answers.json`), the review
+- `reviews/`: per pair of commits, compact analyzer facts (`answers.json`), the review
   (`review.json`), and marks on parts of a change with the layout (`state.json`). Whole marks
   live on the review's branch.
 
@@ -227,6 +236,7 @@ in 1 MB.
 | Path | |
 |---|---|
 | `src/` | The CLI, the server and the pipeline, in TypeScript |
+| `analyzer/` | The native Dart extractor and its pinned dependencies |
 | `analysis/` | The analysis rules (`analyze.js`) and the generated-code adapters, shared with the prototype |
 | `viewer/` | The page: `index.html`, `viewer.js`, `highlight.js` (Shiki, bundled by the build), `fonts.css` (the two faces, bundled by the build), and `core.js` (the tokenizer and diff, used by both sides) |
 | `docs/` | The UX proposal, the test runs, and the prototype pipeline that produced them |

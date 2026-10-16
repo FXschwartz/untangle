@@ -52,9 +52,23 @@ export async function definitions(server: DartServer, root: string, positions: P
     ([p, line, col]) => server.definition(path.join(root, p), line - 1, col).catch(() => null),
     (done) => onProgress?.(done, items.length));
 
+  const collector = definitionCollector(root);
+  items.forEach(([p, line, col, len], i) => {
+    const result = results[i];
+    if (result) collector.add(p, line, col, len, result);
+  });
+  return collector.data;
+}
+
+/** Builds the compact peek index from resolved facts without retaining the analyzer AST. */
+export function definitionCollector(root: string): {
+  data: Definitions;
+  add(p: string, line: number, col: number, len: number, res: Location): void;
+} {
   const targets: Target[] = [], index = new Map<string, number>(), files = new Map<string, string[] | null>();
   const lines = (file: string) => {
     if (!files.has(file)) {
+      if (files.size >= 64) files.delete(files.keys().next().value!);
       try {
         files.set(file, fs.readFileSync(file, 'utf8').split('\n'));
       } catch {
@@ -64,21 +78,21 @@ export async function definitions(server: DartServer, root: string, positions: P
     return files.get(file);
   };
   const defs: Definitions['defs'] = {}, raw: RawDefinitions = {};
-  items.forEach(([p, line, col, len], i) => {
-    const res: Location | null = results[i];
-    if (!res) return;
-    const key = `${res.path}\n${res.line}\n${res.col}`;
-    if (!index.has(key)) {
-      const src = lines(res.path) || [];
-      // The snippet starts at the doc comments and annotations above the definition.
-      let start = res.line;
-      while (start > 0 && start > res.line - 6 && /^(\/\/\/|@)/.test((src[start - 1] || '').trim())) start--;
-      const [p2, w] = short(res.path, root);
-      index.set(key, targets.length);
-      targets.push({ p: p2, w, l: res.line + 1, c: res.col, s: start + 1, code: src.slice(start, Math.min(src.length, res.line + 8)) });
-    }
-    ((defs[p] ??= {})[line] ??= []).push([col, len, index.get(key)!]);
-    raw[`${p}:${line}:${col}`] = [res.path, res.line, res.col];
-  });
-  return { targets, defs, raw };
+  return {
+    data: { targets, defs, raw },
+    add(p, line, col, len, res) {
+      const key = `${res.path}\n${res.line}\n${res.col}`;
+      if (!index.has(key)) {
+        const src = lines(res.path) || [];
+        // The snippet starts at the doc comments and annotations above the definition.
+        let start = res.line;
+        while (start > 0 && start > res.line - 6 && /^(\/\/\/|@)/.test((src[start - 1] || '').trim())) start--;
+        const [p2, w] = short(res.path, root);
+        index.set(key, targets.length);
+        targets.push({ p: p2, w, l: res.line + 1, c: res.col, s: start + 1, code: src.slice(start, Math.min(src.length, res.line + 8)) });
+      }
+      ((defs[p] ??= {})[line] ??= []).push([col, len, index.get(key)!]);
+      raw[`${p}:${line}:${col}`] = [res.path, res.line, res.col];
+    },
+  };
 }

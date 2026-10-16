@@ -1,7 +1,6 @@
 // The page's live requests: go to definition anywhere, whole files at either revision or from
 // outside the repository (a package, the SDK), search over the repository, and opening a
-// location in the editor. One Dart analysis server answers them, kept from the build or
-// started on the first request.
+// location in the editor. A Dart language server serves live requests after bulk extraction.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,7 +49,6 @@ export class LiveSession {
   ) {
     if (built) {
       this.dirs = { headDir: built.headDir, baseDir: built.baseDir };
-      this.server = built.server;
     }
   }
 

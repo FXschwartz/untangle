@@ -1,3 +1,5 @@
+import { introducedCandidates } from './structure.js';
+
 // Reading units sit above edit blocks. Blocks retain their ids and marks; a wholly new
 // declaration is read in source order, without turning each field into a separate task.
 const TYPES = new Set(['class_definition', 'mixin_declaration', 'extension_declaration', 'enum_declaration', 'extension_type_declaration', 'type_alias']);
@@ -46,7 +48,7 @@ export function readingUnits(files, modelPatterns = []) {
   const units = [];
 
   for (const file of files) {
-    if (!file.newTree) continue;
+    if (!file.newTree && !file.structure) continue;
     const source = file.newSrc.split('\n');
     const added = new Set(file.blocks.flatMap((b) => b.rows.filter((r) => r.type === '+').map((r) => r.n)));
     const candidates = [];
@@ -68,7 +70,11 @@ export function readingUnits(files, modelPatterns = []) {
       }
     };
 
-    if (file.oldTree) oldDeclarations(file.oldTree.rootNode);
+    if (file.structure) {
+      for (const declaration of introducedCandidates(file.oldStructure || { declarations: [], scenarios: [] })) {
+        existing.add(`${declaration.kind}:${declaration.name}`);
+      }
+    } else if (file.oldTree) oldDeclarations(file.oldTree.rootNode);
 
     const add = (node, kind, name, endNode = node) => {
       const start = startOf(node);
@@ -106,7 +112,18 @@ export function readingUnits(files, modelPatterns = []) {
       }
     };
 
-    visit(file.newTree.rootNode);
+    if (file.structure) {
+      for (const declaration of introducedCandidates(file.structure)) {
+        if (isTestFile && declaration.kind === 'function' && declaration.name === 'main') continue;
+        if (!isTestFile && declaration.kind === 'test') continue;
+        // Analyzer declaration ranges include documentation and annotations.
+        const node = {
+          startPosition: { row: declaration.startLine - 1, column: declaration.startColumn },
+          endPosition: { row: declaration.endLine - 1 },
+        };
+        add(node, declaration.kind, declaration.name);
+      }
+    } else visit(file.newTree.rootNode);
     // The outer type owns its methods; a test owns helpers declared inside its callback.
     let outer = candidates.filter((candidate) => !candidates.some((other) => other !== candidate && other.start <= candidate.start && other.end >= candidate.end && (other.start < candidate.start || other.end > candidate.end)));
 
@@ -116,11 +133,15 @@ export function readingUnits(files, modelPatterns = []) {
       if (block.move || block.movedTo || block.dels) continue;
       const rows = block.rows.filter((row) => row.type === '+' && row.text.trim());
       const touching = outer.filter((candidate) => rows.some((row) => row.n >= candidate.start && row.n <= candidate.end));
-      if (touching.length < 2) continue;
-      if (!rows.every((row) => /^[\s{}();,]*$/.test(row.text) || touching.some((candidate) => row.n >= candidate.start && row.n <= candidate.end))) continue;
+      if (!touching.length) continue;
+      const inDeclaration = (row) => touching.some((candidate) => row.n >= candidate.start && row.n <= candidate.end);
+      const inDirective = (row) => file.structure?.directives.some((directive) => row.n >= directive.startLine && row.n <= directive.endLine);
+      const attachedHeader = file.s === 'A' && rows.some((row) => !inDeclaration(row) && inDirective(row));
+      if (touching.length < 2 && !attachedHeader) continue;
+      if (!rows.every((row) => /^[\s{}();,]*$/.test(row.text) || inDeclaration(row) || inDirective(row) || /^\s*(\/\/|\/\*|\*)/.test(row.text))) continue;
 
       const first = touching.reduce((a, b) => a.start < b.start ? a : b);
-      const bundle = { ...first, kind: touching.every((candidate) => candidate.kind === 'test') ? 'test' : 'declarations', name: touching.map((candidate) => candidate.name).join(', '), end: Math.max(...touching.map((candidate) => candidate.end)), blocks: new Set() };
+      const bundle = { ...first, kind: touching.every((candidate) => candidate.kind === 'test') ? 'test' : 'declarations', name: touching.map((candidate) => candidate.name).join(', '), start: Math.min(first.start, ...rows.map((row) => row.n)), end: Math.max(...touching.map((candidate) => candidate.end), ...rows.map((row) => row.n)), blocks: new Set() };
       outer = outer.filter((candidate) => !touching.includes(candidate));
       outer.push(bundle);
     }

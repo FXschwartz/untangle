@@ -83,6 +83,12 @@ separate storage seeded from the saved marks. The original review cache and sess
 
 ### Limits
 
+The Dart analyzer handles syntax that the bundled tree-sitter grammar cannot parse,
+including null-aware collection elements. Production extraction now uses the analyzer,
+preserving atomic edit identities, whole-unit ownership, chain multiplicity and new-code
+connectivity. Existing-change graphs still contain disconnected support nodes under both
+providers; the connectivity claim above applies to new-code chains.
+
 These are structural guarantees on a captured corpus, not a proof of ideal conceptual grouping
 for every PR. Resolved dependencies can still form a large component, and missing resolution
 can leave related code outside chains. New code used by multiple independent consumers stays

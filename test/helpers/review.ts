@@ -65,7 +65,7 @@ export async function buildDartReview(files: { base: Record<string, string>; hea
     process.env.PATH = String(gh.env.PATH);
     process.env.UNTANGLE_CACHE = cacheDir;
     const target = await resolveDirectory(repo.dir, 'main', () => {});
-    const built = await buildReview(target, { noCache: true, label: 'main', title: 'feature', keepServer: false }, quiet);
+    const built = await buildReview(target, { noCache: true, label: 'main', title: 'feature' }, quiet);
     restore();
     return { repo, cacheDir, gh, target, data: built.data, remove: discard };
   } catch (error) {

@@ -10,10 +10,13 @@
   "files": [
     "dist",
     "analysis",
-    "viewer"
+    "viewer",
+    "analyzer",
+    "scripts/build-analyzer.mjs",
+    "scripts/dart-sdk.dart"
   ],
   "scripts": {
-    "build": "tsc -p . && esbuild viewer/highlight.js --bundle --format=iife --minify --legal-comments=none --outfile=dist/highlight.js && esbuild viewer/fonts.css --bundle --loader:.woff2=dataurl --minify --legal-comments=inline --outfile=dist/fonts.css",
+    "build": "tsc -p . && node scripts/build-analyzer.mjs && esbuild viewer/highlight.js --bundle --format=iife --minify --legal-comments=none --outfile=dist/highlight.js && esbuild viewer/fonts.css --bundle --loader:.woff2=dataurl --minify --legal-comments=inline --outfile=dist/fonts.css",
     "watch": "tsc -p . --watch",
     "check": "tsc -p . --emitDeclarationOnly && tsc -p test --noEmit",
     "test": "npm run build && node --test --test-force-exit \"test/unit/**/*.test.ts\" \"test/server/**/*.test.ts\"",

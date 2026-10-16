@@ -1,4 +1,4 @@
-// The analysis pass. Deterministic: the same commits, grammar and language server always
+// The analysis pass. Deterministic: the same commits, grammar and analyzer facts always
 // produce the same model. Ported from docs/prototype/analyze.js, with the same rules.
 //
 // 1. Edits: tokens of each change block are diffed (core.js). For Dart, tree-sitter names
@@ -19,6 +19,7 @@ import { ADAPTERS } from './adapters.js';
 import { dartParser } from './dart.js';
 import { readingUnits, testCall } from './units.js';
 import { assembleIntroducedChains } from './chains.js';
+import { CALLABLE_KINDS, TYPE_KINDS, declarationAt, indexOf, memberAt as resolvedMemberAt, memberName } from './structure.js';
 
 const C = globalThis.ReviewCore;
 // ---------- generated code
@@ -41,16 +42,23 @@ const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/
 // each identifier on the head side is defined ("path:line:col" -> [file, line0, col0]). old: per
 // comparison, the old side's checkout and its definitions. calls: outgoing calls reachable from
 // what changed tests call. supers: what each changed declaration overrides.
-export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}, calls = null, supers = null, log = () => {} }) {
+export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}, structure = null, calls = null, supers = null, log = () => {} }) {
   const REPO = repo;
   const HEAD = path.resolve(headDir) + '/';
   const CALLS = calls;
   const SUPERS = supers;
-  const OLD = Object.fromEntries(Object.entries(oldSides).map(([name, o]) => [name, { dir: path.resolve(o.dir) + '/', raw: o.raw }]));
+  const OLD = Object.fromEntries(Object.entries(oldSides).map(([name, o]) => [name, { dir: path.resolve(o.dir) + '/', raw: o.raw, structure: o.structure }]));
   const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
   const parser = await dartParser();
-  const parse = (src) => (src == null ? null : parser.parse(src));
+  const trees = new Set();
+  const parse = (src) => {
+    if (src == null) return null;
+    const tree = parser.parse(src);
+    trees.add(tree);
+    return tree;
+  };
   const out = { compares: {} };
+  const structures = new WeakMap();
 
   // ---------- tree-sitter helpers
   const pos = (line, col) => ({ row: line - 1, column: col });
@@ -151,6 +159,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
   }
   function memberAt(tree, line, text) {
     if (!tree) return null;
+    if (structures.has(tree)) return resolvedMemberAt(structures.get(tree), line, Math.max(0, text.search(/\S/)));
     const col = Math.max(0, text.search(/\S/));
     let n = tree.rootNode.descendantForPosition(pos(line, col));
     let member = null, owner = null, test = null, group = null, testKey = null;
@@ -191,6 +200,13 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
   }
   function declKind(tree, line, col) {
     if (!tree) return 'member';
+    const declared = structures.has(tree) && declarationAt(structures.get(tree), line, col);
+    if (declared) {
+      if (TYPE_KINDS.has(declared.kind)) return 'type';
+      if (declared.kind === 'PARAMETER') return 'param';
+      if (declared.kind === 'LOCAL_VARIABLE') return 'local';
+      return 'member';
+    }
     let n = tree.rootNode.descendantForPosition(pos(line, col));
     const types = [];
     for (let a = n; a; a = a.parent) types.push(a.type);
@@ -204,6 +220,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     return 'member';
   }
 
+  try {
   for (const [name, cmp] of Object.entries(diff.compares)) {
     const meta = { left: cmp.left, right: cmp.right, label: cmp.label };
     // Adapters on for this head, and what .review.yaml adds.
@@ -245,7 +262,14 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       }
       f.oldSrc = f.s !== 'A' ? gitShow(meta.left, f.p) : null;
       f.newSrc = f.s !== 'D' ? gitShow(meta.right, f.p) : null;
-      if (C.langOf(f.p) === 'dart') { f.oldTree = parse(f.oldSrc); f.newTree = parse(f.newSrc); }
+      if (C.langOf(f.p) === 'dart') {
+        f.oldTree = parse(f.oldSrc);
+        f.newTree = parse(f.newSrc);
+        f.structure = structure?.[f.p];
+        f.oldStructure = OLD[name]?.structure?.[f.p];
+        if (f.structure && f.newTree) structures.set(f.newTree, f.structure);
+        if (f.oldStructure && f.oldTree) structures.set(f.oldTree, f.oldStructure);
+      }
       const newStarts = f.newTree ? unitStarts(f.newTree) : null, oldStarts = f.oldTree ? unitStarts(f.oldTree) : null;
       C.analyzeFile(f, { split: (b) => splitPoints(b, newStarts, oldStarts) });
       files.push(f);
@@ -577,7 +601,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     const fileByPath = new Map(files.map((f) => [f.p, f]));
     const diskTrees = new Map();
     const diskTree = (abs) => {
-      if (!diskTrees.has(abs)) { let src = null; try { src = fs.readFileSync(abs, 'utf8'); } catch {} diskTrees.set(abs, src && { tree: parser.parse(src), lines: src.split('\n') }); }
+      if (!diskTrees.has(abs)) { let src = null; try { src = fs.readFileSync(abs, 'utf8'); } catch {} diskTrees.set(abs, src && { tree: parse(src), lines: src.split('\n') }); }
       return diskTrees.get(abs);
     };
     // Where a usage that resolves into generated code leads: a model field (YAML or protobuf),
@@ -671,6 +695,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       return null;
     };
     const isMemberName = (f, line, col) => {
+      if (f.structure) return CALLABLE_KINDS.has(declarationAt(f.structure, line, col)?.kind);
       const n = f.newTree.rootNode.descendantForPosition(pos(line, col));
       if (!n || n.type !== 'identifier') return false;
       for (let a = n.parent; a; a = a.parent) {
@@ -682,20 +707,30 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     const changedInside = (rel, line, col, signatureOnly) => {
       const f = fileByPath.get(rel);
       if (!f || !f.newTree) return null;
-      const sig = memberNode(f, line, col);
-      if (!sig) return null;
-      let end = sig.endPosition.row + 1;
+      const declaration = f.structure && declarationAt(f.structure, line, col);
+      const sig = declaration ? null : memberNode(f, line, col);
+      if (!declaration && !sig) return null;
+      if (declaration && !CALLABLE_KINDS.has(declaration.kind)) return null;
+      let end = declaration ? (signatureOnly ? declaration.signatureEndLine : declaration.endLine) : sig.endPosition.row + 1;
       // A method's body follows its outer signature (method_signature > function_signature).
       let outer = sig;
-      while (outer.parent && SIGNATURES.has(outer.parent.type)) outer = outer.parent;
-      if (!signatureOnly && outer.nextSibling && outer.nextSibling.type === 'function_body') end = outer.nextSibling.endPosition.row + 1;
-      const start = sig.startPosition.row + 1;
+      while (outer?.parent && SIGNATURES.has(outer.parent.type)) outer = outer.parent;
+      if (!signatureOnly && outer?.nextSibling && outer.nextSibling.type === 'function_body') end = outer.nextSibling.endPosition.row + 1;
+      const start = declaration ? declaration.startLine : sig.startPosition.row + 1;
       const hits = f.blocks.filter((x) => x.atoms.length && (() => { const sp = blockNewSpan(f, x); return sp && sp[0] <= end && sp[1] >= start && (!signatureOnly || x.rows.some((r) => r.n != null && r.n >= start && r.n <= end && plusRow.has(rel + ':' + r.n))); })());
       // The first change with code in it, so a comment edit doesn't stand for the function.
       const b = hits.find((x) => x.atoms.some((a) => !a.commentOnly)) || hits[0];
       return b ? { f, b } : null;
     };
     const changedParams = (f, line, col) => {
+      if (f.structure) {
+        const declaration = declarationAt(f.structure, line, col);
+        return f.structure.declarations.filter((parameter) => parameter.kind === 'PARAMETER' && parameter.elementOwner === declaration?.id).flatMap((parameter) => {
+          const [line, col] = parameter.position.split(':').map(Number);
+          const hit = plusRow.get(`${f.p}:${line}`);
+          return hit ? [{ line, col, b: hit.b }] : [];
+        });
+      }
       const sig = memberNode(f, line, col);
       if (!sig) return [];
       return sig.descendantsOfType('formal_parameter').map((fp) => {
@@ -789,6 +824,27 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       return hit ? { line: id.startPosition.row + 1, col: id.startPosition.column, b: hit.b } : null;
     };
     files.forEach((f) => {
+      if (f.structure) {
+        for (const argument of f.structure.arguments) {
+          if (argument.named || !argument.callable?.[0].startsWith(HEAD)) continue;
+          const [callee, line, col] = argument.callable;
+          const rel = callee.slice(HEAD.length);
+          const signature = changedInside(rel, line + 1, col, true);
+          if (!signature) continue;
+          const [target, parameterLine, parameterCol] = argument.target;
+          const parameter = target === callee && plusRow.get(`${rel}:${parameterLine + 1}`);
+          for (let n = argument.startLine; n <= argument.endLine; n++) {
+            const usage = plusRow.get(`${f.p}:${n}`);
+            if (!usage || !usage.r.toks.some((token) => token.atom && (n > argument.startLine || token.c + token.t.length > argument.startColumn) && (n < argument.endLine || token.c < argument.endColumn))) continue;
+            if (parameter) {
+              if (parameter.b !== usage.b) addUse(usage, `${rel}:${parameterLine + 1}:${parameterCol}`, declAt(rel, signature.f, parameter.b, parameterLine + 1, parameterCol));
+            } else if (!changedParams(signature.f, line + 1, col).length && signature.b !== usage.b) {
+              addUse(usage, `${rel}:${line + 1}:${col}`, declAt(rel, signature.f, signature.b, line + 1, col, { kind: 'member' }));
+            }
+          }
+        }
+        return;
+      }
       if (!f.newTree) return;
       f.blocks.forEach((b) => {
         if (!b.atoms.length) return;
@@ -828,7 +884,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         const i1 = key.lastIndexOf(':'), i0 = key.lastIndexOf(':', i1 - 1);
         const p = key.slice(0, i0), line = +key.slice(i0 + 1, i1), col = +key.slice(i1 + 1);
         const u = plusRow.get(p + ':' + line), f = fileByPath.get(p);
-        if (!u || !f || !f.newTree || !isMemberName(f, line, col) || /\/dart-sdk\/lib\/core\/object\.dart$/.test(tpath)) continue;
+        if (!u || !f || !f.newTree || !isMemberName(f, line, col) || /\/(?:dart-sdk|pkg\/sky_engine)\/lib\/core\/object\.dart$/.test(tpath)) continue;
         if (tpath.startsWith(HEAD)) {
           const rel = tpath.slice(HEAD.length), d = plusRow.get(rel + ':' + (tl + 1));
           if (d) { if (d.b !== u.b) addUse(u, `${rel}:${tl + 1}:${tc}`, declAt(rel, d.f, d.b, tl + 1, tc, { kind: 'member' })); continue; }
@@ -1058,6 +1114,21 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     // field's chain is the constructor's chain. Fields set by the unnamed constructor go to it.
     const fieldCtor = new Map();
     files.forEach((f) => {
+      if (f.structure) {
+        for (const parameter of f.structure.declarations) {
+          if (!parameter.field) continue;
+          const field = declarationAt(f.structure, parameter.field[1] + 1, parameter.field[2]);
+          const constructor = indexOf(f.structure).ids.get(parameter.owner);
+          if (!field || !constructor) continue;
+          const member = memberName(f.structure, constructor);
+          const unnamed = constructor.name.endsWith('.new');
+          const label = unnamed ? constructor.name.slice(0, -4) + '()' : member;
+          const key = f.p + '::' + memberName(f.structure, field);
+          if (!fieldCtor.has(key) || unnamed) fieldCtor.set(key, label);
+          fieldCtor.set(f.p + '::' + member, label);
+        }
+        return;
+      }
       if (!f.newTree) return;
       f.newTree.rootNode.descendantsOfType('constructor_param').forEach((cp) => {
         const ids = cp.descendantsOfType('identifier');
@@ -1082,6 +1153,20 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       const col = Number(d.key.slice(d.key.lastIndexOf(':') + 1));
       if (!tree || !d.line || !Number.isFinite(col)) return d.key;
 
+      const resolved = structures.get(tree);
+      if (resolved) {
+        let declaration = declarationAt(resolved, d.line, col);
+        // Anonymous callbacks have semantic identities even though they are not named
+        // reading units. Their parameters must not merge under the enclosing function.
+        if (declaration && ['PARAMETER', 'LOCAL_VARIABLE'].includes(declaration.kind) && declaration.elementOwner) {
+          return `${d.removed ? 'old:' : ''}${declaration.elementOwner}`;
+        }
+        while (declaration) {
+          if (CALLABLE_KINDS.has(declaration.kind)) return `${d.removed ? 'old:' : ''}${declaration.id}`;
+          declaration = indexOf(resolved).ids.get(declaration.owner);
+        }
+        return d.key;
+      }
       let node = tree.rootNode.descendantForPosition(pos(d.line, col));
       while (node) {
         if (SIGNATURES.has(node.type) || node.type === 'function_expression') {
@@ -1407,4 +1492,8 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     groups.slice(0, 8).forEach((g) => { const e = edits[g.parts[0].edits[0].id]; log(`   group ×${g.count} ${e.op} in ${e.where}: ${e.from.slice(0, 40)} → ${e.to.slice(0, 40)}`); });
   }
   return out;
+  } finally {
+    for (const tree of trees) tree.delete();
+    parser.delete();
+  }
 }
