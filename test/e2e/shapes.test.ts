@@ -171,7 +171,7 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     });
 
     it('then the removed copy points at where the function moved.', () => {
-      assert.equal(moved, '↦4 lines moved to b.dart:1, with 1 change');
+      assert.equal(moved, '↦4 lines moved to b.dart:1, with 1 change · Old lines 1–4');
     });
   });
 
@@ -193,7 +193,7 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     });
 
     it('then its header says where it moved from.', () => {
-      assert.equal(head, '↤ | Moved from a.dart:1 · 1 change | same change ×3 | show the moved lines');
+      assert.equal(head, '↤ | Moved from a.dart:1 · Lines 1–3 · 1 change | same change ×3 | show the moved lines');
     });
 
     it('then its body\'s diff stays in one column, under that header.', () => {
@@ -284,7 +284,7 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     it('then the changes outside chains are shown, by file.', () => {
       assert.equal(changes, [
         'lib/a.dart',
-        '  ↦4 lines moved to b.dart:1, with 1 change',
+        '  ↦4 lines moved to b.dart:1, with 1 change · Old lines 1–4',
         '  − void gone() {',
         "  −   print('bye');",
         '  − }',

@@ -506,26 +506,39 @@
     const notes = (o.badges || '') + (o.toggle || '');
     return `<div class="ln ${o.cls}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
-  // A moved declaration. The removed copy is one line pointing at the new place. The added
-  // copy shows the diff between the two bodies: unchanged lines are moved code, and long runs
-  // of them fold.
+  // Move annotations lead the snippet. Name the local lines so nearby import or other edits
+  // cannot be mistaken for the moved declaration. The removed body stays collapsed.
+  function moveLines(b, old) {
+    const meta = b.file.hunks[b.hunk].meta.slice(b.first, b.first + b.len);
+    const ns = meta.map((r) => old ? r.o : r.n).filter((n) => n != null);
+    return `${old ? 'Old l' : 'L'}ine${ns.length > 1 ? 's' : ''} ${ns[0]}${ns.length > 1 ? '–' + ns[ns.length - 1] : ''}`;
+  }
   function movedAwayHtml(b) {
     const to = M().files[b.movedTo.f];
     const what = b.movedTo.changes ? `with ${b.movedTo.changes} change${b.movedTo.changes > 1 ? 's' : ''}` : 'unchanged';
-    return `<div class="ln mv-away"><span class="g"></span><span class="no"></span><span class="sg">↦</span><span class="tx">${b.len} line${b.len > 1 ? 's' : ''} moved to <button type="button" class="linkish" data-open="${esc(to.p)}" data-line="${b.movedTo.n}">${esc(fileName(to.p))}:${b.movedTo.n}</button>, ${what}</span></div>`;
+    return `<div class="ln mv-away"><span class="g"></span><span class="no"></span><span class="sg">↦</span><span class="tx">${b.len} line${b.len > 1 ? 's' : ''} moved to <button type="button" class="linkish" data-open="${esc(to.p)}" data-line="${b.movedTo.n}">${esc(fileName(to.p))}:${b.movedTo.n}</button>, ${what} · ${moveLines(b, true)}</span></div>`;
   }
-  function movedHtml(f, b, ctx) {
+  function movedHeadHtml(f, b) {
     const from = M().files[b.move.f];
     const fromBlock = M().blockById.get(b.move.b);
     const fromLine = fromBlock ? from.hunks[fromBlock.hunk].meta[fromBlock.first].o : '';
-    const rows = b.move.rows;
-    const changed = rows.filter((r) => r[0] !== ' ').length;
     const d = done(b);
     const open = state.moveOpen.has(b.id);
     const groups = new Set(b.edits.map((id) => M().edits[id].group).filter((g) => g != null));
-    let h = `<div class="ln mv-head${d && b.edits.length ? ' rvd' : ''}"><span class="g">${b.edits.length ? tickHtml(b) : ''}</span><span class="no"></span><span class="sg">↤</span><span class="tx">Moved from <button type="button" class="linkish" data-open="${esc(from.p)}">${esc(fileName(from.p))}:${fromLine}</button> · ${b.edits.length ? `${b.edits.length} change${b.edits.length > 1 ? 's' : ''}` : 'no changes'}</span><span class="bdgs">`
+    let h = `<div class="ln mv-head${d && b.edits.length ? ' rvd' : ''}"><span class="g">${b.edits.length ? tickHtml(b) : ''}</span><span class="no"></span><span class="sg">↤</span><span class="tx">Moved from <button type="button" class="linkish" data-open="${esc(from.p)}" data-line="${fromLine}">${esc(fileName(from.p))}:${fromLine}</button> · ${moveLines(b, false)} · ${b.edits.length ? `${b.edits.length} change${b.edits.length > 1 ? 's' : ''}` : 'no changes'}</span><span class="bdgs">`
       + [...groups].map((g) => { const gr = M().groupById.get(g); return `<button type="button" class="note" data-group="${g}">same change ×${gr.count}</button>`; }).join('')
       + `<button type="button" class="note" data-act="toggle-move" data-block="${esc(b.id)}">${open ? 'fold the moved lines' : 'show the moved lines'}</button></span></div>`;
+    return h;
+  }
+  function moveHeadsHtml(f, h, start, end) {
+    const moves = new Set(h.meta.slice(start, end).map((r) => r.block).filter((b) => b && (b.move || b.movedTo)));
+    return [...moves].map((b) => b.move ? movedHeadHtml(f, b) : movedAwayHtml(b)).join('');
+  }
+  // The added copy compares the two bodies: unchanged lines are purple; edits stay red/green.
+  function movedHtml(f, b, ctx) {
+    const from = M().files[b.move.f];
+    const rows = b.move.rows, d = done(b), open = state.moveOpen.has(b.id);
+    let h = '';
     // Keep each change with 3 lines of context; fold the rest unless opened.
     const keep = new Set();
     rows.forEach((r, i) => { if (r[0] !== ' ') for (let k = Math.max(0, i - 3); k <= Math.min(rows.length - 1, i + 3); k++) keep.add(k); });
@@ -550,7 +563,7 @@
   function rowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
     const h = f.hunks[hi];
-    let out = '';
+    let out = moveHeadsHtml(f, h, start, end);
     const placed = new Set();
     for (let ri = start; ri < end; ri++) {
       const meta = h.meta[ri];
@@ -558,7 +571,7 @@
       const colors = rowColors(h.rows, f.p, ri);
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
-        if (!placed.has(b.id)) { placed.add(b.id); out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b); }
+        if (!placed.has(b.id)) { placed.add(b.id); if (b.move) out += movedHtml(f, b, ctx); }
         // A block moved away is one row here; threads on its removed lines still show.
         if (b.movedTo) out += threadsAt(f, 'LEFT', meta.o);
         continue;
@@ -609,13 +622,13 @@
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
     const h = f.hunks[hi];
-    let out = '';
+    let out = moveHeadsHtml(f, h, start, end);
     let ri = start;
     while (ri < end) {
       const meta = h.meta[ri];
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
-        out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b);
+        if (b.move) out += movedHtml(f, b, ctx);
         while (ri < end && h.meta[ri].block === b) { if (b.movedTo) out += threadsAt(f, 'LEFT', h.meta[ri].o); ri++; }
         continue;
       }
