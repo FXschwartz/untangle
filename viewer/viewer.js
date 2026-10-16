@@ -94,7 +94,7 @@
     search: { q: '', scope: 'unreviewed' },
     // Files shown whole, lines shown around each section of a diff ({ above, below } by its key),
     // and folders closed in the Files tab.
-    whole: new Set(), more: new Map(), closedDirs: new Set(),
+    whole: new Set(), more: new Map(), closedDirs: new Set(), fileSections: new Set(),
   };
   const STORE = 'untangle:' + (CONFIG.key || 'review');
   try {
@@ -2791,13 +2791,21 @@
           return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
         },
       });
-      if (m.generated.length) {
-        h += `<div class="sb-group"><span>Generated, not reviewed</span><span>${m.generated.length}</span></div>`;
-        h += treeHtml(fileTree(m.generated), 0, {
-          prefix: 'gen:',
+      const migration = (f) => /(^|\/)migrations?\//i.test(f.p);
+      for (const [key, label, files] of [
+        ['generated', 'Generated', m.generated.filter((f) => !migration(f))],
+        ['migrations', 'Migrations', m.generated.filter(migration)],
+      ]) {
+        if (!files.length) continue;
+        const open = state.fileSections.has(key);
+        h += `<button type="button" class="sb-group" data-act="file-section" data-section="${key}" aria-expanded="${open}" aria-controls="files-${key}"><span>${label}, not reviewed</span><span>${files.length} · ${open ? 'Collapse' : 'Expand'}</span></button>`;
+        h += `<div id="files-${key}"${open ? '' : ' hidden'}>`;
+        if (open) h += treeHtml(fileTree(files), 0, {
+          prefix: key + ':',
           count: () => ({ text: '', done: false }),
-          file: (f, depth, g) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: generated (${esc(f.gen)})">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">+${fmt(f.a)}</span></button>`,
+          file: (f, depth, g) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${key} (${esc(f.gen)})">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">+${fmt(f.a)}</span></button>`,
         });
+        h += '</div>';
       }
     }
     // Most clicks change only the code: the sidebar stays as it is.
@@ -3991,6 +3999,12 @@
       return;
     }
     if (d.tab) { state.tab = d.tab; if (d.tab === 'commits') loadCommits(); return render(); }
+    if (d.act === 'file-section') {
+      state.fileSections.has(d.section) ? state.fileSections.delete(d.section) : state.fileSections.add(d.section);
+      renderSide();
+      side.querySelector(`[data-section="${d.section}"]`)?.focus();
+      return;
+    }
     if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
     if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
     if (d.node !== undefined && !d.act) {

@@ -323,6 +323,7 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     before(async () => {
       await rest(page!);
       await page!.click('[data-tab="files"]');
+      await page!.click('[data-section="generated"]');
       await page!.until(`!!document.querySelector('[data-open="lib/app.g.dart"]')`);
       await page!.click('[data-open="lib/app.g.dart"]');
       await page!.until(`(document.querySelector('.code')?.textContent || '').includes('generated = 2')`);

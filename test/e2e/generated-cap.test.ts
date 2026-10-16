@@ -70,6 +70,7 @@ describe('Given a served review of a generated file with 20,002 changed lines, '
       await page.until(`!!document.querySelector('.t-head')`, 30_000);
       await rest(page);
       await page.click('[data-tab="files"]');
+      await page.click('[data-section="generated"]');
       await page.until(`!!document.querySelector('[data-open="lib/app.g.dart"]')`);
       await page.click('[data-open="lib/app.g.dart"]');
       await page.until(`(document.querySelector('.empty')?.textContent || '').includes(${JSON.stringify(tooMany)})`);

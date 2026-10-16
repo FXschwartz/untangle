@@ -547,9 +547,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
         'file added.dart',
         'file app.dart',
         'file notes.dart',
-        'Generated, not reviewed1',
-        'dir lib',
-        'file app.g.dart',
+        'Generated, not reviewed1 · Expand',
       ].join('\n'));
     });
   });
