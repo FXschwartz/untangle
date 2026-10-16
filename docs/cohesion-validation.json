@@ -1,0 +1,2832 @@
+{
+  "date": "2026-10-16",
+  "baseline": "8d60fa47c9bf323b00deca4c38ccc0b8de592156",
+  "method": "Public PR snapshots only. Identical pinned LSP answers replayed through baseline and corrected grouping rules. Atomic edit identity, generated files, complete nonduplicated reading units, independent source-type completeness, multiple-node chains and connected cross-file new-code chains are checked.",
+  "sourceHashes": {
+    "analysis/analyze.js": "fabde7ab984f5ace8d93618917bc73c1551ab83a57b8d9bb5d1aae977d5e85b4",
+    "analysis/units.js": "b7f3b34f4532a853b29215908f14a19e013f75aaab276b84553cdf14e3b7a238",
+    "analysis/chains.js": "c4f3c557548bc5dbc68b04adf7c1b3d357a57bcf11cbe286d82f76843384fdc3",
+    "viewer/viewer.js": "54f9a365312ae41bead430a4c4b894bc946be868aaf68ceebb8216234f2cc26f",
+    "src/build.ts": "0c01120863a792c8822247c5f7fae74df31574f62a83f9fa89cefbc01fbc899e",
+    "bench/cohesion.ts": "99bc1d9c6f4c473fcb6e99f777842d5ea72aa464a6b9ffbc64302f976d4fa291"
+  },
+  "firstPass": {
+    "status": "superseded: declarations were incorrectly promoted to chains",
+    "samples": [
+      {
+        "name": "fix/sync-merge-admission against main · 30c5b79",
+        "chains": 16,
+        "singleChangeChains": 5,
+        "singleNodeChains": 5,
+        "privateSingleChangeChains": 3
+      },
+      {
+        "name": "#5866 feat: Add `serverpod doctor` command · b70d235",
+        "chains": 46,
+        "singleChangeChains": 34,
+        "singleNodeChains": 34,
+        "privateSingleChangeChains": 19
+      },
+      {
+        "name": "#5869 feat: Add passwordless OTP login to the email identity provider · 20822a0",
+        "chains": 71,
+        "singleChangeChains": 47,
+        "singleNodeChains": 47,
+        "privateSingleChangeChains": 10
+      },
+      {
+        "name": "#5868 Reuse the cached upgrade prompt only for the CLI version that wrote it · 974a676",
+        "chains": 5,
+        "singleChangeChains": 3,
+        "singleNodeChains": 4,
+        "privateSingleChangeChains": 1
+      },
+      {
+        "name": "#5864 feat: Expose the runner log file through a `tail_runner_logs` MCP tool · 5a3750e",
+        "chains": 9,
+        "singleChangeChains": 1,
+        "singleNodeChains": 1,
+        "privateSingleChangeChains": 0
+      },
+      {
+        "name": "#5864 feat: Expose the runner log file through a `tail_runner_logs` MCP tool · ac5ee48",
+        "chains": 7,
+        "singleChangeChains": 1,
+        "singleNodeChains": 1,
+        "privateSingleChangeChains": 0
+      },
+      {
+        "name": "offline_sync #168",
+        "chains": 73,
+        "singleChangeChains": 23,
+        "singleNodeChains": 29,
+        "privateSingleChangeChains": 7
+      },
+      {
+        "name": "offline_sync #157",
+        "chains": 22,
+        "singleChangeChains": 12,
+        "singleNodeChains": 11,
+        "privateSingleChangeChains": 11
+      },
+      {
+        "name": "offline_sync #166",
+        "chains": 17,
+        "singleChangeChains": 8,
+        "singleNodeChains": 8,
+        "privateSingleChangeChains": 5
+      },
+      {
+        "name": "offline_sync #162",
+        "chains": 21,
+        "singleChangeChains": 14,
+        "singleNodeChains": 16,
+        "privateSingleChangeChains": 8
+      },
+      {
+        "name": "serverpod #5706",
+        "chains": 59,
+        "singleChangeChains": 25,
+        "singleNodeChains": 29,
+        "privateSingleChangeChains": 5
+      },
+      {
+        "name": "serverpod #5471",
+        "chains": 29,
+        "singleChangeChains": 15,
+        "singleNodeChains": 17,
+        "privateSingleChangeChains": 5
+      },
+      {
+        "name": "serverpod #5630",
+        "chains": 89,
+        "singleChangeChains": 49,
+        "singleNodeChains": 52,
+        "privateSingleChangeChains": 1
+      }
+    ]
+  },
+  "samples": [
+    {
+      "name": "fix/sync-merge-admission against main · 30c5b79",
+      "base": "ebf93852c73477ebd057f39fe6227071e38f7680",
+      "head": "30c5b79e9031dbdab3594ca0fe5b07375561e6c7",
+      "before": {
+        "files": 10,
+        "generated": 0,
+        "blocks": 101,
+        "changes": 101,
+        "remaining": 101,
+        "units": 0,
+        "chains": 16,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 9,
+        "largestFamily": 16,
+        "largestChains": [
+          {
+            "name": "wrapper",
+            "files": 3,
+            "changes": 30,
+            "blocks": 30
+          },
+          {
+            "name": "OfflineSyncDatabase.mergeChanges",
+            "files": 4,
+            "changes": 23,
+            "blocks": 23
+          },
+          {
+            "name": "OfflineSyncDatabaseContext()",
+            "files": 3,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "merge_admission_test.dart",
+            "files": 1,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "_MergeAdmission",
+            "files": 2,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "OfflineSyncCancelledException",
+            "files": 4,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "OfflineSyncEngine._loadOutboundRows",
+            "files": 1,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "− OfflineSyncEngine._fetchDomainRow",
+            "files": 1,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "OfflineSyncDatabase._transactionAs",
+            "files": 2,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "OfflineSyncEngine._syncSession",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          }
+        ]
+      },
+      "after": {
+        "files": 10,
+        "generated": 0,
+        "blocks": 101,
+        "changes": 72,
+        "remaining": 72,
+        "units": 21,
+        "chains": 10,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 30,
+        "largestFamily": 5,
+        "largestChains": [
+          {
+            "name": "OfflineSyncDatabase.mergeChanges(tx)",
+            "files": 2,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "OfflineSyncEngine._applyCycleBatch(isCancelled)",
+            "files": 2,
+            "changes": 10,
+            "blocks": 10
+          },
+          {
+            "name": "OfflineSyncEngine._loadOutboundRows",
+            "files": 1,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "− OfflineSyncEngine._fetchDomainRow",
+            "files": 1,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "OfflineSyncEngine._syncSession",
+            "files": 1,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "OfflineSyncDatabase.checkCancelled",
+            "files": 1,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "OfflineSyncInitialize.initializeOfflineSync(maxConcurrentMerges)",
+            "files": 2,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "OfflineSyncCancelledException",
+            "files": 2,
+            "changes": 2,
+            "blocks": 4
+          },
+          {
+            "name": "OfflineSyncDatabaseContext._mergeAdmission",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "OfflineSyncEngine._decodeOutboundRow",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 1,
+      "failures": [],
+      "examples": [
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/database/merge_admission.dart:3:0",
+          "kind": "type",
+          "name": "_MergeAdmission",
+          "file": "packages/serverpod_offline_sync/lib/src/database/merge_admission.dart",
+          "start": 3,
+          "end": 60,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/database/merge_admission.dart#1",
+            "packages/serverpod_offline_sync/lib/src/database/merge_admission.dart#2",
+            "packages/serverpod_offline_sync/lib/src/database/merge_admission.dart#3",
+            "packages/serverpod_offline_sync/lib/src/database/merge_admission.dart#4"
+          ]
+        },
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/sync/exceptions.dart:12:0",
+          "kind": "type",
+          "name": "OfflineSyncCancelledException",
+          "file": "packages/serverpod_offline_sync/lib/src/sync/exceptions.dart",
+          "start": 12,
+          "end": 19,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/sync/exceptions.dart#0",
+            "packages/serverpod_offline_sync/lib/src/sync/exceptions.dart#1",
+            "packages/serverpod_offline_sync/lib/src/sync/exceptions.dart#2"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/server/merge_admission_test.dart:522:0",
+          "kind": "type",
+          "name": "_HoldMerge",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/server/merge_admission_test.dart",
+          "start": 522,
+          "end": 542,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/server/merge_admission_test.dart#29",
+            "test/serverpod_offline_sync_test_server/test/integration/server/merge_admission_test.dart#30",
+            "test/serverpod_offline_sync_test_server/test/integration/server/merge_admission_test.dart#31",
+            "test/serverpod_offline_sync_test_server/test/integration/server/merge_admission_test.dart#32"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "#5866 feat: Add `serverpod doctor` command · b70d235",
+      "base": "7645c5b5d9fcd5fa7adb24ceff342368ed9628a3",
+      "head": "b70d2354aa2a85e6b21644336f1fdb23a02b3459",
+      "before": {
+        "files": 19,
+        "generated": 3,
+        "blocks": 186,
+        "changes": 186,
+        "remaining": 131,
+        "units": 0,
+        "chains": 26,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 5,
+        "largestFamily": 21,
+        "largestChains": [
+          {
+            "name": "DoctorStatus",
+            "files": 14,
+            "changes": 87,
+            "blocks": 87
+          },
+          {
+            "name": "DoctorCommand",
+            "files": 4,
+            "changes": 29,
+            "blocks": 29
+          },
+          {
+            "name": "DartSdkCheck",
+            "files": 4,
+            "changes": 25,
+            "blocks": 25
+          },
+          {
+            "name": "FlutterCheck",
+            "files": 4,
+            "changes": 22,
+            "blocks": 22
+          },
+          {
+            "name": "GitCheck",
+            "files": 4,
+            "changes": 17,
+            "blocks": 17
+          },
+          {
+            "name": "_createTempDirectory",
+            "files": 2,
+            "changes": 16,
+            "blocks": 16
+          },
+          {
+            "name": "NetworkCheck",
+            "files": 3,
+            "changes": 15,
+            "blocks": 15
+          },
+          {
+            "name": "check_probes_test.dart",
+            "files": 1,
+            "changes": 15,
+            "blocks": 15
+          },
+          {
+            "name": "ServerpodCliCheck",
+            "files": 3,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "dart_sdk_check_test.dart",
+            "files": 1,
+            "changes": 12,
+            "blocks": 12
+          }
+        ]
+      },
+      "after": {
+        "files": 19,
+        "generated": 3,
+        "blocks": 186,
+        "changes": 115,
+        "remaining": 91,
+        "units": 94,
+        "chains": 4,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 92,
+        "largestFamily": 3,
+        "largestChains": [
+          {
+            "name": "DoctorCommand",
+            "files": 8,
+            "changes": 15,
+            "blocks": 56
+          },
+          {
+            "name": "_serverpodOnBeforeRunCommand",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "_LazyPostHogAnalytics",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "buildCommandRunner",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 12,
+      "failures": [],
+      "examples": [
+        {
+          "id": "tools/serverpod_cli/lib/src/commands/doctor.dart:18:0",
+          "kind": "type",
+          "name": "DoctorOption",
+          "file": "tools/serverpod_cli/lib/src/commands/doctor.dart",
+          "start": 18,
+          "end": 32,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#2",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#3",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#4",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#5"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/commands/doctor.dart:34:0",
+          "kind": "type",
+          "name": "DoctorCommand",
+          "file": "tools/serverpod_cli/lib/src/commands/doctor.dart",
+          "start": 34,
+          "end": 79,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#6",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#7",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#8",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#9",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#10",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#11",
+            "tools/serverpod_cli/lib/src/commands/doctor.dart#12"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart:11:0",
+          "kind": "type",
+          "name": "DartSdkInfo",
+          "file": "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart",
+          "start": 11,
+          "end": 12,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#1"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart:14:0",
+          "kind": "type",
+          "name": "DartSdkCheck",
+          "file": "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart",
+          "start": 14,
+          "end": 159,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#2",
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#3",
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#4",
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#5",
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#6",
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#7",
+            "tools/serverpod_cli/lib/src/doctor/dart_sdk_check.dart#8"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/doctor_check.dart:3:0",
+          "kind": "type",
+          "name": "DoctorStatus",
+          "file": "tools/serverpod_cli/lib/src/doctor/doctor_check.dart",
+          "start": 3,
+          "end": 19,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#1",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#2",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#3",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#4",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#5",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#6"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/doctor_check.dart:21:0",
+          "kind": "type",
+          "name": "DoctorStatusMarker",
+          "file": "tools/serverpod_cli/lib/src/doctor/doctor_check.dart",
+          "start": 21,
+          "end": 29,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#7",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#8"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/doctor_check.dart:31:0",
+          "kind": "type",
+          "name": "DoctorCheckResult",
+          "file": "tools/serverpod_cli/lib/src/doctor/doctor_check.dart",
+          "start": 31,
+          "end": 75,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#9",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#10",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#11",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#12",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#13",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#14",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#15",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#16",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#17",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#18",
+            "tools/serverpod_cli/lib/src/doctor/doctor_check.dart#19"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/flutter_check.dart:10:0",
+          "kind": "type",
+          "name": "FlutterVersionInfo",
+          "file": "tools/serverpod_cli/lib/src/doctor/flutter_check.dart",
+          "start": 10,
+          "end": 15,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/flutter_check.dart#1"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/flutter_check.dart:17:0",
+          "kind": "type",
+          "name": "FlutterCheck",
+          "file": "tools/serverpod_cli/lib/src/doctor/flutter_check.dart",
+          "start": 17,
+          "end": 128,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/flutter_check.dart#2",
+            "tools/serverpod_cli/lib/src/doctor/flutter_check.dart#3",
+            "tools/serverpod_cli/lib/src/doctor/flutter_check.dart#4",
+            "tools/serverpod_cli/lib/src/doctor/flutter_check.dart#5",
+            "tools/serverpod_cli/lib/src/doctor/flutter_check.dart#6"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/git_check.dart:8:0",
+          "kind": "type",
+          "name": "GitCheck",
+          "file": "tools/serverpod_cli/lib/src/doctor/git_check.dart",
+          "start": 8,
+          "end": 96,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/git_check.dart#1",
+            "tools/serverpod_cli/lib/src/doctor/git_check.dart#2",
+            "tools/serverpod_cli/lib/src/doctor/git_check.dart#3",
+            "tools/serverpod_cli/lib/src/doctor/git_check.dart#4",
+            "tools/serverpod_cli/lib/src/doctor/git_check.dart#5"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/network_check.dart:7:0",
+          "kind": "type",
+          "name": "NetworkCheck",
+          "file": "tools/serverpod_cli/lib/src/doctor/network_check.dart",
+          "start": 7,
+          "end": 54,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/network_check.dart#1",
+            "tools/serverpod_cli/lib/src/doctor/network_check.dart#2",
+            "tools/serverpod_cli/lib/src/doctor/network_check.dart#3",
+            "tools/serverpod_cli/lib/src/doctor/network_check.dart#4",
+            "tools/serverpod_cli/lib/src/doctor/network_check.dart#5",
+            "tools/serverpod_cli/lib/src/doctor/network_check.dart#6"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/doctor/serverpod_cli_check.dart:5:0",
+          "kind": "type",
+          "name": "ServerpodCliCheck",
+          "file": "tools/serverpod_cli/lib/src/doctor/serverpod_cli_check.dart",
+          "start": 5,
+          "end": 60,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/doctor/serverpod_cli_check.dart#1",
+            "tools/serverpod_cli/lib/src/doctor/serverpod_cli_check.dart#2",
+            "tools/serverpod_cli/lib/src/doctor/serverpod_cli_check.dart#3",
+            "tools/serverpod_cli/lib/src/doctor/serverpod_cli_check.dart#4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "#5869 feat: Add passwordless OTP login to the email identity provider · 20822a0",
+      "base": "c738d28aace22c3bea6e6a9e6c05b398ce035f31",
+      "head": "20822a0dbea4544304334e0d2db0c69104db181d",
+      "before": {
+        "files": 33,
+        "generated": 54,
+        "blocks": 313,
+        "changes": 313,
+        "remaining": 313,
+        "units": 0,
+        "chains": 76,
+        "singleChangeChains": 0,
+        "singleNodeChains": 1,
+        "newCodeFileLocalChains": 0,
+        "outside": 16,
+        "largestFamily": 76,
+        "largestChains": [
+          {
+            "name": "EmailIdpOtpLoginUtil",
+            "files": 5,
+            "changes": 48,
+            "blocks": 48
+          },
+          {
+            "name": "EmailIdpConfig()",
+            "files": 9,
+            "changes": 47,
+            "blocks": 47
+          },
+          {
+            "name": "email_otp_flow_test.dart",
+            "files": 1,
+            "changes": 42,
+            "blocks": 42
+          },
+          {
+            "name": "EmailSignInTexts()",
+            "files": 6,
+            "changes": 31,
+            "blocks": 31
+          },
+          {
+            "name": "EmailSignInWidget()",
+            "files": 4,
+            "changes": 26,
+            "blocks": 26
+          },
+          {
+            "name": "EmailAuthController()",
+            "files": 5,
+            "changes": 21,
+            "blocks": 21
+          },
+          {
+            "name": "OtpCompleteRegistrationForm",
+            "files": 3,
+            "changes": 18,
+            "blocks": 18
+          },
+          {
+            "name": "EmailAccountOtpVerificationResult",
+            "files": 3,
+            "changes": 17,
+            "blocks": 17
+          },
+          {
+            "name": "EmailIdp.verifyOtpLoginCode",
+            "files": 4,
+            "changes": 17,
+            "blocks": 17
+          },
+          {
+            "name": "OtpStartForm",
+            "files": 3,
+            "changes": 13,
+            "blocks": 13
+          }
+        ]
+      },
+      "after": {
+        "files": 33,
+        "generated": 54,
+        "blocks": 313,
+        "changes": 208,
+        "remaining": 208,
+        "units": 92,
+        "chains": 28,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 96,
+        "largestFamily": 13,
+        "largestChains": [
+          {
+            "name": "EmailSignInTexts()",
+            "files": 3,
+            "changes": 19,
+            "blocks": 19
+          },
+          {
+            "name": "ServerpodCloudEmailClient.sendEmail",
+            "files": 6,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "EmailFlowScreen.otpCompleteRegistration",
+            "files": 3,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "EmailFlowScreen.otpVerify",
+            "files": 3,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "EmailIdpConfig()",
+            "files": 1,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "EmailSignInWidget()",
+            "files": 1,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "EmailAuthController()",
+            "files": 2,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "_buildEmailStory",
+            "files": 3,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "EmailFlowScreen.otpStart",
+            "files": 3,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "EmailAuthController._guardedFlow",
+            "files": 1,
+            "changes": 5,
+            "blocks": 5
+          }
+        ]
+      },
+      "introducedTypes": 13,
+      "failures": [],
+      "examples": [
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart:15:0",
+          "kind": "type",
+          "name": "OtpCompleteRegistrationForm",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart",
+          "start": 15,
+          "end": 42,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#1",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#2",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#3",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#4",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#5",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#6"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart:44:0",
+          "kind": "type",
+          "name": "_OtpCompleteRegistrationFormState",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart",
+          "start": 44,
+          "end": 139,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#7",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#8",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#9",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#10",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#11",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_registration_complete.dart#12"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_start.dart:14:0",
+          "kind": "type",
+          "name": "OtpStartForm",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_start.dart",
+          "start": 14,
+          "end": 89,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_start.dart#1",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_start.dart#2",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_start.dart#3",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/lib/src/email/forms/otp_start.dart#4"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart:194:0",
+          "kind": "type",
+          "name": "_OtpFlowStory",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart",
+          "start": 194,
+          "end": 210,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#8",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#9",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#10",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#11"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart:212:0",
+          "kind": "type",
+          "name": "_OtpFlowStoryState",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart",
+          "start": 212,
+          "end": 255,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#12",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#13",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#14",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#15",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#16",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/storybook/lib/stories/email.dart#17"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart:405:0",
+          "kind": "type",
+          "name": "_TestClient",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart",
+          "start": 405,
+          "end": 453,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#16",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#17",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#18",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#19",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#20",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#21",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#22"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart:455:0",
+          "kind": "type",
+          "name": "_TestEmailIdp",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart",
+          "start": 455,
+          "end": 549,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#23",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#24",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#25",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#26",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#27",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#28",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#29",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#30",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#31",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#32",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#33",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#34",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#35",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#36"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart:551:0",
+          "kind": "type",
+          "name": "_InMemoryStorage",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart",
+          "start": 551,
+          "end": 559,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#37",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#38",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#39",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#40"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart:561:0",
+          "kind": "type",
+          "name": "_TestSerializationManager",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart",
+          "start": 561,
+          "end": 561,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_flutter/test/email_otp_flow_test.dart#41"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/email_idp_config.dart:51:0",
+          "kind": "type",
+          "name": "SendOtpLoginVerificationCodeFunction",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/email_idp_config.dart",
+          "start": 51,
+          "end": 64,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/email_idp_config.dart#0"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart:10:0",
+          "kind": "type",
+          "name": "EmailIdpOtpLoginUtil",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart",
+          "start": 10,
+          "end": 515,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#1",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#2",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#3",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#4",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#5",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#6",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#7",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#8",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#9",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#10",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#11",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#12",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#13",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#14",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#15",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#16",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#17",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#18"
+          ]
+        },
+        {
+          "id": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart:517:0",
+          "kind": "type",
+          "name": "EmailIdpOtpLoginUtilsConfig",
+          "file": "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart",
+          "start": 517,
+          "end": 583,
+          "blocks": [
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#19",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#20",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#21",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#22",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#23",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#24",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#25",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#26",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#27",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#28",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#29",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#30",
+            "modules/serverpod_auth/serverpod_auth_idp/serverpod_auth_idp_server/lib/src/providers/email/business/utils/email_idp_otp_login_util.dart#31"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "#5868 Reuse the cached upgrade prompt only for the CLI version that wrote it · 974a676",
+      "base": "c738d28aace22c3bea6e6a9e6c05b398ce035f31",
+      "head": "974a676947dbdbb553a8db3dc5fc14074ca4d9cf",
+      "before": {
+        "files": 3,
+        "generated": 0,
+        "blocks": 9,
+        "changes": 9,
+        "remaining": 1,
+        "units": 0,
+        "chains": 2,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 4,
+        "largestFamily": 1,
+        "largestChains": [
+          {
+            "name": "_cliVersionKey",
+            "files": 1,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "ResourceManager.tryFetchLatestCliVersion",
+            "files": 2,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "after": {
+        "files": 3,
+        "generated": 0,
+        "blocks": 9,
+        "changes": 9,
+        "remaining": 1,
+        "units": 4,
+        "chains": 1,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 6,
+        "largestFamily": 1,
+        "largestChains": [
+          {
+            "name": "ResourceManager.tryFetchLatestCliVersion",
+            "files": 2,
+            "changes": 3,
+            "blocks": 3
+          }
+        ]
+      },
+      "introducedTypes": 0,
+      "failures": [],
+      "examples": []
+    },
+    {
+      "name": "#5864 feat: Expose the runner log file through a `tail_runner_logs` MCP tool · 5a3750e",
+      "base": "d65d22e0ede6318fbd10e2df6291b1d3b1e048b2",
+      "head": "5a3750e4feea045ec1df8efd057de73bb3cfd429",
+      "before": {
+        "files": 9,
+        "generated": 0,
+        "blocks": 36,
+        "changes": 36,
+        "remaining": 36,
+        "units": 0,
+        "chains": 8,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 2,
+        "largestFamily": 8,
+        "largestChains": [
+          {
+            "name": "“tail_runner_logs”",
+            "files": 5,
+            "changes": 15,
+            "blocks": 15
+          },
+          {
+            "name": "_makeBridgePair",
+            "files": 3,
+            "changes": 13,
+            "blocks": 13
+          },
+          {
+            "name": "tailRunnerLogsTool",
+            "files": 6,
+            "changes": 13,
+            "blocks": 13
+          },
+          {
+            "name": "serverpodRunnerLogPath",
+            "files": 2,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "“runner.log”",
+            "files": 3,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "BridgeMcpServer()",
+            "files": 1,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "BridgeMcpServer._tailRunnerLogs",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "serverpodRunnerLogName",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "after": {
+        "files": 9,
+        "generated": 0,
+        "blocks": 36,
+        "changes": 36,
+        "remaining": 36,
+        "units": 4,
+        "chains": 7,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 4,
+        "largestFamily": 6,
+        "largestChains": [
+          {
+            "name": "_makeBridgePair",
+            "files": 3,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "tailRunnerLogsTool",
+            "files": 6,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "“tail_runner_logs”",
+            "files": 5,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "serverpodRunnerLogPath",
+            "files": 2,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "BridgeMcpServer()",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "serverpodRunnerLogName",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "“runner.log”",
+            "files": 2,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 0,
+      "failures": [],
+      "examples": []
+    },
+    {
+      "name": "#5864 feat: Expose the runner log file through a `tail_runner_logs` MCP tool · ac5ee48",
+      "base": "d65d22e0ede6318fbd10e2df6291b1d3b1e048b2",
+      "head": "ac5ee483441009492411585799b1b9aec69560de",
+      "before": {
+        "files": 8,
+        "generated": 0,
+        "blocks": 29,
+        "changes": 29,
+        "remaining": 22,
+        "units": 0,
+        "chains": 7,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 2,
+        "largestFamily": 6,
+        "largestChains": [
+          {
+            "name": "“tail_runner_logs”",
+            "files": 5,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "tailRunnerLogsTool",
+            "files": 6,
+            "changes": 13,
+            "blocks": 13
+          },
+          {
+            "name": "serverpodRunnerLogName",
+            "files": 2,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "BridgeMcpServer()",
+            "files": 2,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "BridgeMcpServer.logPath",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "“runner.log”",
+            "files": 3,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "BridgeMcpServer._tailRunnerLogs",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "after": {
+        "files": 8,
+        "generated": 0,
+        "blocks": 29,
+        "changes": 29,
+        "remaining": 22,
+        "units": 4,
+        "chains": 5,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 2,
+        "largestFamily": 5,
+        "largestChains": [
+          {
+            "name": "tailRunnerLogsTool",
+            "files": 6,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "“tail_runner_logs”",
+            "files": 5,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "BridgeMcpServer()",
+            "files": 2,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "serverpodRunnerLogName",
+            "files": 2,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "“runner.log”",
+            "files": 2,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 0,
+      "failures": [],
+      "examples": []
+    },
+    {
+      "name": "offline_sync #168",
+      "base": "e0598c1577db2d55c9af7d0d165be6332256910d",
+      "head": "a45f9aee30bcb170b863373840e63a0e42a0092b",
+      "before": {
+        "files": 66,
+        "generated": 21,
+        "blocks": 580,
+        "changes": 580,
+        "remaining": 580,
+        "units": 0,
+        "chains": 63,
+        "singleChangeChains": 0,
+        "singleNodeChains": 3,
+        "newCodeFileLocalChains": 0,
+        "outside": 29,
+        "largestFamily": 62,
+        "largestChains": [
+          {
+            "name": "OfflineSyncDatabase.mergeChanges",
+            "files": 45,
+            "changes": 253,
+            "blocks": 253
+          },
+          {
+            "name": "user_clock_concurrency_test.dart",
+            "files": 1,
+            "changes": 119,
+            "blocks": 119
+          },
+          {
+            "name": "− OfflineSyncSpace.currentNode",
+            "files": 18,
+            "changes": 48,
+            "blocks": 48
+          },
+          {
+            "name": "persistedUserClock",
+            "files": 7,
+            "changes": 41,
+            "blocks": 41
+          },
+          {
+            "name": "OfflineSyncDatabase.transactionForUser",
+            "files": 7,
+            "changes": 40,
+            "blocks": 40
+          },
+          {
+            "name": "CrdtNode.localUserUuid",
+            "files": 11,
+            "changes": 22,
+            "blocks": 22
+          },
+          {
+            "name": "caller_transaction_clock_test.dart",
+            "files": 1,
+            "changes": 22,
+            "blocks": 22
+          },
+          {
+            "name": "CrdtRecorderContext.spaceIdFor",
+            "files": 5,
+            "changes": 19,
+            "blocks": 19
+          },
+          {
+            "name": "spaceClock",
+            "files": 2,
+            "changes": 18,
+            "blocks": 18
+          },
+          {
+            "name": "DstReplica.nodeUuidFor",
+            "files": 4,
+            "changes": 15,
+            "blocks": 15
+          }
+        ]
+      },
+      "after": {
+        "files": 66,
+        "generated": 21,
+        "blocks": 580,
+        "changes": 473,
+        "remaining": 473,
+        "units": 89,
+        "chains": 40,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 138,
+        "largestFamily": 36,
+        "largestChains": [
+          {
+            "name": "OfflineSyncSpaceManager.getOrCreateUserNode",
+            "files": 43,
+            "changes": 227,
+            "blocks": 227
+          },
+          {
+            "name": "− OfflineSyncSpace.currentNode",
+            "files": 18,
+            "changes": 51,
+            "blocks": 51
+          },
+          {
+            "name": "CrdtNode.localUserUuid",
+            "files": 10,
+            "changes": 18,
+            "blocks": 18
+          },
+          {
+            "name": "hlcManagerFor → spaceIdFor",
+            "files": 4,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "userId → spaceId",
+            "files": 5,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "OfflineSyncDatabase.recordSyncCheckpoint(spaceId)",
+            "files": 4,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "CrdtMutationRecorder.getOrCreateUserNode",
+            "files": 4,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "DstReplica.create · userNodeUuid",
+            "files": 3,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "OfflineSyncDatabase.transactionForUser",
+            "files": 4,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "_UserClock",
+            "files": 1,
+            "changes": 7,
+            "blocks": 7
+          }
+        ]
+      },
+      "introducedTypes": 6,
+      "failures": [],
+      "examples": [
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart:1688:0",
+          "kind": "type",
+          "name": "_PauseInMergeTransaction",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart",
+          "start": 1688,
+          "end": 1727,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#118",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#119",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#120",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#121",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#122",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#123"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart:1729:0",
+          "kind": "type",
+          "name": "_CountClockAccess",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart",
+          "start": 1729,
+          "end": 1836,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#124",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#125",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#126",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#127",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#128",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#129",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#130",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#131"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart:1838:0",
+          "kind": "type",
+          "name": "extension<T> on T",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart",
+          "start": 1838,
+          "end": 1840,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#132",
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#133"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart:1842:0",
+          "kind": "type",
+          "name": "_DisjointRun",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart",
+          "start": 1842,
+          "end": 1851,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#134"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart:1853:0",
+          "kind": "type",
+          "name": "_StaleWrappers",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart",
+          "start": 1853,
+          "end": 1860,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/server/user_clock_concurrency_test.dart#135"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/test_tools/sync_streams.dart:7:0",
+          "kind": "type",
+          "name": "SyncRound",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/test_tools/sync_streams.dart",
+          "start": 7,
+          "end": 12,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/test_tools/sync_streams.dart#1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "offline_sync #157",
+      "base": "65bcfb72d7c76ffec79b603702f48b0a34f47131",
+      "head": "405e7097ea821207e66a95b35560aa1f4711464f",
+      "before": {
+        "files": 10,
+        "generated": 0,
+        "blocks": 102,
+        "changes": 102,
+        "remaining": 102,
+        "units": 0,
+        "chains": 10,
+        "singleChangeChains": 1,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 4,
+        "largestFamily": 4,
+        "largestChains": [
+          {
+            "name": "metadata_batch_test.dart",
+            "files": 1,
+            "changes": 24,
+            "blocks": 24
+          },
+          {
+            "name": "_ProjectionReader",
+            "files": 2,
+            "changes": 23,
+            "blocks": 23
+          },
+          {
+            "name": "CrdtMergeRecorderExtension.mergeChanges",
+            "files": 3,
+            "changes": 21,
+            "blocks": 21
+          },
+          {
+            "name": "CrdtForeignKeyProjector._loadRowClosureInto(reader)",
+            "files": 1,
+            "changes": 20,
+            "blocks": 20
+          },
+          {
+            "name": "_MergeWriteBatch",
+            "files": 3,
+            "changes": 20,
+            "blocks": 20
+          },
+          {
+            "name": "sync_projection_wave_identity_test.dart",
+            "files": 1,
+            "changes": 10,
+            "blocks": 10
+          },
+          {
+            "name": "CrdtRecorderContext.findRowIdsHoldingAnyAttemptedValues",
+            "files": 3,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "CrdtRecorderContext.findDomainRowIdsWhereAnyColumnsIn",
+            "files": 3,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "− Future<void>",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "− _PendingInsertAttempts.isEmpty",
+            "files": 1,
+            "changes": 1,
+            "blocks": 2
+          }
+        ]
+      },
+      "after": {
+        "files": 10,
+        "generated": 0,
+        "blocks": 102,
+        "changes": 76,
+        "remaining": 76,
+        "units": 23,
+        "chains": 8,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 26,
+        "largestFamily": 4,
+        "largestChains": [
+          {
+            "name": "CrdtForeignKeyProjector._loadRowClosureInto(reader)",
+            "files": 2,
+            "changes": 23,
+            "blocks": 31
+          },
+          {
+            "name": "CrdtMergeRecorderExtension.mergeChanges(operation)",
+            "files": 3,
+            "changes": 15,
+            "blocks": 15
+          },
+          {
+            "name": "_MergeWriteBatch",
+            "files": 3,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "CrdtRecorderContext.findRowIdsHoldingAnyAttemptedValues",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "_MergeWriteBatch._flushInsertAttempts",
+            "files": 3,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "CrdtRecorderContext.findDomainRowIdsWhereAnyColumnsIn",
+            "files": 1,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "_MergeWriteBatch()",
+            "files": 2,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "− Future<void>",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 2,
+      "failures": [],
+      "examples": [
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart:3:0",
+          "kind": "type",
+          "name": "_ProjectionReader",
+          "file": "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart",
+          "start": 3,
+          "end": 142,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#1",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#2",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#3",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#4",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#5"
+          ]
+        },
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart:144:0",
+          "kind": "type",
+          "name": "_ProjectionClaimReads",
+          "file": "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart",
+          "start": 144,
+          "end": 193,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#6",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#7",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#8",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#9",
+            "packages/serverpod_offline_sync/lib/src/database/merge_utils/projection_reads.dart#10"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "offline_sync #166",
+      "base": "3a4ada5baf2b677156d4eae0cbe3f4d5b8255a39",
+      "head": "79f3cb5e3ca7f6c6ed041411a0f4971b9bbef12d",
+      "before": {
+        "files": 12,
+        "generated": 0,
+        "blocks": 123,
+        "changes": 123,
+        "remaining": 123,
+        "units": 0,
+        "chains": 13,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 11,
+        "largestFamily": 13,
+        "largestChains": [
+          {
+            "name": "OfflineSyncEngine.collectPendingChanges",
+            "files": 4,
+            "changes": 54,
+            "blocks": 54
+          },
+          {
+            "name": "dst_outbound_snapshot_test.dart",
+            "files": 1,
+            "changes": 25,
+            "blocks": 25
+          },
+          {
+            "name": "outbound_capture_database.dart",
+            "files": 3,
+            "changes": 22,
+            "blocks": 22
+          },
+          {
+            "name": "DstAdversary()",
+            "files": 3,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "DstReplica.collect",
+            "files": 3,
+            "changes": 10,
+            "blocks": 10
+          },
+          {
+            "name": "DstAdversary._collect",
+            "files": 2,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "outbound_snapshot_test.dart",
+            "files": 1,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "DstReplica._captureDatabase",
+            "files": 1,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "DstAdversary._collectPending",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "DstAdversary.captureInterleavingProbability",
+            "files": 2,
+            "changes": 4,
+            "blocks": 4
+          }
+        ]
+      },
+      "after": {
+        "files": 12,
+        "generated": 0,
+        "blocks": 123,
+        "changes": 80,
+        "remaining": 80,
+        "units": 26,
+        "chains": 6,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 37,
+        "largestFamily": 1,
+        "largestChains": [
+          {
+            "name": "OfflineSyncEngine.collectPendingChanges(transaction)",
+            "files": 2,
+            "changes": 28,
+            "blocks": 28
+          },
+          {
+            "name": "DstReplica._captureDatabase",
+            "files": 1,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "DstAdversary._collectDelta",
+            "files": 1,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "DstReplica._captureSession",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "runDstSimulation(replica)",
+            "files": 2,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "DstAdversary()",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 3,
+      "failures": [],
+      "examples": [
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart:287:0",
+          "kind": "type",
+          "name": "_FirstYieldSchedule",
+          "file": "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart",
+          "start": 287,
+          "end": 300,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#21",
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#22",
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#23",
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#24",
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#25"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart:302:0",
+          "kind": "type",
+          "name": "_CaptureSchedule",
+          "file": "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart",
+          "start": 302,
+          "end": 307,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#26",
+            "test/serverpod_offline_sync_test_server/test/dst/dst_outbound_snapshot_test.dart#27"
+          ]
+        },
+        {
+          "id": "test/serverpod_offline_sync_test_server/test/integration/test_tools/outbound_capture_database.dart:4:0",
+          "kind": "type",
+          "name": "OutboundCaptureDatabase",
+          "file": "test/serverpod_offline_sync_test_server/test/integration/test_tools/outbound_capture_database.dart",
+          "start": 4,
+          "end": 45,
+          "blocks": [
+            "test/serverpod_offline_sync_test_server/test/integration/test_tools/outbound_capture_database.dart#1",
+            "test/serverpod_offline_sync_test_server/test/integration/test_tools/outbound_capture_database.dart#2",
+            "test/serverpod_offline_sync_test_server/test/integration/test_tools/outbound_capture_database.dart#3",
+            "test/serverpod_offline_sync_test_server/test/integration/test_tools/outbound_capture_database.dart#4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "offline_sync #162",
+      "base": "de3498aa209e852fd3c040b3572e64d155704fa4",
+      "head": "499dc1f49977f9b1f0042c13cc836f6927741856",
+      "before": {
+        "files": 19,
+        "generated": 83,
+        "blocks": 104,
+        "changes": 104,
+        "remaining": 104,
+        "units": 0,
+        "chains": 13,
+        "singleChangeChains": 0,
+        "singleNodeChains": 1,
+        "newCodeFileLocalChains": 0,
+        "outside": 6,
+        "largestFamily": 6,
+        "largestChains": [
+          {
+            "name": "watch_test.dart",
+            "files": 1,
+            "changes": 27,
+            "blocks": 27
+          },
+          {
+            "name": "mergeWhereWithVisibility",
+            "files": 3,
+            "changes": 21,
+            "blocks": 21
+          },
+          {
+            "name": "'>=4.0.4 <4.1.0' → ^4.1.0-beta.3",
+            "files": 9,
+            "changes": 13,
+            "blocks": 13
+          },
+          {
+            "name": "_IncludeObjectCopy",
+            "files": 1,
+            "changes": 10,
+            "blocks": 10
+          },
+          {
+            "name": "include → queryInclude",
+            "files": 1,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "copyInclude",
+            "files": 3,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "_OfflineSyncDatabaseWatch",
+            "files": 3,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "crdtRowVisibilityPredicate",
+            "files": 3,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "HlcManager(currentNode)",
+            "files": 2,
+            "changes": 3,
+            "blocks": 3
+          },
+          {
+            "name": "overrides Database.watch",
+            "files": 3,
+            "changes": 3,
+            "blocks": 3
+          }
+        ]
+      },
+      "after": {
+        "files": 19,
+        "generated": 83,
+        "blocks": 104,
+        "changes": 93,
+        "remaining": 93,
+        "units": 33,
+        "chains": 6,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 49,
+        "largestFamily": 2,
+        "largestChains": [
+          {
+            "name": "mergeWhereWithVisibility",
+            "files": 1,
+            "changes": 19,
+            "blocks": 19
+          },
+          {
+            "name": "'>=4.0.4 <4.1.0' → ^4.1.0-beta.3",
+            "files": 9,
+            "changes": 13,
+            "blocks": 13
+          },
+          {
+            "name": "+ final queryInclude = copyInclude(include);",
+            "files": 1,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "HlcManager(currentNode)",
+            "files": 3,
+            "changes": 4,
+            "blocks": 4
+          },
+          {
+            "name": "OfflineSyncDatabase.watch",
+            "files": 2,
+            "changes": 2,
+            "blocks": 4
+          },
+          {
+            "name": "OfflineSyncDatabase.unsafeWatch",
+            "files": 2,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 3,
+      "failures": [],
+      "examples": [
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/database/includes.dart:16:0",
+          "kind": "type",
+          "name": "_IncludeObjectCopy",
+          "file": "packages/serverpod_offline_sync/lib/src/database/includes.dart",
+          "start": 16,
+          "end": 28,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#2",
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#3",
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#4",
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#5"
+          ]
+        },
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/database/includes.dart:30:0",
+          "kind": "type",
+          "name": "_IncludeListCopy",
+          "file": "packages/serverpod_offline_sync/lib/src/database/includes.dart",
+          "start": 30,
+          "end": 49,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#6",
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#7",
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#8",
+            "packages/serverpod_offline_sync/lib/src/database/includes.dart#9"
+          ]
+        },
+        {
+          "id": "packages/serverpod_offline_sync/lib/src/database/watch.dart:3:0",
+          "kind": "type",
+          "name": "_OfflineSyncDatabaseWatch",
+          "file": "packages/serverpod_offline_sync/lib/src/database/watch.dart",
+          "start": 3,
+          "end": 101,
+          "blocks": [
+            "packages/serverpod_offline_sync/lib/src/database/watch.dart#1",
+            "packages/serverpod_offline_sync/lib/src/database/watch.dart#2",
+            "packages/serverpod_offline_sync/lib/src/database/watch.dart#3"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "serverpod #5706",
+      "base": "c738d28aace22c3bea6e6a9e6c05b398ce035f31",
+      "head": "3040ac91bbb14279e81aa1a8879ed189852fb256",
+      "before": {
+        "files": 29,
+        "generated": 1,
+        "blocks": 261,
+        "changes": 261,
+        "remaining": 261,
+        "units": 0,
+        "chains": 50,
+        "singleChangeChains": 0,
+        "singleNodeChains": 2,
+        "newCodeFileLocalChains": 0,
+        "outside": 49,
+        "largestFamily": 46,
+        "largestChains": [
+          {
+            "name": "EmbeddedPostgresImpl.start",
+            "files": 13,
+            "changes": 79,
+            "blocks": 79
+          },
+          {
+            "name": "DualTransport",
+            "files": 9,
+            "changes": 35,
+            "blocks": 35
+          },
+          {
+            "name": "TransportListeners",
+            "files": 5,
+            "changes": 30,
+            "blocks": 30
+          },
+          {
+            "name": "EmbeddedPostgresOptions()",
+            "files": 6,
+            "changes": 25,
+            "blocks": 25
+          },
+          {
+            "name": "PortInUseException",
+            "files": 6,
+            "changes": 18,
+            "blocks": 18
+          },
+          {
+            "name": "EmbeddedPostgres.tcpEndpoint",
+            "files": 7,
+            "changes": 17,
+            "blocks": 17
+          },
+          {
+            "name": "UnixTransport()",
+            "files": 6,
+            "changes": 16,
+            "blocks": 16
+          },
+          {
+            "name": "ResolvedEmbeddedPostgres()",
+            "files": 3,
+            "changes": 14,
+            "blocks": 14
+          },
+          {
+            "name": "writeServerProject",
+            "files": 1,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "selectOne",
+            "files": 3,
+            "changes": 11,
+            "blocks": 11
+          }
+        ]
+      },
+      "after": {
+        "files": 29,
+        "generated": 1,
+        "blocks": 261,
+        "changes": 237,
+        "remaining": 237,
+        "units": 56,
+        "chains": 25,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 102,
+        "largestFamily": 19,
+        "largestChains": [
+          {
+            "name": "_deleteIfExists",
+            "files": 4,
+            "changes": 44,
+            "blocks": 44
+          },
+          {
+            "name": "startOrAttachEmbeddedPostgres",
+            "files": 7,
+            "changes": 28,
+            "blocks": 28
+          },
+          {
+            "name": "ResolvedEmbeddedPostgres()",
+            "files": 3,
+            "changes": 20,
+            "blocks": 20
+          },
+          {
+            "name": "embedded_postgres_integration_test.dart · databasePort",
+            "files": 1,
+            "changes": 17,
+            "blocks": 23
+          },
+          {
+            "name": "+ environment: { ServerpodEnv.databasePort.envVar…",
+            "files": 1,
+            "changes": 10,
+            "blocks": 10
+          },
+          {
+            "name": "EmbeddedPostgres.tcpEndpoint",
+            "files": 5,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "writeServerProject",
+            "files": 1,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "EmbeddedPostgresOptions()",
+            "files": 3,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "_generatedPasswordFileName",
+            "files": 2,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "_pidFileName",
+            "files": 2,
+            "changes": 8,
+            "blocks": 8
+          }
+        ]
+      },
+      "introducedTypes": 4,
+      "failures": [],
+      "examples": [
+        {
+          "id": "packages/serverpod_database/test/embedded_postgres_integration_test.dart:331:0",
+          "kind": "type",
+          "name": "_TestSession",
+          "file": "packages/serverpod_database/test/embedded_postgres_integration_test.dart",
+          "start": 331,
+          "end": 347,
+          "blocks": [
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#30",
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#31",
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#32",
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#33",
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#34",
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#35",
+            "packages/serverpod_database/test/embedded_postgres_integration_test.dart#36"
+          ]
+        },
+        {
+          "id": "packages/serverpod_embedded_postgres/lib/src/exceptions.dart:159:0",
+          "kind": "type",
+          "name": "PortInUseException",
+          "file": "packages/serverpod_embedded_postgres/lib/src/exceptions.dart",
+          "start": 159,
+          "end": 167,
+          "blocks": [
+            "packages/serverpod_embedded_postgres/lib/src/exceptions.dart#0",
+            "packages/serverpod_embedded_postgres/lib/src/exceptions.dart#1",
+            "packages/serverpod_embedded_postgres/lib/src/exceptions.dart#2"
+          ]
+        },
+        {
+          "id": "packages/serverpod_embedded_postgres/lib/src/transport.dart:38:0",
+          "kind": "type",
+          "name": "DualTransport",
+          "file": "packages/serverpod_embedded_postgres/lib/src/transport.dart",
+          "start": 38,
+          "end": 51,
+          "blocks": [
+            "packages/serverpod_embedded_postgres/lib/src/transport.dart#7",
+            "packages/serverpod_embedded_postgres/lib/src/transport.dart#8",
+            "packages/serverpod_embedded_postgres/lib/src/transport.dart#9",
+            "packages/serverpod_embedded_postgres/lib/src/transport.dart#10"
+          ]
+        },
+        {
+          "id": "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart:6:0",
+          "kind": "type",
+          "name": "TransportListeners",
+          "file": "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart",
+          "start": 6,
+          "end": 41,
+          "blocks": [
+            "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart#2",
+            "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart#3",
+            "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart#4",
+            "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart#5",
+            "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart#6",
+            "packages/serverpod_embedded_postgres/lib/src/transport_listeners.dart#7"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "serverpod #5471",
+      "base": "75758185b9d54d9980fbf32b8895790ddb7cba32",
+      "head": "c0c5219ad0b1003c5c556a4333fc99729ef0bbc3",
+      "before": {
+        "files": 17,
+        "generated": 1,
+        "blocks": 146,
+        "changes": 146,
+        "remaining": 146,
+        "units": 0,
+        "chains": 22,
+        "singleChangeChains": 0,
+        "singleNodeChains": 2,
+        "newCodeFileLocalChains": 0,
+        "outside": 2,
+        "largestFamily": 20,
+        "largestChains": [
+          {
+            "name": "CustomClassAnalyzer",
+            "files": 6,
+            "changes": 69,
+            "blocks": 69
+          },
+          {
+            "name": "TypeDefinition()",
+            "files": 11,
+            "changes": 44,
+            "blocks": 44
+          },
+          {
+            "name": "testSharedProjectDirectory",
+            "files": 3,
+            "changes": 41,
+            "blocks": 41
+          },
+          {
+            "name": "createTestSharedPackageEnvironment",
+            "files": 4,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "extra_class_migration_test.dart",
+            "files": 1,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "extra_classes_config_test.dart",
+            "files": 1,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "findContextFor",
+            "files": 4,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "CustomClassMethodAnalyzer",
+            "files": 2,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "+ tearDownAll(() { testSharedProjectDirectory.del…",
+            "files": 3,
+            "changes": 6,
+            "blocks": 6
+          },
+          {
+            "name": "custom_class_type_extraction_test.dart",
+            "files": 1,
+            "changes": 6,
+            "blocks": 6
+          }
+        ]
+      },
+      "after": {
+        "files": 17,
+        "generated": 1,
+        "blocks": 146,
+        "changes": 88,
+        "remaining": 88,
+        "units": 45,
+        "chains": 8,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 43,
+        "largestFamily": 4,
+        "largestChains": [
+          {
+            "name": "TypeDefinition()",
+            "files": 6,
+            "changes": 20,
+            "blocks": 20
+          },
+          {
+            "name": "Analyzers(customClassAnalyzer)",
+            "files": 2,
+            "changes": 10,
+            "blocks": 10
+          },
+          {
+            "name": "Analyzers._customClassAnalyzer",
+            "files": 1,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "GeneratorConfig.load",
+            "files": 3,
+            "changes": 5,
+            "blocks": 5
+          },
+          {
+            "name": "CustomClassAnalyzer",
+            "files": 2,
+            "changes": 3,
+            "blocks": 19
+          },
+          {
+            "name": "+ // Limit discovery to the server's lib director…",
+            "files": 2,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "_FakeConfig._extraClasses",
+            "files": 1,
+            "changes": 2,
+            "blocks": 2
+          },
+          {
+            "name": "for (var context in collection.contexts) { var … → final normalizedFilePath = p.normalize(filePath…",
+            "files": 2,
+            "changes": 2,
+            "blocks": 2
+          }
+        ]
+      },
+      "introducedTypes": 3,
+      "failures": [],
+      "examples": [
+        {
+          "id": "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart:17:0",
+          "kind": "type",
+          "name": "_CustomClassFileResult",
+          "file": "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart",
+          "start": 17,
+          "end": 28,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#1",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#2",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#3",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#4"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart:30:0",
+          "kind": "type",
+          "name": "CustomClassAnalyzer",
+          "file": "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart",
+          "start": 30,
+          "end": 280,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#5",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#6",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#7",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#8",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#9",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#10",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#11",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#12",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#13",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#14",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzer.dart#15"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzers/custom_class_method_analyzer.dart:8:0",
+          "kind": "type",
+          "name": "CustomClassMethodAnalyzer",
+          "file": "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzers/custom_class_method_analyzer.dart",
+          "start": 8,
+          "end": 113,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzers/custom_class_method_analyzer.dart#1",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzers/custom_class_method_analyzer.dart#2",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzers/custom_class_method_analyzer.dart#3",
+            "tools/serverpod_cli/lib/src/analyzer/dart/custom_class_analyzers/custom_class_method_analyzer.dart#4"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "serverpod #5630",
+      "base": "2e30f60ef55cbad0ae796fbd6f954106eb5f3618",
+      "head": "0053e21ac9f518261cbdb0364139fde5d1e6fd79",
+      "before": {
+        "files": 37,
+        "generated": 476,
+        "blocks": 264,
+        "changes": 264,
+        "remaining": 264,
+        "units": 0,
+        "chains": 79,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 39,
+        "largestFamily": 67,
+        "largestChains": [
+          {
+            "name": "Include.selectedColumns",
+            "files": 9,
+            "changes": 29,
+            "blocks": 29
+          },
+          {
+            "name": "ColumnJsonField",
+            "files": 5,
+            "changes": 17,
+            "blocks": 17
+          },
+          {
+            "name": "JsonCompatibleInclude",
+            "files": 5,
+            "changes": 16,
+            "blocks": 16
+          },
+          {
+            "name": "ProjectedOrder",
+            "files": 3,
+            "changes": 16,
+            "blocks": 16
+          },
+          {
+            "name": "FullModelInclude",
+            "files": 6,
+            "changes": 15,
+            "blocks": 15
+          },
+          {
+            "name": "SerializableModelLibraryGenerator._buildModelJsonIncludeClass",
+            "files": 1,
+            "changes": 15,
+            "blocks": 15
+          },
+          {
+            "name": "ModelClassDefinition()",
+            "files": 4,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "ProjectedAddress",
+            "files": 3,
+            "changes": 12,
+            "blocks": 12
+          },
+          {
+            "name": "Database.findFirstRowAsJson",
+            "files": 6,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "IncludeList",
+            "files": 5,
+            "changes": 11,
+            "blocks": 11
+          }
+        ]
+      },
+      "after": {
+        "files": 37,
+        "generated": 476,
+        "blocks": 264,
+        "changes": 247,
+        "remaining": 247,
+        "units": 69,
+        "chains": 40,
+        "singleChangeChains": 0,
+        "singleNodeChains": 0,
+        "newCodeFileLocalChains": 0,
+        "outside": 101,
+        "largestFamily": 35,
+        "largestChains": [
+          {
+            "name": "ModelClassDefinition()",
+            "files": 6,
+            "changes": 22,
+            "blocks": 22
+          },
+          {
+            "name": "SerializableModelLibraryGenerator._buildModelJsonIncludeClass",
+            "files": 1,
+            "changes": 17,
+            "blocks": 17
+          },
+          {
+            "name": "+ 'select': refer('select').nullSafeProperty('cal…",
+            "files": 1,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "+ Parameter( (p) => p ..type = typeSelectColumnsB…",
+            "files": 1,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "resolvePrefixedQueryRow(selectedColumns)",
+            "files": 3,
+            "changes": 11,
+            "blocks": 11
+          },
+          {
+            "name": "IncludeList",
+            "files": 4,
+            "changes": 9,
+            "blocks": 9
+          },
+          {
+            "name": "..symbol = className ..isNullable = true → (r) => r ..isNullable = true ..symbol = 'Map' .…",
+            "files": 1,
+            "changes": 8,
+            "blocks": 8
+          },
+          {
+            "name": "IncludeList()",
+            "files": 2,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "SerializableModelLibraryGenerator._buildModelIncludeListClassConstructor",
+            "files": 1,
+            "changes": 7,
+            "blocks": 7
+          },
+          {
+            "name": "_ListQueryAdditions()",
+            "files": 2,
+            "changes": 7,
+            "blocks": 7
+          }
+        ]
+      },
+      "introducedTypes": 6,
+      "failures": [],
+      "examples": [
+        {
+          "id": "packages/serverpod_database/lib/src/concepts/columns.dart:12:0",
+          "kind": "type",
+          "name": "SelectColumnsBuilder",
+          "file": "packages/serverpod_database/lib/src/concepts/columns.dart",
+          "start": 12,
+          "end": 13,
+          "blocks": [
+            "packages/serverpod_database/lib/src/concepts/columns.dart#1"
+          ]
+        },
+        {
+          "id": "packages/serverpod_database/lib/src/concepts/columns.dart:116:0",
+          "kind": "type",
+          "name": "ColumnJsonField",
+          "file": "packages/serverpod_database/lib/src/concepts/columns.dart",
+          "start": 116,
+          "end": 140,
+          "blocks": [
+            "packages/serverpod_database/lib/src/concepts/columns.dart#6",
+            "packages/serverpod_database/lib/src/concepts/columns.dart#7",
+            "packages/serverpod_database/lib/src/concepts/columns.dart#8",
+            "packages/serverpod_database/lib/src/concepts/columns.dart#9",
+            "packages/serverpod_database/lib/src/concepts/columns.dart#10"
+          ]
+        },
+        {
+          "id": "packages/serverpod_database/lib/src/concepts/includes.dart:3:0",
+          "kind": "type",
+          "name": "JsonCompatibleInclude",
+          "file": "packages/serverpod_database/lib/src/concepts/includes.dart",
+          "start": 3,
+          "end": 4,
+          "blocks": [
+            "packages/serverpod_database/lib/src/concepts/includes.dart#0"
+          ]
+        },
+        {
+          "id": "packages/serverpod_database/lib/src/concepts/includes.dart:6:0",
+          "kind": "type",
+          "name": "FullModelInclude",
+          "file": "packages/serverpod_database/lib/src/concepts/includes.dart",
+          "start": 6,
+          "end": 7,
+          "blocks": [
+            "packages/serverpod_database/lib/src/concepts/includes.dart#1"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart:974:0",
+          "kind": "type",
+          "name": "SerializableModelProjectionDefinition",
+          "file": "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart",
+          "start": 974,
+          "end": 991,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#9",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#10",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#11",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#12",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#13"
+          ]
+        },
+        {
+          "id": "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart:993:0",
+          "kind": "type",
+          "name": "ProjectionFieldDefinition",
+          "file": "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart",
+          "start": 993,
+          "end": 1006,
+          "blocks": [
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#14",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#15",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#16",
+            "tools/serverpod_cli/lib/src/analyzer/models/definitions.dart#17"
+          ]
+        },
+        {
+          "id": "tests/serverpod_test_server/lib/src/models/projected_address.spy.yaml:1:0",
+          "kind": "model",
+          "name": "ProjectedAddress",
+          "file": "tests/serverpod_test_server/lib/src/models/projected_address.spy.yaml",
+          "start": 1,
+          "end": 16,
+          "blocks": [
+            "tests/serverpod_test_server/lib/src/models/projected_address.spy.yaml#0"
+          ]
+        },
+        {
+          "id": "tests/serverpod_test_server/lib/src/models/projected_article.spy.yaml:1:0",
+          "kind": "model",
+          "name": "ProjectedArticle",
+          "file": "tests/serverpod_test_server/lib/src/models/projected_article.spy.yaml",
+          "start": 1,
+          "end": 15,
+          "blocks": [
+            "tests/serverpod_test_server/lib/src/models/projected_article.spy.yaml#0"
+          ]
+        },
+        {
+          "id": "tests/serverpod_test_server/lib/src/models/projected_author.spy.yaml:1:0",
+          "kind": "model",
+          "name": "ProjectedAuthor",
+          "file": "tests/serverpod_test_server/lib/src/models/projected_author.spy.yaml",
+          "start": 1,
+          "end": 8,
+          "blocks": [
+            "tests/serverpod_test_server/lib/src/models/projected_author.spy.yaml#0"
+          ]
+        },
+        {
+          "id": "tests/serverpod_test_server/lib/src/models/projected_course.spy.yaml:1:0",
+          "kind": "model",
+          "name": "ProjectedCourse",
+          "file": "tests/serverpod_test_server/lib/src/models/projected_course.spy.yaml",
+          "start": 1,
+          "end": 11,
+          "blocks": [
+            "tests/serverpod_test_server/lib/src/models/projected_course.spy.yaml#0"
+          ]
+        },
+        {
+          "id": "tests/serverpod_test_server/lib/src/models/projected_enrollment.spy.yaml:1:0",
+          "kind": "model",
+          "name": "ProjectedEnrollment",
+          "file": "tests/serverpod_test_server/lib/src/models/projected_enrollment.spy.yaml",
+          "start": 1,
+          "end": 16,
+          "blocks": [
+            "tests/serverpod_test_server/lib/src/models/projected_enrollment.spy.yaml#0"
+          ]
+        },
+        {
+          "id": "tests/serverpod_test_server/lib/src/models/projected_json_field.spy:1:0",
+          "kind": "model",
+          "name": "ProjectedJsonField",
+          "file": "tests/serverpod_test_server/lib/src/models/projected_json_field.spy",
+          "start": 1,
+          "end": 25,
+          "blocks": [
+            "tests/serverpod_test_server/lib/src/models/projected_json_field.spy#0"
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "build": "passed",
+    "typecheck": "passed",
+    "strictBenchmarkTypecheck": "passed",
+    "completeSuite": {
+      "tests": 477,
+      "passed": 477,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "finalFocusedSuite": {
+      "tests": 14,
+      "passed": 14,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "corpus": {
+      "samples": 13,
+      "introducedTypes": 53,
+      "singleChangeChains": 0,
+      "singleNodeChains": 0,
+      "newCodeFileLocalChains": 0,
+      "renderedModelsByteIdenticalToFinalReplay": true
+    },
+    "note": "The full suite preceded the final Markdown-unit attachment guard, locale-independent cycle-root tie break and empty-map wording adjustment. Focused cohesion checks passed afterward; all 13 public corpus models are byte-identical to the rendered models. The browser inspection used the current viewer wording. No original review cache or marks were written."
+  },
+  "browserObservations": [
+    {
+      "name": "OfflineSyncSpaceManager.getOrCreateUserNode",
+      "chains": 40,
+      "singletonChains": 0,
+      "fileLocalNewChains": 0,
+      "sections": 38,
+      "ownSections": 0,
+      "declarationVisible": false,
+      "pill": "1 of 83",
+      "progress": "473changes to review"
+    },
+    {
+      "name": "CustomClassAnalyzer",
+      "chains": 8,
+      "singletonChains": 0,
+      "fileLocalNewChains": 0,
+      "sections": 3,
+      "ownSections": 1,
+      "declarationVisible": true,
+      "pill": "1 of 3",
+      "progress": "88changes to review"
+    }
+  ]
+}

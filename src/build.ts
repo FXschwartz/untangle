@@ -43,7 +43,7 @@ function fingerprint(files: string[]): string {
   return h.digest('hex').slice(0, 16);
 }
 const LSP_STAGE = ['dist/pipeline/diff.js', 'dist/pipeline/positions.js', 'dist/pipeline/definitions.js', 'dist/pipeline/links.js', 'dist/lsp/dart.js', 'analysis/adapters.js', 'viewer/core.js'];
-const MODEL_STAGE = ['analysis/analyze.js', 'analysis/dart.js'];
+const MODEL_STAGE = ['analysis/analyze.js', 'analysis/dart.js', 'analysis/units.js', 'analysis/chains.js'];
 
 const readJson = <T>(file: string): T | null => {
   try {
@@ -111,9 +111,11 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
   });
   const c = model.compares.base;
   c.title = opts.title;
-  const changes = c.files.flatMap((f: { blocks: Array<{ id: string; edits: number[] }> }) => f.blocks).filter((b: { edits: number[] }) => b.edits.length);
+  type Change = { id: string; unit?: string; edits: number[] };
+  const changes: Change[] = c.files.flatMap((f: { blocks: Change[] }) => f.blocks).filter((b: Change) => b.edits.length);
   const inChain = new Set(c.chains.flatMap((ch: { blocks: string[] }) => ch.blocks));
-  progress.note(`${c.chains.length} chains hold ${inChain.size} of ${changes.length} changes; ${c.groups.length} same-change groups (${Date.now() - t0} ms)`);
+  const count = (blocks: Change[]) => new Set(blocks.map((block) => block.unit || block.id)).size;
+  progress.note(`${c.chains.length} chains hold ${count(changes.filter((block) => inChain.has(block.id)))} of ${count(changes)} changes; ${c.groups.length} same-change groups (${Date.now() - t0} ms)`);
 
   const data: ReviewData = { model, defs: slim(answers.defs), refs: changedUsages(answers.diff, answers.headDir, answers.defs.raw), defsOld: { base: slim(answers.defsOld) } };
   writeJson(path.join(dir, 'review.json'), data);

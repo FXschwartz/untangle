@@ -1,6 +1,6 @@
-# UX proposal v13: start from the chain map, end in the code
+# UX proposal v17: start from the chain map, end in the code
 
-> Draft v13, 2026-10-14. Replaces v12 (see "History" at the end).
+> Draft v17, 2026-10-16. Extends the v13 grouping rules and v16 history design (see "History").
 > Starting point: [00-original-prompt.md](00-original-prompt.md).
 > Working prototype on serverpod_offline_sync #168: https://claude.ai/artifact/MEkRBmhVGgqBPUB5QYAFVB (version 15,
 > with the "Calmer by default" proposal that `untangle`'s page now follows).
@@ -90,8 +90,9 @@ From the review of v11:
 13. **Model adapters:** one per generator, built in and switched on by what the repository
     contains; `.review.yaml` can turn one off, add generated patterns or declare a mapping.
 14. **Chain order:** by level, never by review progress, with a "next unreviewed" action.
-15. **Large graphs:** a test file's tests are one node; code stays one node per member;
-    "+N more" only when a level is still too busy.
+15. **Large graphs:** introduced declarations are whole reading units; existing code stays
+    one node per changed member, with existing test cases grouped by file. "+N more" only
+    when a level is still too busy.
 16. **Same change across declarations:** syntax only; the group view shows the declaration
     each place resolves to, and each can be marked on its own.
 17. **Names in strings:** a string that looks like a name links like one, beyond what the
@@ -103,14 +104,27 @@ From the review of v11:
 
 ### Changes
 
-1. A change is a run of changed lines in a hunk, split where a declaration unit starts:
+1. An atomic change block is a run of changed lines in a hunk, split where a declaration starts:
    - each top-level declaration (consecutive directives count as one);
    - each member of a class, mixin, extension or enum;
    - each `test(...)`, `group(...)`, `setUp...` or `tearDown...` call.
    A unit starts at its doc comments and annotations. Members written right under each
    other, with no blank line, stay together. A block with removed and added lines keeps its
    removed lines with the added lines they were diffed against.
-2. **Moved code.** A removed unit and an added unit with the same full name and kind, or
+2. **Reading units.** A fully introduced declaration is read in source order as one change:
+   a class, mixin, enum, extension, type alias, function, method, top-level binding or
+   configured YAML model. A class includes its constructor, fields and methods. This applies
+   to new declarations inside existing files too. Fully added `test(...)` and `testWidgets(...)`
+   calls are complete scenarios, identified by source position and labeled with the whole
+   title, including adjacent string literals.
+   - Existing declarations retain their smaller change blocks. Rewriting all their lines
+     does not make them introduced declarations; moved code keeps its move representation.
+   - Reading units sit above the original blocks and edits. Their IDs, saved review marks,
+     refresh behavior and commit lenses remain intact.
+   - Counts, navigation and Space operate on reading units. Gutter marks still allow an
+     individual block to be reviewed. The explicit same-change view retains individual places.
+   - Adjacent introduced declarations that share an indivisible atomic block stay together.
+3. **Moved code.** A removed unit and an added unit with the same full name and kind, or
    the same short name and at least half their tokens alike, are one moved declaration.
    - Its change is the diff between the two bodies. Only the tokens that diff changed count
      as changed, for same changes and for chains.
@@ -140,36 +154,52 @@ From the review of v11:
 5. **Parameters pass a chain on.** Union-find runs over changes: a changed parameter joins
    its declaration with every change that uses it. A local variable does so only within its
    own member, and a brand-new function's parameters don't (calls link to the function).
-6. **A changed function, method, field or type starts a chain:** its declaration plus the
+6. **A changed existing function, method, field or type starts a chain:** its declaration plus the
    changes that use it.
    - A member's chain and the ripple of its own parameters merge.
    - A field and the constructor parameter that sets it (`this.field`) are one declaration:
      the field's chain is the constructor's chain.
+   - Merging uses the declaration's file and source identity, never just its displayed name.
+     Two private helpers called `_money` in different libraries remain separate.
 7. **Tests follow their calls.** From each declaration a changed test uses, in production
    code or in an unchanged test helper, the language server's outgoing calls are followed
    breadth first, up to 3 levels inside the repository. The test links to the first changed
    function on each path, whether its signature or its body changed.
    - A test is a `*_test.dart` file, or a file under a `test*/` or `integration_test/`
      directory.
-8. **A same-change group that names an identifier is a chain.**
+8. **A same-change group that names an identifier is a chain** for existing code. Introduced
+   declarations keep ownership of their blocks; same-change badges remain available there.
 9. **Member cohesion.** A change that no other rule links joins the chains of its member.
    Changes that already belong to a chain stay out of other chains.
-   - In test files, the member is the enclosing `test(...)`.
+   - In test files, the member is the enclosing `test(...)` or `testWidgets(...)`, keyed by
+     its call position. A `group(...)` is setup, not a test case.
    - A comment-only change belongs to the declaration it documents, unless the block holds
      that declaration itself.
-10. **New code stays together.**
-    - A new or removed type is one chain with its members; a new type declared in a new
-      file folds with that file.
-    - Chains that never leave a new file are one chain, named after the file's main new
-      type (or the file, for tests).
-    - A change of a new file that links to nothing joins that file's main chain.
-    - The field chains of a new YAML model are one chain per model, as for a new type.
+10. **Reading units and chains are different.**
+    - A complete introduced declaration is one reading unit, not automatically one chain.
+      Self-contained new code, including connected declarations within one file, stays in
+      the file review. New-code chains connect multiple whole units across files.
+    - Resolved dependencies establish ownership. A new dependency with one production
+      consumer joins that consumer's component. Mutually dependent new declarations form
+      one component before ownership is evaluated. Shared dependencies do not combine
+      their otherwise independent consumers. No file name, PR metadata or size target
+      determines membership.
+    - Test scenarios and helpers are whole units too. Test infrastructure does not own
+      production code. A scenario can join the changed existing behavior it exercises
+      when that target is unambiguous. For a wholly new implementation, the test and its
+      production target must also have an exclusive relationship; shared use of a new
+      fixture or API does not establish change propagation.
+    - A unit can belong to at most one chain and is never split between chains. Units
+      outside chains remain available by file, with the same saved marks and navigation.
+    - A removed type's member chains still fold into that type, scoped to its file.
 11. **Overrides.** The language server says what each changed method overrides
     (`dart/textDocument/super`).
     - Changed methods that override the same method, a framework's say, join one chain.
     - An override of a changed method links to it.
     - The members of `Object` (`toString`, `==`, `hashCode`) are left out.
 12. **Imports, parts and docs.**
+    These attachments apply to existing-code chains; they never split an introduced
+    reading unit. Unattached imports and docs remain reviewable by file.
     - A new import of a file in the repository joins the chains that, in the same file, use
       declarations from the imported file. A `package:` import counts when the package is in
       the repository; with two pubspecs of the same name, it resolves to the one that has
@@ -201,13 +231,17 @@ From the review of v11:
     - **`.review.yaml`** at the repository root can add `generated:` patterns, turn an
       adapter on or off (`adapters:`), and declare YAML-model mappings of its own (`models:`,
       with `generated`, `source` and `classSuffixes`).
-15. A chain needs at least two members; same-change chains need two changes. Chains with
-    exactly the same changes are one chain. Changes in no chain are listed by file.
+15. A chain needs at least two reading units and two graph nodes. New-code chains also
+    require resolved connections across files; being a complete class or sharing a file
+    is not enough. A repeated change collapsed into one graph node remains available in
+    the same-change group view. Chains with exactly the same changes are one chain.
+    Changes in no chain are listed by file.
 16. **Name:** the best declaration inside the chain: what remains before what was removed,
     members and types before parameters and locals, public before private, then the most
     used. In a ripple, the top parameter comes first: the one whose callers don't pass it on
     from a parameter of their own.
 17. **Graph:**
+    - one node per introduced reading unit, before any same-change aggregation;
     - one node per member;
     - nodes that are all the same change, 3 or more times, collapse into one;
     - the tests of one test file are one node;
@@ -217,13 +251,15 @@ From the review of v11:
 
 ### Chain of chains
 
-- A chain's **core** is the changes of its root's member, or all its changes when it has
-  no root.
+- A chain's **core** is its whole introduced declaration, otherwise the changes of its
+  root's member, or all its changes when it has no root.
 - **Chain A uses chain B** when A's core uses a function, method, field or type in B's
   core.
 - **Depth** is the longest path from a chain that nothing uses, ignoring back edges of
   cycles.
 - **Families** are chains connected by "uses" or by shared changes.
+  Introduced test suites and test helpers retain their dependency links but do not connect
+  otherwise independent production families through shared test infrastructure.
 - **The chain map** lays a family out by depth:
   - it draws only direct dependencies (a transitive reduction);
   - arrows that skip levels are faint;
@@ -361,7 +397,7 @@ From the review of v11:
 - **Unified by default, split on demand** from a view's ⋯ menu. Split pairs removed and added
   lines per change and wraps long lines.
 
-## Numbers on #168 (computed by the prototype)
+## Historical numbers on #168 (v13 prototype)
 
 | | vs main (e0598c1) | vs snapshot at 0540639 |
 |---|---:|---:|
@@ -622,6 +658,12 @@ through the page.
   - Asked: a commit's details in the History view, as Git Graph shows them; the lens named only
     in the top bar, without the chip in the view's header; and B's popover on the head commit.
     Done.
+
+- **v17:** introduced declarations are complete reading units above stable atomic edits.
+  - The grouping pass could fragment new classes and merge unrelated consumers through
+    shared helpers or displayed names. Added declaration ownership, source-scoped identities,
+    complete test titles, and a baseline/candidate cohesion replay over the validation corpus.
+  - Validation and remaining limits: [02-test-runs.md](02-test-runs.md).
 
 ## References
 

@@ -1,4 +1,96 @@
-# Test runs: the rules on seven other PRs
+# Test runs: chain grouping across PRs
+
+## 2026-10-16: complete reading units, connected chains
+
+The first implementation fixed fragmented new classes but introduced a navigation regression:
+it promoted almost every new declaration to a chain. Completeness of a reading unit did not
+justify making it a chain. The previous validation checked preservation and completeness
+but missed fragmentation.
+
+The corrected rules distinguish the two concepts:
+
+- A new class, function, model or test scenario is a complete reading unit. It does not
+  automatically create a chain. File-local new code stays in the file review.
+- Chains require multiple reading units and graph nodes. New-code chains also require a
+  connected graph of resolved dependencies across files. File names, PR metadata, display
+  names and desired chain counts do not establish membership.
+- Mutually dependent new declarations are resolved together. An exclusive dependency can
+  join its owning behavior; shared dependencies do not pull independent consumers together.
+- New scenarios can follow changes to existing behavior. For an entirely new implementation,
+  attaching a scenario also requires exclusive use of that implementation; a common new
+  fixture or API must not gather every test that uses it.
+- Atomic blocks, saved marks, edit spans, moves and generated-code treatment stay intact.
+  Each reading unit is either complete in one chain or complete outside chains.
+
+### Controlled corpus replay
+
+[`bench/cohesion.ts`](../bench/cohesion.ts) replays identical pinned LSP answers through baseline
+`8d60fa47c9bf323b00deca4c38ccc0b8de592156` and the corrected rules. All 13 public samples passed
+preservation, ownership and independent source-type completeness checks: **53 introduced
+types remained complete**, including aliases and unnamed extensions. Every sample has
+**zero single-change chains, zero single-node chains, and zero file-local new-code chains**.
+All new-code chain graphs are connected by resolved dependencies.
+
+The reference uses the original prototype head, `a45f9aee30bc`. Six saved public reviews
+reuse their saved answers. The seven missing answer sets were collected
+in isolated clones with a copied SDK and pub cache. These are controlled comparisons on the
+explicit revisions below, not a claim that every historical run used these same heads or LSP
+answers. Collection completed without unresolved-file warnings.
+
+| Review | Head | Atomic changes | Reading units | Chains original → first pass → corrected | Introduced types |
+| --- | --- | ---: | ---: | ---: | ---: |
+| offline_sync merge admission | `30c5b79e9031` | 101 | 72 | 16 → 16 → 10 | 1 |
+| Serverpod #5866, doctor | `b70d2354aa2a` | 186 | 115 | 26 → 46 → 4 | 12 |
+| Serverpod #5869, OTP login | `20822a0dbea4` | 313 | 208 | 76 → 71 → 28 | 13 |
+| Serverpod #5868, cached prompt | `974a676947db` | 9 | 9 | 2 → 5 → 1 | 0 |
+| Serverpod #5864, revised | `5a3750e4feea` | 36 | 36 | 8 → 9 → 7 | 0 |
+| Serverpod #5864, original | `ac5ee4834410` | 29 | 29 | 7 → 7 → 5 | 0 |
+| offline_sync #168, reference | `a45f9aee30bc` | 580 | 473 | 63 → 73 → 40 | 6 |
+| offline_sync #157, batching | `405e7097ea82` | 102 | 76 | 10 → 22 → 8 | 2 |
+| offline_sync #166, snapshot | `79f3cb5e3ca7` | 123 | 80 | 13 → 17 → 6 | 3 |
+| offline_sync #162, watches | `499dc1f49977` | 104 | 93 | 13 → 21 → 6 | 3 |
+| Serverpod #5706, Postgres | `3040ac91bbb1` | 261 | 237 | 50 → 59 → 25 | 4 |
+| Serverpod #5471, custom classes | `c0c5219ad0b1` | 146 | 88 | 22 → 29 → 8 | 3 |
+| Serverpod #5630, projection | `0053e21ac9f5` | 264 | 247 | 79 → 89 → 40 | 6 |
+
+Full commits, source hashes and metrics are in [`cohesion-validation.json`](cohesion-validation.json).
+A partially reviewed declaration stays open until all its edits are reviewed.
+
+### Concrete inspection
+
+- The reference retains its clock-contract migration: the largest chain spans 43 files and
+  renders 38 member sections. Collapsed same-change groups remain accessible in the group
+  view instead of being listed as one-node chains.
+- #5471's `CustomClassAnalyzer` forms a three-node, two-file chain with its result type and
+  method analyzer. Each new class remains one complete reading unit.
+- #157 preserves moves, #166 preserves the transaction-parameter propagation, #162 preserves
+  the watch/constraint changes, and #5630 still excludes all 476 generated files from review.
+
+### Regression and browser validation
+
+The complete unit/server/browser suite passed **477 tests**, with no failures, skips or
+cancellations. Fourteen focused cohesion tests also passed after the final attachment and
+deterministic-order guards. Generic fixtures cover standalone classes, unrelated consumers of
+one utility, recursive helpers, real cross-file dependencies, file-local connected declarations,
+shared APIs used by multiple new scenarios, existing behavior changes, duplicate scenario
+titles, and generator models. No fixture or grouping rule depends on a validation PR's names.
+
+Browser checks verify a class over the folding threshold, complete source-order reading inside
+a real multi-node chain, correct counts when folded, Space marking the whole class, saved marks
+after reload, an untouched neighboring declaration, and distinct scenarios with identical titles.
+The reference and custom-class models were rendered in Chromium. Comparison previews use
+separate storage seeded from the saved marks. The original review cache and session are unchanged.
+
+### Limits
+
+These are structural guarantees on a captured corpus, not a proof of ideal conceptual grouping
+for every PR. Resolved dependencies can still form a large component, and missing resolution
+can leave related code outside chains. New code used by multiple independent consumers stays
+outside ownership-based chains. Files, definitions and usages remain necessary review paths.
+Mixed replacement blocks, moved code, documents and design assets retain their existing treatment.
+No arbitrary chain-size cap or PR-specific rule was introduced.
+
+The earlier runs below are retained as historical evidence.
 
 > 2026-10-13. The rules of [UX proposal v9](01-ux-proposal.md), run unchanged on three more
 > PRs of serverpod_offline_sync. Every rule was written while looking at #168 only; this

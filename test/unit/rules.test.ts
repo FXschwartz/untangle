@@ -18,6 +18,7 @@ interface Model {
       generated: Array<{ p: string }>;
       edits: Edit[];
       groups: Array<{ count: number; edits: number[] }>;
+      units: Array<{ name: string; blocks: string[] }>;
       chains: Chain[];
     };
   };
@@ -192,7 +193,7 @@ describe('Given a test file whose group name and test body change, ', { skip: sk
     after(() => review?.remove());
 
     it('then the group call and the test call are two changes.', () => {
-      assert.equal(blocksOf(review!), 'test/a_test.dart#0 main +1 -1 test inner, standalone\ntest/a_test.dart#1 main +1 -1 test one, standalone');
+      assert.equal(blocksOf(review!), 'test/a_test.dart#0 main +1 -1 standalone\ntest/a_test.dart#1 main +1 -1 test one, standalone');
     });
   });
 });
@@ -380,8 +381,13 @@ describe('Given a new function whose parameter is passed at the call, ', { skip:
 
     after(() => review?.remove());
 
-    it('then the chain is named for the function, not the parameter.', () => {
-      assert.equal(chainsOf(review!), 'member greet +6 -1 depth 0\nlib/a.dart#0, lib/a.dart#1, lib/b.dart#0\nL0 greet, L1 main, L2 (top)\nmain → greet [greet name]\nuses none, shares none, family 0');
+    it('then the complete new function joins its adapting caller in one connected chain.', () => {
+      const chains = baseOf(review!).chains;
+      const caller = chains.find((chain) => chain.name === 'main')!;
+
+      assert.equal(chains.length, 1);
+      assert.deepEqual(caller.blocks, ['lib/a.dart#0', 'lib/a.dart#1', 'lib/b.dart#0']);
+      assert.ok(caller.graph.edges.some((edge) => edge.labels.includes('greet')));
     });
   });
 });
@@ -518,8 +524,11 @@ describe('Given a new file that declares a type whose methods call each other, '
 
     after(() => review?.remove());
 
-    it('then the file is one chain named for the type.', () => {
-      assert.equal(chainsOf(review!), 'member Box +9 -0 depth 0\nlib/box.dart#0, lib/box.dart#1, lib/box.dart#2\nL0 Box.open, L1 Box.show, L2 Box\nBox.show → Box.open [open]\nuses none, shares none, family 0');
+    it('then the type is one complete reading unit without a singleton chain.', () => {
+      assert.equal(chainsOf(review!), 'none');
+      assert.deepEqual(baseOf(review!).units.map((unit) => [unit.name, unit.blocks]), [
+        ['Box', ['lib/box.dart#0', 'lib/box.dart#1', 'lib/box.dart#2']],
+      ]);
     });
   });
 });
@@ -757,8 +766,9 @@ describe('Given the same identifier renamed in three functions, ', { skip: skipD
 
     after(() => review?.remove());
 
-    it('then the graph is one node.', () => {
-      assert.equal(chainsOf(review!), 'group name → title +3 -3 depth 0\nlib/a.dart#0, lib/a.dart#1, lib/a.dart#2\nL0 a\nnone\nuses none, shares none, family 0');
+    it('then the repeated change remains a group instead of a singleton chain.', () => {
+      assert.equal(chainsOf(review!), 'none');
+      assert.equal(groupsOf(review!), 'x3 name → title');
     });
   });
 });
@@ -1205,14 +1215,11 @@ describe('Given a new class nothing uses, whose methods call each other in two p
 
     after(() => review?.remove());
 
-    it('then the class and its methods are one chain, named after it.', () => {
-      assert.equal(chainsOf(review!), [
-        'member Box +9 -0 depth 0',
-        'lib/a.dart#1, lib/a.dart#2, lib/a.dart#3, lib/a.dart#4, lib/a.dart#5',
-        'L0 Box._w, L1 Box.width, L2 Box, L2 Box._h, L2 Box.height',
-        'Box.width → Box._w [_w], Box.height → Box._h [_h]',
-        'uses none, shares none, family 0',
-      ].join('\n'));
+    it('then the class and its methods stay whole without becoming a singleton chain.', () => {
+      assert.equal(chainsOf(review!), 'none');
+      assert.deepEqual(baseOf(review!).units.map((unit) => [unit.name, unit.blocks]), [
+        ['Box', ['lib/a.dart#1', 'lib/a.dart#2', 'lib/a.dart#3', 'lib/a.dart#4', 'lib/a.dart#5']],
+      ]);
     });
   });
 });
@@ -1335,14 +1342,12 @@ describe('Given a new file whose functions call each other in two pairs, ', { sk
 
     after(() => review?.remove());
 
-    it('then the file is one chain, named after it.', () => {
-      assert.equal(chainsOf(review!), [
-        'member tools.dart +7 -0 depth 0',
-        'lib/tools.dart#0, lib/tools.dart#1, lib/tools.dart#2, lib/tools.dart#3',
-        'L0 b, L1 a, L2 c, L2 d',
-        'a → b [b], c → d [d]',
-        'uses none, shares none, family 0',
-      ].join('\n'));
+    it('then the functions remain separate reading units in the file without file-local chains.', () => {
+      assert.equal(chainsOf(review!), 'none');
+      assert.deepEqual(baseOf(review!).units.map((unit) => [unit.name, unit.blocks]), [
+        ['a', ['lib/tools.dart#0']], ['b', ['lib/tools.dart#1']],
+        ['c', ['lib/tools.dart#2']], ['d', ['lib/tools.dart#3']],
+      ]);
     });
   });
 });

@@ -148,6 +148,7 @@
     if (models[name]) return models[name];
     const raw = MODEL.compares[name];
     const m = { name, raw, files: raw.files, edits: raw.edits, groups: raw.groups, chains: raw.chains, generated: raw.generated };
+    m.unitById = new Map((raw.units || []).map((unit) => [unit.id, unit]));
     m.blockById = new Map();
     m.head = new Map();
     m.old = new Map();
@@ -298,7 +299,19 @@
   function stats(blocks) {
     const s = { total: 0, open: 0, lines: 0, all: 0 };
     const lens = lensOn();
-    blocks.forEach((b) => { if (!b.edits.length || (lens && !blockIn(b))) return; s.total++; s.all += b.adds + b.dels; if (!doneL(b)) { s.open++; s.lines += b.adds + b.dels; } });
+    const units = new Set(), open = new Set();
+    blocks.forEach((b) => {
+      if (!b.edits.length || (lens && !blockIn(b))) return;
+      const key = b.unit || b.id;
+      units.add(key);
+      s.all += b.adds + b.dels;
+      if (!doneL(b)) {
+        open.add(key);
+        s.lines += b.adds + b.dels;
+      }
+    });
+    s.total = units.size;
+    s.open = open.size;
     return s;
   }
   // The same, as if no lens were on.
@@ -337,7 +350,11 @@
   }
   function groupLabel(g) { return g.parts.map(editText).join(' … '); }
   function nodeLabels(n) {
-    if (n.tests != null) return { l1: 'tests', l2: `${fileName(n.file)} · ${n.tests} test${n.tests === 1 ? '' : 's'}`, owner: '' };
+    if (n.unit) {
+      const unit = M().unitById.get(n.unit);
+      if (unit) return { l1: fileName(n.file), l2: unit.name, owner: '' };
+    }
+    if (n.tests != null) return { l1: 'tests', l2: `${fileName(n.file)} · ${n.tests ? `${n.tests} test${n.tests === 1 ? '' : 's'}` : 'setup'}`, owner: '' };
     if (n.group !== null && n.group !== undefined) {
       const g = M().groupById.get(n.group);
       return { l1: `same change · ${n.files} file${n.files > 1 ? 's' : ''}`, l2: g ? groupLabel(g) : '' };
@@ -550,7 +567,7 @@
       if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors, c: true, sel }); continue; }
       const d = done(b);
       const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
-      const other = ctx.chain && !ctx.chain.blockSet.has(b.id) ? ' other' : '';
+      const other = (ctx.unit && b.unit !== ctx.unit) || (ctx.chain && !ctx.chain.blockSet.has(b.id)) ? ' other' : '';
       const emphasis = b.adds > 0 && b.dels > 0;
       if (!showDiff) {
         if (t === '-') {
@@ -615,7 +632,7 @@
       for (let i = ri; i < bEnd; i++) (h.meta[i].t === '-' ? dels : adds).push(i);
       const d = done(b);
       const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
-      const other = ctx.chain && !ctx.chain.blockSet.has(b.id) ? ' other' : '';
+      const other = (ctx.unit && b.unit !== ctx.unit) || (ctx.chain && !ctx.chain.blockSet.has(b.id)) ? ' other' : '';
       const emphasis = b.adds > 0 && b.dels > 0;
       if (!showDiff) {
         if (!adds.length) {
@@ -760,13 +777,14 @@
     return { key: (ctx.key || 'file') + '|' + f.p + '#' + hi + ':' + s0, hi, s0, e0, a: g.at + s0, b: g.at + e0 };
   }
   function sectionInfo(f, S, ctx) {
-    const blocks = (f.blocks || []).filter((b) => b.hunk === S.hi && b.edits.length && b.first < S.e0 && b.first + b.len > S.s0);
+    const blocks = (f.blocks || []).filter((b) => b.hunk === S.hi && b.edits.length && b.first < S.e0 && b.first + b.len > S.s0
+      && (!ctx.chain || ctx.chain.blockSet.has(b.id)) && (!ctx.unit || b.unit === ctx.unit));
     const allDone = blocks.length > 0 && blocks.every(done);
-    const open = blocks.filter((b) => blockIn(b) && !doneL(b)).length;
+    const open = stats(blocks).open;
     // Reviewed sections fold, and so do long ones in a chain, unless a conversation is open in them.
     const folds = !!f.blocks;
     const threads = threadsIn(f, S.hi, S.s0, S.e0);
-    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key) && !threads.open));
+    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && !ctx.unit && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key) && !threads.open));
     return { S, blocks, open, allDone, folds, collapsed, threads };
   }
   const grown = (key) => state.more.get(key) || { above: 0, below: 0 };
@@ -794,7 +812,8 @@
     const { o, n } = numbersFrom(f, x.collapsed ? S.a : to, S.b);
     const head = S.s0 === 0 && to === S.a && hk.h ? hk.h : '';
     const tip = click ? (click[1] === 'above' ? `Show ${linesWord(click[2])} more above` : `Show ${linesWord(click[2])} more below the code above`) + (hidden > click[2] ? ` (${fmt(hidden)} hidden)` : '') : '';
-    let out = `<div class="hh${x.allDone ? ' done' : ''}${P && !hidden ? ' joined' : ''}${click ? ' more' : ''}" data-sec="${esc(S.key)}"${x.collapsed && x.open ? ` data-nav="1" data-open="${x.open}"` : ''}${click ? ` ${moreAttrs(...click)} title="${esc(tip)}"` : ''}>`
+    const unit = x.blocks.length && x.blocks.every((block) => block.unit && block.unit === x.blocks[0].unit) ? x.blocks[0].unit : null;
+    let out = `<div class="hh${x.allDone ? ' done' : ''}${P && !hidden ? ' joined' : ''}${click ? ' more' : ''}" data-sec="${esc(S.key)}"${unit ? ` data-unit="${esc(unit)}"` : ''}${x.collapsed && x.open ? ` data-nav="1" data-open="${x.open}"` : ''}${click ? ` ${moreAttrs(...click)} title="${esc(tip)}"` : ''}>`
       + `<span class="hh-g">${x.folds ? `<button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(S.key)}" aria-expanded="${!x.collapsed}" title="${x.collapsed ? 'Unfold' : 'Fold'}">${x.collapsed ? ICON.chevronRight : ICON.chevronDown}</button>` : ''}</span>`
       + `<span class="hh-at" title="@@ −${o != null ? o : hk.o} +${n != null ? n : hk.n} @@">${n != null ? n : hk.n}</span><span class="hh-tx">${esc(head)}</span>`;
     if (x.collapsed) {
@@ -1983,16 +2002,18 @@
       const g = b.grp || '(no group)';
       if (!byGroup.has(g)) byGroup.set(g, new Map());
       const t = b.test && b.test !== b.grp ? b.test : '(setup)';
-      if (!byGroup.get(g).has(t)) byGroup.get(g).set(t, []);
-      byGroup.get(g).get(t).push(b);
+      const key = b.unit || (b.test ? b.mk : t);
+      if (!byGroup.get(g).has(key)) byGroup.get(g).set(key, { title: t, blocks: [] });
+      byGroup.get(g).get(key).blocks.push(b);
     });
     let h = '';
     byGroup.forEach((tests, g) => {
       h += `<section class="sec"><div class="sec-h"><b>${esc(g)}</b><span>group · ${tests.size} test${tests.size > 1 ? 's' : ''}</span></div>`;
-      tests.forEach((list, t) => {
+      tests.forEach(({ title: t, blocks: list }, key) => {
         const ns = stats(list);
+        const unit = list[0].unit && list.every((block) => block.unit === list[0].unit) ? list[0].unit : null;
         h += `<div class="sec-h sub"><span>${esc(t)}</span><span class="sp"></span><span class="hov"><span>${leftWords(ns)}</span><button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(list.map((b) => b.id).join(' '))}">${ns.open ? 'Mark test reviewed' : 'Mark test unreviewed'}</button></span></div>`
-          + subHunksHtml(list, { chain: c, key: 'tl' + c.id + ':' + g + ':' + t });
+          + subHunksHtml(list, { chain: c, unit, key: 'tl' + c.id + ':' + g + ':' + key });
       });
       h += '</section>';
     });
@@ -2028,8 +2049,9 @@
     if (!c) return '<div class="empty">This chain doesn’t exist in this comparison.</div>';
     const all = blocksOf(c.blocks);
     const s = stats(all);
-    const kind = c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain';
-    const oneTestFile = new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
+    const kind = c.kind === 'declaration' ? 'new implementation' : c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain';
+    const suite = c.kind !== 'declaration' || c.graph.nodes.every((node) => ['test', 'setup'].includes(m.unitById.get(node.unit)?.kind));
+    const oneTestFile = suite && new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
     let h = headerHtml({
       crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
@@ -2047,7 +2069,8 @@
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     if (focused) {
       const { l2 } = nodeLabels(focused);
-      h += `<div class="focus-bar">Showing only <b>${esc(l2)}</b> · ${focused.blocks.length} change${focused.blocks.length > 1 ? 's' : ''}<span class="sp"></span><button type="button" class="btn xs" data-act="clear-focus">Show all ${c.graph.nodes.length} members</button></div>`;
+      const count = stats(blocksOf(focused.blocks)).total;
+      h += `<div class="focus-bar">Showing only <b>${esc(l2)}</b> · ${count} change${count > 1 ? 's' : ''}<span class="sp"></span><button type="button" class="btn xs" data-act="clear-focus">Show all ${c.graph.nodes.length} members</button></div>`;
     }
     c.graph.nodes.forEach((n) => {
       if (focused && n !== focused) return;
@@ -2064,7 +2087,7 @@
         const g = m.groupById.get(n.group);
         h += `<p class="sec-note">The same change in ${blocks.length} places. Each place shows the whole edit.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
       } else {
-        h += subHunksHtml(blocks, { chain: c, key: 'c' + c.id + 'n' + n.idx });
+        h += subHunksHtml(blocks, { chain: c, unit: n.unit, key: 'c' + c.id + 'n' + n.idx });
         // The member's other changes belong to other chains: folded context here.
         const rest = n.member ? [...new Set(blocks.map((b) => b.mk))].flatMap((k) => m.byMember.get(k) || []).filter((b) => !c.blockSet.has(b.id)) : [];
         if (rest.length) {
@@ -2083,7 +2106,7 @@
     const fam = m.families.find((f) => f.id === famId) || m.families[0];
     const linked = m.families.filter((f) => f.chains.length > 1);
     const nx = nextUnreviewed();
-    if (!fam) return headerHtml({ crumbs: '<b class="ui">Chain map</b>', facts: 'No chains in this review', action: nx ? '<button type="button" class="btn primary" data-act="next-open">Next to review</button>' : '' }) + '<div class="empty">Every change here stands on its own: see “Not in a chain”, or the Files tab.</div>';
+    if (!fam) return headerHtml({ crumbs: '<b class="ui">Chain map</b>', facts: 'No chains in this review', action: nx ? '<button type="button" class="btn primary" data-act="next-open">Next to review</button>' : '' }) + '<div class="empty">Review these changes in the Files tab or “Not in a chain”. New declarations stay whole.</div>';
     let h = headerHtml({
       crumbs: '<b class="ui">Chain map</b>',
       facts: `${fam.chains.length} linked chain${fam.chains.length === 1 ? '' : 's'} · ${fam.depth + 1} level${fam.depth ? 's' : ''}`,
@@ -2103,7 +2126,7 @@
       facts: `${leftWords(s)} · ${plusMinus(sumOf(m.standalone, 'adds'), sumOf(m.standalone, 'dels'))}`,
       nav: true,
       action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-standalone">${s.open ? 'Mark all reviewed' : 'Mark all unreviewed'}</button>`,
-      below: '<p class="fv-note">Changes that don’t use, and aren’t used by, anything changed elsewhere. Grouped by file.</p>',
+      below: '<p class="fv-note">Changes outside a review chain, grouped by file. New declarations stay whole; shared dependencies remain available here.</p>',
     });
     return h + '<div class="sec">' + subHunksHtml(m.standalone, { key: 'standalone' }) + '</div>';
   }
@@ -3218,7 +3241,18 @@
   const rowOf = (el) => el.closest('.ln, .sl, .hh');
   const markId = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
   // A chain shows other chains' changes in its context lines: j, k and the pill skip them.
-  const changeMarks = (open) => [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav]')].filter((el) => !open || !el.closest('.other'));
+  const changeMarks = (open) => {
+    const seen = new Set();
+    return [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav]')].filter((el) => {
+      if (open && el.closest('.other')) return false;
+      const block = M().blockById.get(el.dataset.block);
+      const key = state.view.kind === 'group' ? block?.id : el.dataset.unit || block?.unit || block?.id;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
   // Where a change is put when you go to it: a little below the header.
   const readY = () => main.getBoundingClientRect().top + headH() + 48;
   const follows = (a, b) => { const p = a.compareDocumentPosition(b); return !!(p & Node.DOCUMENT_POSITION_FOLLOWING) && !(p & Node.DOCUMENT_POSITION_CONTAINED_BY); };
@@ -3294,8 +3328,10 @@
     const id = el.dataset.block, b = M().blockById.get(id);
     if (!b) return false;
     const band = bandOf(el), key = band && band.dataset.sec;
-    toggleBlocks([b]);
-    hint({ mark: [id] });
+    const unit = state.view.kind !== 'group' && b.unit && M().unitById.get(b.unit);
+    const blocks = unit ? blocksOf(unit.blocks) : [b];
+    toggleBlocks(blocks);
+    hint({ mark: blocks.map((block) => block.id) });
     render();
     return goNextAfter(() => [...main.querySelectorAll('.tick[data-block]')].find((x) => x.dataset.block === id) || (key && findBand(key)()));
   }

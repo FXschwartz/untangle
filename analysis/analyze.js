@@ -17,6 +17,8 @@ import { execFileSync } from 'node:child_process';
 import YAML from 'yaml';
 import { ADAPTERS } from './adapters.js';
 import { dartParser } from './dart.js';
+import { readingUnits, testCall } from './units.js';
+import { assembleIntroducedChains } from './chains.js';
 
 const C = globalThis.ReviewCore;
 // ---------- generated code
@@ -151,7 +153,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     if (!tree) return null;
     const col = Math.max(0, text.search(/\S/));
     let n = tree.rootNode.descendantForPosition(pos(line, col));
-    let member = null, owner = null, test = null, group = null;
+    let member = null, owner = null, test = null, group = null, testKey = null;
     for (let a = n; a; a = a.parent) {
       if (!member && a.type === 'function_body') {
         const s = a.previousNamedSibling;
@@ -165,13 +167,16 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         if (id) member = id.text;
       }
       if (a.type === 'expression_statement' && (!test || !group)) {
-        const m = /^(test|group)\s*\(\s*(['"])((?:\\.|(?!\2).)*)\2/.exec(a.text);
-        if (m && !test) test = m[3];
-        if (m && m[1] === 'group' && !group) group = m[3];
+        const call = testCall(a);
+        if (call && call.kind !== 'group' && !test) {
+          test = call.title;
+          testKey = call.key;
+        }
+        if (call && call.kind === 'group' && !group) group = call.title;
       }
       if (!owner && TYPES.has(a.type)) { const nm = a.childForFieldName('name') || a.namedChildren.find((x) => x.type === 'identifier'); owner = nm ? nm.text : null; }
     }
-    return { member: member ? (owner && !member.includes('.') ? owner + '.' + member : member) : owner || null, test, group };
+    return { member: member ? (owner && !member.includes('.') ? owner + '.' + member : member) : owner || null, test, group, testKey };
   }
   // Role of a replaced token: a declaration name (the language server resolves it to
   // itself), a named-argument label, a type, or a reference.
@@ -460,12 +465,15 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         if (!rows.length) { rows = b.rows.filter((r) => r.type === '-' && codeRow(r)); tree = f.oldTree; line = (r) => r.o; }
         if (!rows.length) rows = b.rows.filter((r) => r.type === '+').length ? b.rows.filter((r) => r.type === '+') : b.rows;
         const tally = new Map();
-        let firstTest = null, firstGroup = null;
+        let firstTest = null, firstGroup = null, firstTestKey = null;
         rows.forEach((r) => {
           const at = memberAt(tree, line(r), r.text);
           const k = at && at.member ? at.member : null;
           tally.set(k, (tally.get(k) || 0) + 1);
-          if (!firstTest && at && at.test) firstTest = at.test;
+          if (!firstTest && at && at.test) {
+            firstTest = at.test;
+            firstTestKey = at.testKey;
+          }
           if (!firstGroup && at && at.group) firstGroup = at.group;
         });
         let best = null, bestN = -1;
@@ -489,20 +497,19 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
           }
         }
         const isTest = TEST_FILE.test(f.p) && (!b.member || b.member === 'main');
-        b.memberKey = f.p + '::' + (isTest && b.test ? 'test:' + b.test : b.member || '(top)');
+        b.memberKey = f.p + '::' + (isTest && firstTestKey ? firstTestKey : b.member || '(top)');
       }
     }
 
+    const units = readingUnits(files, mappings.filter((mapping) => mapping.kind === 'yaml').flatMap((mapping) => mapping.source));
     const decls = new Map();
     const usesOf = new Map();
     // ---------- model fields changed in this comparison: Class.field -> blocks of the model file
-    const newModels = new Map();
     mappings.filter((mp) => mp.kind === 'yaml').forEach((mp) => files.filter((f) => mp.source.some((rx) => rx.test(f.p))).forEach((f) => {
       const modelFields = mp.fields;
       const cls = (src) => { const m = src && /^(?:class|exception):\s*(\w+)/m.exec(src); return m ? m[1] : null; };
       const name = cls(f.newSrc) || cls(f.oldSrc);
       if (!name) return;
-      if (f.s === 'A') newModels.set(name, f.p);
       const fieldOf = (text) => { const m = /^  ([A-Za-z_]\w*):/.exec(text); return m && m[1] !== 'fields' && m[1] !== 'indexes' ? m[1] : null; };
       f.blocks.forEach((b) => {
         const touched = new Map();
@@ -969,9 +976,11 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       return !!(hit && !hit.b.dels);
     };
     decls.forEach((d) => {
-      if (d.removed) { if (d.kind === 'param' || d.kind === 'local') d.users.forEach((u) => union(d.block, u)); return; }
-      if (d.kind === 'local') d.users.forEach((u) => { if (u.memberKey === d.block.memberKey) union(d.block, u); });
-      else if (d.kind === 'param' && !newFunction(d)) d.users.forEach((u) => union(d.block, u));
+      if (d.block.unit) return;
+      const users = [...d.users].filter((u) => !u.unit);
+      if (d.removed) { if (d.kind === 'param' || d.kind === 'local') users.forEach((u) => union(d.block, u)); return; }
+      if (d.kind === 'local') users.forEach((u) => { if (u.memberKey === d.block.memberKey) union(d.block, u); });
+      else if (d.kind === 'param' && !newFunction(d)) users.forEach((u) => union(d.block, u));
     });
     const comps = new Map();
     allBlocks.forEach((b) => { const r = find(b); if (!comps.has(r)) comps.set(r, new Set()); comps.get(r).add(b); });
@@ -979,8 +988,8 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     const chainOf = new Map();
     chains.forEach((c) => c.blocks.forEach((b) => chainOf.set(b, c)));
     decls.forEach((d) => {
-      if ((d.kind !== 'member' && d.kind !== 'type') || !d.users.size || !d.block.atoms.length) return;
-      const blocks = new Set([d.block, ...d.users]);
+      if (d.block.unit || (d.kind !== 'member' && d.kind !== 'type') || !d.users.size || !d.block.atoms.length) return;
+      const blocks = new Set([d.block, ...[...d.users].filter((b) => !b.unit)]);
       const owners = new Set([...blocks].map((b) => chainOf.get(b)));
       if (owners.size === 1 && [...owners][0]) return; // already inside one ripple chain
       chains.push({ blocks, kind: 'member', root: d });
@@ -989,7 +998,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     groups.forEach((g) => {
       const named = g.edits.some((e) => !e.commentOnly && e.atoms.some((a) => a.del.concat(a.ins).some(identToken)));
       if (!named) return;
-      const blocks = new Set(g.edits.map((e) => e.block));
+      const blocks = new Set(g.edits.map((e) => e.block).filter((b) => !b.unit));
       if (blocks.size < 2) return;
       const shared = chains.filter((c) => [...blocks].every((b) => c.blocks.has(b)));
       if (shared.length) return;
@@ -1006,7 +1015,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     // as a member in test files; top-level code doesn't). Changes that already belong to a chain
     // stay out of other chains.
     const byMember = new Map();
-    allBlocks.forEach((b) => { if (!b.memberKey.endsWith('::(top)')) { if (!byMember.has(b.memberKey)) byMember.set(b.memberKey, []); byMember.get(b.memberKey).push(b); } });
+    allBlocks.forEach((b) => { if (!b.unit && !b.memberKey.endsWith('::(top)')) { if (!byMember.has(b.memberKey)) byMember.set(b.memberKey, []); byMember.get(b.memberKey).push(b); } });
     const linkedBlocks = new Set(chains.flatMap((c) => [...c.blocks]));
     chains.forEach((c) => { [...c.blocks].forEach((b) => (byMember.get(b.memberKey) || []).forEach((x) => { if (!linkedBlocks.has(x)) c.blocks.add(x); })); });
     chains.forEach((c) => {
@@ -1043,7 +1052,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       const t = (x) => (x.length > 48 ? x.slice(0, 47) + '…' : x);
       return e.op === 'insert' ? '+ ' + t(e.to) : e.op === 'delete' ? '− ' + t(e.from) : t(e.from) + ' → ' + t(e.to);
     };
-    // Chains with the same root name are one chain (a ripple and the star of its root).
+    // Chains rooted at the same declaration are one chain (a ripple and its root's star).
     // A member's own chain and the ripple of one of its parameters are one chain too.
     // A field and the constructor parameter that sets it (`this.field`) are one declaration: the
     // field's chain is the constructor's chain. Fields set by the unnamed constructor go to it.
@@ -1058,75 +1067,116 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         while (owner && !TYPES.has(owner.type)) owner = owner.parent;
         const nm = owner && (owner.childForFieldName('name') || owner.namedChildren.find((x) => x.type === 'identifier'));
         if (!ids.length || !sig || !nm) return;
-        const ctorName = nameOf(sig), cls = nm.text, key = cls + '.' + ids[ids.length - 1].text;
+        const ctorName = nameOf(sig), cls = nm.text, key = f.p + '::' + cls + '.' + ids[ids.length - 1].text;
         const ctorLabel = ctorName === cls ? cls + '()' : ctorName.includes('.') ? ctorName : cls + '.' + ctorName;
         if (!fieldCtor.has(key) || ctorName === cls) fieldCtor.set(key, ctorLabel);
+        fieldCtor.set(f.p + '::' + (ctorName.includes('.') ? ctorName : cls + '.' + ctorName), ctorLabel);
       });
     });
     const byName = new Map();
-    const mergeKey = (c, nm) => (c.root && c.root.kind === 'member' && fieldCtor.has(c.root.member) ? fieldCtor.get(c.root.member)
+    const fieldKey = (d) => d && d.file + '::' + d.member;
+    const declarationOwner = (d) => {
+      if (d.str || d.overrides || d.model) return d.key;
+      const file = fileByPath.get(d.file);
+      const tree = d.removed ? file?.oldTree : file?.newTree;
+      const col = Number(d.key.slice(d.key.lastIndexOf(':') + 1));
+      if (!tree || !d.line || !Number.isFinite(col)) return d.key;
+
+      let node = tree.rootNode.descendantForPosition(pos(d.line, col));
+      while (node) {
+        if (SIGNATURES.has(node.type) || node.type === 'function_expression') {
+          while (SIGNATURES.has(node.parent?.type)) node = node.parent;
+          return `${d.removed ? 'old:' : ''}${d.file}:${node.startPosition.row + 1}:${node.startPosition.column}`;
+        }
+        node = node.parent;
+      }
+      return d.key;
+    };
+    const mergeKey = (c, nm) => (c.root && c.root.kind === 'member' && fieldCtor.has(fieldKey(c.root)) ? fieldCtor.get(fieldKey(c.root))
       : c.root && c.root.kind === 'param' && c.root.member ? label({ ...c.root, kind: 'member', name: c.root.member.split('.').pop() }) : nm);
     chains.forEach((c) => {
       const nm = c.kind === 'group' && !c.root ? editLabel(c.group.edits[0]) : label(c.root);
-      const key = mergeKey(c, nm);
-      c.name = c.root && c.root.kind === 'member' && fieldCtor.has(c.root.member) ? key : nm;
+      const memberName = mergeKey(c, nm);
+      const ctor = c.root && fieldCtor.get(fieldKey(c.root));
+      const key = ctor ? c.root.file + '::constructor:' + ctor : c.root ? declarationOwner(c.root) : 'edit:' + c.group.parts.map((p) => p.key).join('|');
+      c.name = c.root && c.root.kind === 'member' && fieldCtor.has(fieldKey(c.root)) ? memberName : nm;
       if (!byName.has(key)) { byName.set(key, c); return; }
       const keep = byName.get(key);
       if (keep.root && keep.root.kind === 'param' && c.root && c.root.kind !== 'param') { keep.name = c.name; }
-      if (key === c.name || key === fieldCtor.get(keep.root && keep.root.member)) keep.name = key;
+      if (memberName === c.name || memberName === fieldCtor.get(fieldKey(keep.root))) keep.name = memberName;
       c.blocks.forEach((b) => keep.blocks.add(b));
       [c.root, ...c.also].forEach((d) => { if (d && !keep.also.includes(d) && d !== keep.root) keep.also.push(d); });
     });
     chains = [...byName.values()];
-    // A new or removed type is one chain with its members. Chains that never leave a new file
-    // are one chain: the file.
-    const newTypes = new Map(), removedTypes = new Map(), typeBlocks = [];
-    files.forEach((f) => [[f.newTree, plusRow, newTypes, 'dels'], [f.oldTree, minusRow, removedTypes, 'adds']].forEach(([tree, rows, map, other]) => {
-      if (!tree) return;
-      for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
-        const n = tree.rootNode.namedChild(i), nm = TYPES.has(n.type) && (n.childForFieldName('name') || n.namedChildren.find((x) => x.type === 'identifier'));
-        const hit = nm && rows.get(f.p + ':' + (nm.startPosition.row + 1));
-        if (hit && !hit.b[other]) { map.set(nm.text, f); typeBlocks.push([nm.text, hit.b]); }
+    // Removed types retain their own identity; equal type names in other libraries do not
+    // establish a relationship. New declarations get reading units below instead.
+    const removedTypes = new Map();
+    files.forEach((f) => {
+      if (!f.oldTree) return;
+      for (const node of f.oldTree.rootNode.namedChildren) {
+        if (!TYPES.has(node.type)) continue;
+        const name = node.childForFieldName('name') || node.namedChildren.find((n) => n.type === 'identifier');
+        const hit = name && minusRow.get(f.p + ':' + (name.startPosition.row + 1));
+        if (hit && !hit.b.adds) removedTypes.set(f.p + '::' + name.text, hit.b);
       }
-    }));
-    // A new type declared in a new file folds with that file.
-    const foldKey = (c) => {
-      if (c.root && c.root.model && newModels.has(String(c.root.member).split('.')[0])) return 'model:' + String(c.root.member).split('.')[0];
-      const fl = new Set([...c.blocks].map((b) => b.file));
-      if (fl.size === 1 && [...fl][0].s === 'A') return 'file:' + [...fl][0].p;
-      const t = c.root && (c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0]);
-      if (t && newTypes.has(t)) return newTypes.get(t).s === 'A' ? 'file:' + newTypes.get(t).p : 'type:' + t;
-      return t && removedTypes.has(t) ? 'type:' + t : null;
-    };
-    const folds = new Map();
-    chains.forEach((c) => { const k = foldKey(c); if (k) { if (!folds.has(k)) folds.set(k, []); folds.get(k).push(c); } });
-    folds.forEach((list, k) => {
-      if (list.length < 2 && !k.startsWith('file:') && !k.startsWith('model:')) return;
-      // Named after the type it is about, or the new type with most changes in a new file.
-      const ownerType = (c) => c.root && (c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0]);
-      let typeName = k.startsWith('type:') || k.startsWith('model:') ? k.slice(k.indexOf(':') + 1) : null;
-      if (!typeName) {
-        const sizes = new Map();
-        list.forEach((c) => { const t = ownerType(c); if (t && newTypes.has(t)) sizes.set(t, (sizes.get(t) || 0) + c.blocks.size); });
-        typeName = [...sizes].sort((x, y) => y[1] - x[1])[0]?.[0] || null;
+    });
+    const removedChains = new Map();
+    chains = chains.filter((c) => {
+      if (!c.root || !c.root.removed) return true;
+      const type = c.root.kind === 'type' ? c.root.name : String(c.root.member || '').split('.')[0];
+      const key = c.root.file + '::' + type;
+      if (!removedTypes.has(key)) return true;
+      c.blocks.add(removedTypes.get(key));
+      c.name = '− ' + type;
+      const keep = removedChains.get(key);
+      if (!keep) {
+        removedChains.set(key, c);
+        return true;
       }
-      const keep = list.find((c) => c.root && c.root.kind === 'type' && c.root.name === typeName) || list.slice().sort((x, y) => y.blocks.size - x.blocks.size)[0];
-      list.forEach((c) => {
-        if (c === keep) return;
-        c.blocks.forEach((b) => keep.blocks.add(b));
-        [c.root, ...c.also].forEach((d) => { if (d && d !== keep.root && !keep.also.includes(d)) keep.also.push(d); });
-        c.folded = true;
-      });
-      const testFile = k.startsWith('file:') && isTestFile(k.slice(5));
-      keep.name = typeName && !testFile ? (removedTypes.has(typeName) && !newTypes.has(typeName) ? '− ' : '') + typeName : path.basename(k.slice(5));
+      c.blocks.forEach((block) => keep.blocks.add(block));
+      return false;
     });
-    chains = chains.filter((c) => !c.folded);
-    // The type's own lines (its name, what it extends) join that chain when nothing linked them.
-    const typed = new Set(chains.flatMap((c) => [...c.blocks]));
-    typeBlocks.forEach(([t, b]) => {
-      const c = !typed.has(b) && chains.find((x) => foldKey(x) === 'type:' + t);
-      if (c) { c.blocks.add(b); typed.add(b); }
+
+    // These are candidate nodes, not sidebar entries. Complete declarations and scenarios
+    // enter chains only through dependencies; sharing a file does not establish a chain.
+    for (const unit of units) {
+      const blocks = new Set(unit.blocks);
+      const root = [...decls.values()].find((d) => d.block.unit === unit &&
+        (unit.kind === 'type' ? d.kind === 'type' && d.name === unit.name : d.member === unit.name && d.kind === 'member')) || {
+        key: 'unit:' + unit.id, name: unit.name, member: unit.name,
+        file: unit.file, line: unit.start, kind: unit.kind === 'type' ? 'type' : 'member',
+        block: [...blocks].find((b) => b.atoms.length), users: new Set(),
+      };
+      const chain = {
+        kind: 'declaration', root, blocks, also: [], unit,
+        name: unit.name,
+        support: isTestFile(unit.file),
+      };
+      chains.push(chain);
+    }
+
+    // Existing members can anchor introduced dependencies or new test scenarios, even when
+    // no existing-code rule produced a chain for that member alone.
+    const owned = new Set(chains.flatMap((chain) => [...chain.blocks]));
+    byMember.forEach((blocks) => {
+      const remaining = blocks.filter((block) => !owned.has(block));
+      const callsNew = remaining.some((block) => [...(usesOf.get(block) || new Map()).keys()].some((key) => decls.get(key).block.unit));
+      const calledByNew = [...decls.values()].some((declaration) => remaining.includes(declaration.block) && [...declaration.users].some((block) => block.unit));
+      if (!callsNew && !calledByNew) return;
+      const first = remaining[0];
+      const root = {
+        key: 'caller:' + first.memberKey, name: first.test || first.member,
+        member: first.member, kind: 'member', file: first.file.p,
+        line: first.rows.find((row) => row.n != null)?.n || 0, block: first, users: new Set(),
+      };
+      chains.push({ kind: 'member', root, blocks: new Set(remaining), name: root.name, also: [], support: isTestFile(first.file.p) });
     });
+
+    chains.forEach((chain) => {
+      chain.support = chain.root ? isTestFile(chain.root.file) : [...chain.blocks].every((block) => isTestFile(block.file.p));
+    });
+    chains = assembleIntroducedChains(chains, usesOf, decls);
+
     const namesOf = (c) => {
       const out = new Set();
       c.blocks.forEach((b) => { if (b.member && b.member !== 'main') out.add(b.member.split('.').pop()); });
@@ -1134,12 +1184,12 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       return out;
     };
     const chainNames = chains.map((c) => [c, namesOf(c)]);
-    allBlocks.filter((b) => b.lang === 'md').forEach((b) => {
+    allBlocks.filter((b) => b.lang === 'md' && !b.unit).forEach((b) => {
       const mentioned = new Set();
       b.rows.forEach((r) => { if (r.type === '+' || r.type === '-') for (const m of r.text.matchAll(/`([A-Za-z_$][\w$.]*)(?:\(\))?`/g)) mentioned.add(m[1].split('.').pop()); });
-      chainNames.forEach(([c, names]) => { if ([...mentioned].some((x) => names.has(x))) c.blocks.add(b); });
+      chainNames.forEach(([c, names]) => { if (c.kind !== 'declaration' && [...mentioned].some((x) => names.has(x))) c.blocks.add(b); });
     });
-    allBlocks.filter((b) => b.lang === 'dart').forEach((b) => {
+    allBlocks.filter((b) => b.lang === 'dart' && !b.unit).forEach((b) => {
       const imported = [];
       b.rows.forEach((r) => {
         const m = r.type === '+' && /^\s*import\s+['"]([^'"]+)['"]/.exec(r.text);
@@ -1150,24 +1200,16 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       if (!imported.length) return;
       chains.forEach((c) => {
         const uses = [...c.blocks].some((x) => x.file === b.file && [...(usesOf.get(x) || new Map()).keys()].some((dk) => imported.includes(decls.get(dk).file)));
-        if (uses) c.blocks.add(b);
+        if (uses && c.kind !== 'declaration') c.blocks.add(b);
       });
     });
     // An import prefix (`as p`) starts no chain: its import joins the chains that use it.
-    decls.forEach((d) => { if (d.kind === 'import') chains.forEach((c) => { if ([...d.users].some((u) => c.blocks.has(u))) c.blocks.add(d.block); }); });
+    decls.forEach((d) => { if (d.kind === 'import' && !d.block.unit) chains.forEach((c) => { if (c.kind !== 'declaration' && [...d.users].some((u) => c.blocks.has(u))) c.blocks.add(d.block); }); });
     // `part 'x.dart'` makes x.dart part of this library: chains with changes in x.dart take it.
-    allBlocks.filter((b) => b.lang === 'dart').forEach((b) => {
+    allBlocks.filter((b) => b.lang === 'dart' && !b.unit).forEach((b) => {
       const parts = [];
       b.rows.forEach((r) => { const m = r.type !== ' ' && /^\s*part\s+['"]([^'"]+)['"]/.exec(r.text); if (m) parts.push(path.normalize(path.join(path.dirname(b.file.p), m[1]))); });
-      if (parts.length) chains.forEach((c) => { if ([...c.blocks].some((x) => parts.includes(x.file.p))) c.blocks.add(b); });
-    });
-    // A new file is written as a whole: a change of it that links to nothing joins the chain
-    // holding most of that file's changes.
-    const inAny = new Set(chains.flatMap((c) => [...c.blocks]));
-    allBlocks.filter((b) => b.file.s === 'A' && !inAny.has(b)).forEach((b) => {
-      let best = null, bestN = 0;
-      chains.forEach((c) => { const n = [...c.blocks].filter((x) => x.file === b.file).length; if (n > bestN) { best = c; bestN = n; } });
-      if (best) best.blocks.add(b);
+      if (parts.length) chains.forEach((c) => { if (c.kind !== 'declaration' && [...c.blocks].some((x) => parts.includes(x.file.p))) c.blocks.add(b); });
     });
     // Chains with exactly the same changes are one chain, named after the better root.
     const bySet = new Map();
@@ -1194,8 +1236,8 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         const gs = new Set(b.edits.map((e) => e.group));
         const g = gs.size === 1 ? [...gs][0] : undefined;
         const testCase = isTestFile(b.file.p) && /::(test:.*|main|\(top\))$/.test(b.memberKey);
-        const key = g !== undefined && groupCount.get(g) >= 3 ? 'group:' + g : testCase ? 'tests:' + b.file.p : 'member:' + b.memberKey;
-        if (!nodes.has(key)) nodes.set(key, { key, blocks: [], files: new Set(), group: key.startsWith('group:') ? g : null, member: testCase ? null : b.member, file: b.file.p, test: b.test, tests: key.startsWith('tests:') ? new Set() : null });
+        const key = b.unit ? 'unit:' + b.unit.id : g !== undefined && groupCount.get(g) >= 3 ? 'group:' + g : testCase ? 'tests:' + b.file.p : 'member:' + b.memberKey;
+        if (!nodes.has(key)) nodes.set(key, { key, blocks: [], files: new Set(), group: key.startsWith('group:') ? g : null, member: b.unit ? b.unit.name : testCase ? null : b.member, file: b.file.p, test: b.test, unit: b.unit?.id, tests: key.startsWith('tests:') ? new Set() : null });
         const n = nodes.get(key);
         n.blocks.push(b); n.files.add(b.file.p);
         if (n.tests && b.test) n.tests.add(b.test);
@@ -1241,11 +1283,20 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       nodes.forEach((n, k) => { if (!layer.has(k)) layer.set(k, maxLayer + 1); });
       c.graph = {
         root: rootKey,
-        nodes: [...nodes.values()].map((n) => ({ key: n.key, layer: layer.get(n.key), group: n.group, member: n.member, file: n.file, files: n.files.size, test: n.test, tests: n.tests ? n.tests.size : undefined, blocks: n.blocks.map((b) => b.id) }))
+        nodes: [...nodes.values()].map((n) => ({ key: n.key, layer: layer.get(n.key), group: n.group, member: n.member, file: n.file, files: n.files.size, test: n.test, unit: n.unit, tests: n.tests ? n.tests.size : undefined, blocks: n.blocks.map((b) => b.id) }))
           .sort((x, y) => x.layer - y.layer || (x.file < y.file ? -1 : x.file > y.file ? 1 : (x.key < y.key ? -1 : 1))),
         edges: [...edges.values()].map((e) => ({ from: e.from, to: e.to, labels: [...e.labels].sort() })),
       };
     }
+    // A collapsed same-change group is still available in the group view. A self-contained
+    // new implementation is still available by file. Neither is a one-node chain, and
+    // file-local new code does not need a separate chain navigation entry.
+    chains = chains.filter((c) => {
+      const changes = new Set([...c.blocks].filter((block) => block.edits.length).map((block) => block.unit || block));
+      return changes.size > 1 && c.graph.nodes.length > 1 && (c.kind !== 'declaration' || c.files > 1);
+    });
+    chains.forEach((c, i) => { c.id = i; });
+
     // Linked chains: a block of one chain uses a member that roots another, or they share blocks.
     const rootChain = new Map(chains.filter((c) => c.root).map((c) => [c.root.key, c]));
     chains.forEach((c) => {
@@ -1262,7 +1313,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     // Chain A uses chain B when A's core uses a function, method, field or type of B's core.
     chains.forEach((c) => {
       const mk = c.root ? c.root.block.memberKey : null;
-      c.core = new Set([...c.blocks].filter((b) => !mk || b.memberKey === mk));
+      c.core = new Set([...c.blocks].filter((b) => b.unit || !mk || b.memberKey === mk));
     });
     chains.forEach((c) => {
       c.uses = new Set();
@@ -1293,7 +1344,12 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       if (fam.has(c.id)) return;
       const stack = [c.id];
       fam.set(c.id, famId);
-      while (stack.length) { const x = stack.pop(); const ch = chains[x]; [...ch.uses, ...usedBy.get(x), ...ch.shares].forEach((y) => { if (!fam.has(y)) { fam.set(y, famId); stack.push(y); } }); }
+      while (stack.length) {
+        const x = stack.pop(), ch = chains[x];
+        // Shared test infrastructure does not combine otherwise independent production work.
+        const neighbors = ch.support ? [] : [...ch.uses, ...usedBy.get(x), ...ch.shares].filter((y) => !chains[y].support);
+        neighbors.forEach((y) => { if (!fam.has(y)) { fam.set(y, famId); stack.push(y); } });
+      }
       famId++;
     });
     chains.forEach((c) => { c.depth = depth.get(c.id); c.family = fam.get(c.id); });
@@ -1333,10 +1389,11 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
           }
           return row;
         }) })),
-        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, grp: b.group || undefined, mk: b.memberKey, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
+        blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, grp: b.group || undefined, mk: b.memberKey, unit: b.unit?.id, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
           move: b.move ? { f: fileIndex.get(b.move.file), b: b.move.from.id, rows: b.move.rows.map(rowOut) } : undefined,
           movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: b.movedTo.block.rows[0].n, changes: b.movedTo.block.edits.length } : undefined })),
       })),
+      units: units.map((u) => ({ id: u.id, kind: u.kind, name: u.name, file: u.file, start: u.start, end: u.end, blocks: [...u.blocks].map((b) => b.id) })),
       edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan, sym: e.group != null && e.op === 'token' ? symOf(e) : undefined })),
       groups: groups.map((g) => ({ id: g.id, count: g.count, files: g.files, parts: g.parts.map((p) => p.edits[0].id), edits: g.edits.map((e) => e.id) })),
       chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, links: c.links, uses: [...c.uses].sort((a, b) => a - b), shares: [...c.shares].sort((a, b) => a - b), depth: c.depth, family: c.family, adds: [...c.blocks].reduce((x, b) => x + b.adds, 0), dels: [...c.blocks].reduce((x, b) => x + b.dels, 0), focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),

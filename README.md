@@ -7,6 +7,13 @@ parameter, the calls that now pass it, the function that had to take a parameter
 chain, group and count comes from fixed rules over git, tree-sitter and the Dart analysis server.
 The rules and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md).
 
+New classes, models and functions are read whole. A reading unit is not automatically a chain:
+self-contained new code stays in the file review, and chains connect multiple nodes. New code
+forms chains through resolved dependencies across files, without collecting the independent
+consumers of shared utilities. New tests keep each complete scenario together. Existing-code
+changes still follow their signature, rename and call-site chains. Counts and keyboard navigation
+use reading units; individual edit marks and saved reviews remain available underneath.
+
 ```
 untangle [flags] [directory]
 untangle [flags] <pr-url>

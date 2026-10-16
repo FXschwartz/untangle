@@ -16,6 +16,7 @@ are local measurements; the host load and available memory are saved with every 
 | `compare.ts` | Compares answers and prints timing/memory tables. Supports strict pairs and the baseline union. |
 | `noise.ts` | Lists every differing query and its traffic attempts, including symbol order versus membership changes. |
 | `harness.test.ts` | Tests framing, process cleanup, timing boundaries, comparisons and SDK source equivalence. |
+| `cohesion.ts` | Replays pinned answers through two grouping rule sets, checking edit identity, generated files, complete introduced types and unique reading-unit ownership. |
 
 ## Prerequisites and isolation
 
@@ -161,3 +162,39 @@ node_modules/.bin/tsc --noEmit --strict --noUnusedLocals --noUnusedParameters --
 
 The harness tests use unique folders under `os.tmpdir()` and clean them up. They do not require
 the large scenario, the copied SDK, or any machine-specific directory.
+
+## Cohesion replay
+
+`cohesion.ts` isolates grouping changes from LSP variability. Keep the source checkouts that
+the captured `answers.json` files refer to. Supply a baseline analyzer module from a separate
+checkout, with its imports and dependencies available, and a manifest:
+
+```json
+{
+  "cases": [
+    {
+      "name": "reference PR at its pinned head",
+      "answers": "/scratch/reference/answers.json",
+      "state": "/scratch/reference/state.json"
+    }
+  ]
+}
+```
+
+`state` is optional and read only; it supplies saved block marks for remaining-work counts.
+Both analyzers receive the same diff, definitions, outgoing calls and overrides. The harness
+checks that atomic IDs, edit spans, move data and generated files remain unchanged, each new
+unit is complete and belongs to at most one chain (one graph node when linked), and
+independently detected introduced source types include every changed member. Chains must
+have multiple graph nodes; new-code chains must span files and have a connected dependency
+graph. It records singleton counts separately from reading-unit completeness, writes full
+base/head SHAs, and exits nonzero on a failed invariant.
+
+```sh
+node bench/cohesion.ts /scratch/manifest.json /scratch/cohesion-results /scratch/baseline/analysis/analyze.js
+```
+
+These structural checks complement rendered-page checks and inspection of representative
+chains. A smaller chain count or higher linked percentage alone does not establish cohesion.
+The recorded corpus and limitations are in [the validation report](../docs/02-test-runs.md)
+and [its machine-readable evidence](../docs/cohesion-validation.json).
