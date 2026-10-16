@@ -41,28 +41,69 @@ describe('Given an unchanged declaration moved next to separate import edits, ',
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
   });
 
-  for (const layout of ['unified', 'split']) {
-    describe(`when the move is read in ${layout} layout, `, () => {
-      before(async () => {
-        await client.call('state', { method: 'PUT', body: { rev: { base: [] }, layout } });
-        await page.goto(run.url);
-        await page.until(`!!document.querySelector('[data-tab="files"]')`);
-        await page.click('[data-tab="files"]');
-      });
+  async function readMove(layout: string) {
+    await client.call('state', { method: 'PUT', body: { rev: { base: [] }, layout } });
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('[data-tab="files"]')`);
+    await page.click('[data-tab="files"]');
+    await page.click('#vw-side [data-open="lib/old.dart"]');
+    await page.until(`!!document.querySelector('.mv-away')`);
+    const removed = await page.eval(`(() => {
+      const marker = document.querySelector('.mv-away');
+      const edit = document.querySelector('.code .del');
+      return { afterImport: !!(edit.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING), label: marker.textContent };
+    })()`) as { afterImport: boolean; label: string };
 
-      for (const [file, marker, local] of [['old', 'mv-away', 'Old lines 3–4'], ['new', 'mv-head', 'Line 3']]) {
-        it(`then the ${file} file's annotation precedes the import edits and identifies the moved lines.`, async () => {
-          await page.click(`#vw-side [data-open="lib/${file}.dart"]`);
-          await page.until(`!!document.querySelector('.${marker}')`);
-          const result = await page.eval(`(() => {
-            const marker = document.querySelector('.${marker}');
-            const edit = document.querySelector('.code .add, .code .del');
-            return { above: !!(marker.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING), label: marker.textContent };
-          })()`) as { above: boolean; label: string };
-          assert.equal(result.above, true);
-          assert.ok(result.label.includes(local), result.label);
-        });
-      }
-    });
+    await page.click('#vw-side [data-open="lib/new.dart"]');
+    await page.until(`!!document.querySelector('.mv-head')`);
+    const folded = await page.eval(`(() => { const row = document.querySelector('.mv-head').nextElementSibling; return { className: row.className, body: row.textContent }; })()`) as { className: string; body: string };
+    await page.click('.mv-head [data-act="toggle-move"]');
+    const added = await page.eval(`(() => {
+      const marker = document.querySelector('.mv-head');
+      const edit = document.querySelector('.code .add');
+      return {
+        afterImport: !!(edit.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING),
+        body: marker.nextElementSibling.querySelector('.tx').textContent,
+        label: marker.textContent,
+      };
+    })()`) as { afterImport: boolean; body: string; label: string };
+
+    return { removed, folded, added };
   }
+
+  describe('when the move is read in unified layout, ', () => {
+    let result: Awaited<ReturnType<typeof readMove>>;
+
+    before(async () => { result = await readMove('unified'); });
+
+    it('then the moved-away annotation stays after the unrelated import edit.', () => {
+      assert.equal(result.removed.afterImport, true);
+      assert.ok(result.removed.label.includes('Old lines 3–4'));
+    });
+
+    it('then the moved-from annotation immediately precedes its folded or expanded body.', () => {
+      assert.equal(result.added.afterImport, true);
+      assert.ok(result.folded.className.includes('mv'), JSON.stringify(result));
+      assert.equal(result.added.body, 'enum Page { days, months, years }');
+      assert.ok(result.added.label.includes('Line 3'));
+    });
+  });
+
+  describe('when the move is read in split layout, ', () => {
+    let result: Awaited<ReturnType<typeof readMove>>;
+
+    before(async () => { result = await readMove('split'); });
+
+    it('then the moved-away annotation stays after the unrelated import edit.', () => {
+      assert.equal(result.removed.afterImport, true);
+      assert.ok(result.removed.label.includes('Old lines 3–4'));
+    });
+
+    it('then the moved-from annotation immediately precedes its folded or expanded body.', () => {
+      assert.equal(result.added.afterImport, true);
+      assert.ok(result.folded.className.includes('mv'), JSON.stringify(result));
+      assert.equal(result.added.body, 'enum Page { days, months, years }');
+      assert.ok(result.added.label.includes('Line 3'));
+    });
+  });
 });

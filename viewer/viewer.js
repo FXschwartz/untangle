@@ -506,8 +506,8 @@
     const notes = (o.badges || '') + (o.toggle || '');
     return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
-  // Move annotations lead the snippet. Name the local lines so nearby import or other edits
-  // cannot be mistaken for the moved declaration. The removed body stays collapsed.
+  // Each move annotation stays at the moved block's position. The removed body stays
+  // collapsed; the added body's annotation immediately precedes its rows.
   function moveLines(b, old) {
     const meta = b.file.hunks[b.hunk].meta.slice(b.first, b.first + b.len);
     const ns = meta.map((r) => old ? r.o : r.n).filter((n) => n != null);
@@ -530,15 +530,11 @@
       + `<button type="button" class="note" data-act="toggle-move" data-block="${esc(b.id)}">${open ? 'fold the moved lines' : 'show the moved lines'}</button></span></div>`;
     return h;
   }
-  function moveHeadsHtml(f, h, start, end) {
-    const moves = new Set(h.meta.slice(start, end).map((r) => r.block).filter((b) => b && (b.move || b.movedTo)));
-    return [...moves].map((b) => b.move ? movedHeadHtml(f, b) : movedAwayHtml(b)).join('');
-  }
   // The added copy compares the two bodies: unchanged lines are purple; edits stay red/green.
   function movedHtml(f, b, ctx) {
     const from = M().files[b.move.f];
     const rows = b.move.rows, d = done(b), open = state.moveOpen.has(b.id);
-    let h = '';
+    let h = movedHeadHtml(f, b);
     // Keep each change with 3 lines of context; fold the rest unless opened.
     const keep = new Set();
     rows.forEach((r, i) => { if (r[0] !== ' ') for (let k = Math.max(0, i - 3); k <= Math.min(rows.length - 1, i + 3); k++) keep.add(k); });
@@ -563,7 +559,7 @@
   function rowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
     const h = f.hunks[hi];
-    let out = moveHeadsHtml(f, h, start, end);
+    let out = '';
     const placed = new Set();
     for (let ri = start; ri < end; ri++) {
       const meta = h.meta[ri];
@@ -571,7 +567,7 @@
       const colors = rowColors(h.rows, f.p, ri);
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
-        if (!placed.has(b.id)) { placed.add(b.id); if (b.move) out += movedHtml(f, b, ctx); }
+        if (!placed.has(b.id)) { placed.add(b.id); out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b); }
         // A block moved away is one row here; threads on its removed lines still show.
         if (b.movedTo) out += threadsAt(f, 'LEFT', meta.o);
         continue;
@@ -622,13 +618,13 @@
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
     const h = f.hunks[hi];
-    let out = moveHeadsHtml(f, h, start, end);
+    let out = '';
     let ri = start;
     while (ri < end) {
       const meta = h.meta[ri];
       const b = meta.block;
       if (b && (b.move || b.movedTo)) {
-        if (b.move) out += movedHtml(f, b, ctx);
+        out += b.move ? movedHtml(f, b, ctx) : movedAwayHtml(b);
         while (ri < end && h.meta[ri].block === b) { if (b.movedTo) out += threadsAt(f, 'LEFT', h.meta[ri].o); ri++; }
         continue;
       }
