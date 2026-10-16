@@ -101,7 +101,8 @@ describe('Given a served review of a renamed parameter and its caller, with the 
       await page!.until(`!!document.querySelector('[data-act="peek-use"]')`);
       await page!.click('[data-act="peek-use"]');
       await page!.until(`(document.querySelector('.peek')?.textContent || '').includes('Usage')`);
-      peek = await read(page!, `[[...document.querySelector('.peek .pk-h').children].map((part) => part.textContent).filter(Boolean).join(' | '), ...[...document.querySelectorAll('.peek .pk-code .pk-ln')].map((row) => (row.matches('.hit') ? '> ' : '  ') + row.querySelector('.no')?.textContent + ' ' + (row.querySelector('.sg')?.textContent || ' ') + ' ' + row.querySelector('.tx')?.textContent)].join('\\n')`);
+      await page!.until(`!!document.querySelector('.peek [data-peek-code$=":file"]')`);
+      peek = await read(page!, `[[...document.querySelector('.peek .pk-h').children].map((part) => part.textContent).filter(Boolean).join(' | '), ...[...document.querySelectorAll('.peek .pk-code .pk-ln')].filter(row => Number(row.dataset.n) >= 2 && Number(row.dataset.n) <= 9).map((row) => (row.matches('.hit') ? '> ' : '  ') + row.querySelector('.no')?.textContent + ' ' + (row.querySelector('.sg')?.textContent || ' ') + ' ' + row.querySelector('.tx')?.textContent)].join('\\n')`);
     });
 
     it('then the peek shows that usage.', () => {
@@ -116,6 +117,41 @@ describe('Given a served review of a renamed parameter and its caller, with the 
         '  8   ',
         '  9   // pad 1',
       ].join('\n'));
+    });
+  });
+
+  describe('when the code in a usage window is scrolled, ', () => {
+    it('then the rest of the file is reachable without moving the review page.', async () => {
+      const result = await page!.eval(`(() => {
+        const code = document.querySelector('.peek .pk-code');
+        const main = document.querySelector('#vw-main');
+        const before = main.scrollTop;
+        code.scrollTop = code.scrollHeight;
+        const last = code.querySelector('.pk-ln:last-child').getBoundingClientRect();
+        const box = code.getBoundingClientRect();
+        return {
+          scrolled: code.scrollTop > 0,
+          bounded: code.clientHeight <= 360,
+          lastVisible: last.top >= box.top && last.bottom <= box.bottom,
+          pageStayed: main.scrollTop === before,
+          text: code.textContent,
+        };
+      })()`) as { scrolled: boolean; bounded: boolean; lastVisible: boolean; pageStayed: boolean; text: string };
+      assert.equal(result.scrolled, true);
+      assert.equal(result.bounded, true);
+      assert.equal(result.lastVisible, true);
+      assert.equal(result.pageStayed, true);
+      assert.ok(result.text.includes('final buffer = StringBuffer();'));
+    });
+  });
+
+  describe('when Space is pressed with the code window focused, ', () => {
+    it('then it scrolls the code without marking a change reviewed.', async () => {
+      const before = await read(page!, `document.querySelector('.sb-prog').textContent`);
+      await page!.eval(`(() => { const code = document.querySelector('.peek .pk-code'); code.scrollTop = 0; code.focus({ preventScroll: true }); })()`);
+      await page!.key(' ');
+      await page!.until(`document.querySelector('.peek .pk-code')?.scrollTop > 0`);
+      assert.equal(await read(page!, `document.querySelector('.sb-prog').textContent`), before);
     });
   });
 
@@ -160,6 +196,21 @@ describe('Given a served review of a renamed parameter and its caller, with the 
 
     it('then the peek shows its definition in the Dart SDK, with Open file.', () => {
       assert.match(peekHead, /^Definition \| dart:core\/print\.dart:\d+ \| Dart SDK \| Open file \| Close$/);
+    });
+  });
+
+  describe('when a saved SDK definition has loaded its file, ', () => {
+    it('then its requested line starts in view and code beyond the saved snippet can be read.', async () => {
+      await page!.until(`!!document.querySelector('.peek [data-peek-code$=":file"]')`, 120_000);
+      const result = await page!.eval(`(() => {
+        const code = document.querySelector('.peek .pk-code');
+        const box = code.getBoundingClientRect();
+        const hit = code.querySelector('.hit').getBoundingClientRect();
+        return { visible: hit.top >= box.top && hit.bottom <= box.bottom, rows: code.querySelectorAll('.pk-ln').length, scrollable: code.scrollHeight > code.clientHeight };
+      })()`) as { visible: boolean; rows: number; scrollable: boolean };
+      assert.equal(result.visible, true);
+      assert.ok(result.rows > 20);
+      assert.equal(result.scrollable, true);
     });
   });
 

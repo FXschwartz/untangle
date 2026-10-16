@@ -909,8 +909,60 @@
       return `<div class="pk-ln${i === hl.ri ? ' hit' : ''}${r.t === '+' ? ' add' : ''}"><span class="no">${r.n}</span><span class="sg">${r.t === '+' ? '+' : ''}</span><span class="tx">${codeHtml(hl.f, h.rows[i][1], null, { colors: rowColors(h.rows, hl.f.p, i), live: CONFIG.served ? { side: 'head', p: hl.f.p, line: r.n } : null })}</span></div>`;
     }).join('');
   }
-  // A definition asked live: where it is, its snippet (names in it can be asked in turn), and
-  // ways to open it.
+  // Every peek uses the same bounded code viewport. Served reviews fill it with the whole
+  // file, keeping the saved snippet useful while the file (or an external path) is loading.
+  function peekCodeHtml(t, fallback, usage) {
+    const v = { side: t.side, path: t.p, ext: t.ext };
+    const canLoad = CONFIG.served && (t.side || t.ext != null);
+    const source = canLoad ? loadSource(v, true) : null;
+    const full = source && source.status === 'ok';
+    const lines = full ? source.lines : t.code || [];
+    const start = full ? 1 : t.s || 1;
+    const key = `${srcKey(v)}:${t.l}:${full ? 'file' : 'snippet'}`;
+    const colors = textColors(full ? source.text : lines.join('\n'), t.p);
+    const file = { p: t.p, lang: C.langOf(t.p) };
+    const body = !full && fallback ? fallback : lines.map((text, i) => {
+      const ln = start + i;
+      const row = usage && M().head.get(t.p + ':' + ln);
+      const added = row && row.r.t === '+';
+      const live = canLoad ? { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } : null;
+      return `<div class="pk-ln${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
+    }).join('');
+    const note = source && source.status === 'error' ? `<div class="pk-foot">${esc(source.error)} · showing the saved snippet</div>` : '';
+    return `<div class="pk-code" tabindex="0" aria-label="Code in ${esc(t.p)}" data-peek-code="${esc(key)}">${body}</div>${note}`;
+  }
+  function cachedPeekTarget(p, t, side) {
+    if (side) return { ...t, side };
+    if (p.resolved) return { ...t, ...p.resolved };
+    if (CONFIG.served && !p.resolving) {
+      p.resolving = true;
+      askDefinition({ side: p.old ? 'base' : 'head', p: p.path, l: p.old ? p.o : p.n, c: p.col }).then((live) => {
+        if (live.status !== 'ok') return;
+        p.resolved = live.target;
+        if (state.peek === p) render();
+      });
+    }
+    return t;
+  }
+  // Keep each definition/usage's position across redraws and Back. A new file starts at
+  // the requested line, with a little context above; scrolling stays inside the window.
+  function savePeekScroll() {
+    const code = main.querySelector('.peek .pk-code');
+    if (!code || !state.peek) return;
+    if (!state.peek.scrolls) state.peek.scrolls = new Map();
+    state.peek.scrolls.set(code.dataset.peekCode, [code.scrollLeft, code.scrollTop]);
+  }
+  function restorePeekScroll() {
+    const code = main.querySelector('.peek .pk-code');
+    if (!code || !state.peek) return;
+    const at = state.peek.scrolls && state.peek.scrolls.get(code.dataset.peekCode);
+    if (at) { code.scrollLeft = at[0]; code.scrollTop = at[1]; return; }
+    const hit = code.querySelector('.hit');
+    if (hit) code.scrollTop = hit.getBoundingClientRect().top - code.getBoundingClientRect().top - Math.min(80, code.clientHeight / 3);
+  }
+  main.addEventListener('scroll', (e) => { if (e.target.matches && e.target.matches('.pk-code')) savePeekScroll(); }, true);
+
+  // A definition asked live, with the same code viewport and navigation as a saved one.
   function livePeekHtml(p) {
     const L = p.live;
     const back = p.back && p.back.length ? '<button type="button" class="btn xs" data-act="peek-back">Back</button>' : '';
@@ -919,15 +971,10 @@
     if (L.status !== 'ok') return `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(L.error || 'The language server knows no definition for this name.')}</span><span class="sp"></span>${back}${close}</div>`;
     const t = L.target;
     const where = t.side === 'base' ? `old side · ${(CONFIG.base || '').slice(0, 7)}` : t.side === 'head' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : t.w === 'package' ? 'package' : 'outside the repo';
-    const file = { p: t.p, lang: C.langOf(t.p) };
-    const colors = textColors(t.code.join('\n'), t.p);
     let h = `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>${back}`
       + sourceButton({ side: t.side, p: t.side ? t.p : null, ext: t.ext, line: t.l, label: t.w !== 'repo' ? t.p : null, where }, 'Open file', 'btn xs')
       + editorHtml({ side: t.side, p: t.p, abs: t.abs, line: t.l, col: t.c }) + close + '</div>'
-      + `<div class="pk-code">${t.code.map((line, i) => {
-        const ln = t.s + i;
-        return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${codeHtml(file, line, null, { colors: colors && colors[i], live: { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } })}</span></div>`;
-      }).join('')}</div>`;
+      + peekCodeHtml(t);
     if (t.side === 'head' && M().head.has(t.p + ':' + t.l)) h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
     return h;
   }
@@ -943,19 +990,15 @@
       h += `<div class="pk-h"><b>Usage ${p.sel + 1} of ${list.length}</b><span class="pk-loc">${esc(sel[0])}:${sel[1]}</span><span class="pk-src">${isOpen(sel) ? 'not reviewed' : 'reviewed'}</span><span class="sp"></span>`
         + (hasDef ? '<button type="button" class="btn xs" data-act="peek-def">Back to definition</button>' : '')
         + `<button type="button" class="btn xs primary" data-act="peek-go">Go to it</button><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
-        + `<div class="pk-code">${usageContextHtml(selHl)}</div>`;
+        + peekCodeHtml({ p: sel[0], side: 'head', l: sel[1] }, usageContextHtml(selHl), true);
     } else if (hasDef) {
       const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : defsNow().targets[p.ti];
       const where = (p.old ? `old side · ${M().raw.left} · ` : '') + (t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package');
       const side = t.w === 'repo' ? (p.old ? 'base' : 'head') : null;
-      const colors = textColors(t.code.join('\n'), t.p);
       h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>`
         + (side ? sourceButton({ side, p: t.p, line: t.l }, 'Open file', 'btn xs') + editorHtml({ side, p: t.p, line: t.l }) : CONFIG.served ? '<button type="button" class="btn xs" data-act="open-def">Open file</button>' : '')
-        + `<button type="button" class="pk-x" data-act="close-peek">Close</button></div>
-        <div class="pk-code">${t.code.map((line, i) => {
-          const ln = t.s + i;
-          return `<div class="pk-ln${ln === t.l ? ' hit' : ''}"><span class="no">${ln}</span><span class="tx">${codeHtml({ p: t.p, lang: C.langOf(t.p) }, line, null, { colors: colors && colors[i], live: side ? { side, p: t.p, line: ln } : null })}</span></div>`;
-        }).join('')}</div>`;
+        + `<button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
+        + peekCodeHtml(cachedPeekTarget(p, t, side));
       if (!p.old && t.w === 'repo' && M().head.has(t.p + ':' + t.l) && !(t.p === p.path && t.l === p.n)) {
         h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
       }
@@ -983,6 +1026,7 @@
     tmp.innerHTML = peekHtml(state.peek);
     const next = tmp.firstElementChild;
     el.replaceWith(next);
+    restorePeekScroll();
     const lst = next.querySelector('.pk-list');
     if (lst) lst.scrollTop = listTop;
     const f = next.querySelector(focusSel);
@@ -3164,6 +3208,7 @@
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
     }
+    restorePeekScroll();
     const gs2 = graphAt && graphAt.view === viewKey() && main.querySelector('.graph-scroll');
     if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
@@ -4235,7 +4280,7 @@
       if (next) { e.preventDefault(); next.focus(); }
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || typingIn(e.target) || PAL.open) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || typingIn(e.target) || (e.target.matches && e.target.matches('.pk-code')) || PAL.open) return;
     // Space on a button presses it.
     if (e.key === ' ' && e.target.closest && e.target.closest('button, a, [role="button"], summary')) return;
     if (e.key === 'j' || e.key === 'k') gotoChange(e.key === 'j' ? 1 : -1, true);

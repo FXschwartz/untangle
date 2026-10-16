@@ -662,7 +662,7 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .pk-src { font-size: 12px; color: var(--text-3); }
 .pk-x { appearance: none; border: 0; background: none; color: var(--text-3); font: 500 12px/1 var(--ui); cursor: pointer; padding: 6px 4px; }
 .pk-x:hover { color: var(--text); }
-.pk-code { overflow-x: auto; padding: 2px 0 8px; font: 400 12px/1.6 var(--code); }
+.pk-code { max-height: min(360px, 45vh); overflow: auto; overscroll-behavior: contain; padding: 2px 0 8px; font: 400 12px/1.6 var(--code); }
 .pk-ln { display: flex; white-space: pre; }
 .pk-ln .no { width: 46px; flex: none; padding-right: 10px; text-align: right; color: var(--text-4); }
 .pk-ln.hit { background: rgba(255, 255, 255, .05); box-shadow: inset 2px 0 0 var(--accent); }
