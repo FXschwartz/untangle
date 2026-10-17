@@ -19,6 +19,10 @@ import { editorFrom, ReviewSession } from './session.js';
 import { isPrUrl, latestHead, resolveDirectory, resolveUrl, type Target } from './target.js';
 import { VERSION } from './version.js';
 
+// After its last page closes, untangle waits this long for a page to open again (a reload)
+// before it stops.
+const AUTOCLOSE_AFTER = 5000;
+
 async function main(): Promise<number> {
   let opts: Options;
   try {
@@ -60,8 +64,9 @@ async function main(): Promise<number> {
   let target: Target | null = null;
   let url = '';
   if (!exporting) {
+    const idle = { after: AUTOCLOSE_AFTER, then: () => { say.stopping('The review’s page closed, so untangle stops (-autoclose=false keeps it serving).'); void stop(); } };
     server = new ReviewServer(
-      { host: opts.host, port: opts.port, portExplicit: opts.portExplicit, basePath: opts.basePath },
+      { host: opts.host, port: opts.port, portExplicit: opts.portExplicit, basePath: opts.basePath, idle: opts.autoclose ? idle : undefined },
       say,
       {
         page: () => (render && session ? render(session.config()) : null),
@@ -212,7 +217,7 @@ async function main(): Promise<number> {
     session = opened.session;
     render = opened.render;
     say.note(`marks go to the branch ${session.snapshot.branch}`);
-    say.ready(url);
+    say.ready(url, opts.autoclose);
     // Start live navigation after extraction and grouping have finished.
     live.ensure().catch((e) => say.note(`live go to definition is off: ${(e as Error).message}`));
   } catch (e) {

@@ -46,6 +46,12 @@ export const highlighter = () => built('highlight.js');
 /** The page's fonts, with their files inlined (dist/fonts.css), built by `npm run build`. */
 export const fonts = () => built('fonts.css');
 const hash = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex').slice(0, 12);
+// Served, a page tells untangle when it opens and closes, so the last one to close can stop it.
+const presence = () => {
+  const src = read('presence.js');
+  if (/<\/script/i.test(src)) throw new Error('presence.js contains </script');
+  return `<script>\n${src}</script>`;
+};
 // Served, an asset's URL carries its content's hash: a browser never keeps an old one.
 const fontsLink = (css: Buffer | null) => (css ? `<link rel="stylesheet" href="assets/fonts.css?v=${hash(css)}">` : '');
 
@@ -77,6 +83,7 @@ export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'ex
   const parts: Array<[string, string]> = [
     ['/*TITLE*/', escapeHtml(title + ' · untangle')],
     ['<!--FONTS-->', !faces ? '' : mode === 'served' ? fontsLink(faces) : `<style>${faces.toString('utf8')}</style>`],
+    ['<!--PRESENCE-->', mode === 'served' ? presence() : ''],
     ['<!--HIGHLIGHT-->', highlight],
     ['/*CORE*/', core],
     ['/*CONFIG*/', '\0'],
@@ -106,5 +113,5 @@ export function reviewPage(data: ReviewData, title: string, mode: 'served' | 'ex
 
 /** The page shown while the review is being built: it follows the steps and reloads when done. */
 export function progressPage(): string {
-  return read('progress.html').replace('<!--FONTS-->', fontsLink(fonts()));
+  return read('progress.html').replace('<!--FONTS-->', fontsLink(fonts())).replace('<!--PRESENCE-->', presence());
 }

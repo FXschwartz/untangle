@@ -5,6 +5,7 @@ import { parseArgs, UsageError, type Options } from '../../dist/args.js';
 function shown(options: Options): string {
   return [
     `target ${options.target}`,
+    `autoclose ${options.autoclose}`,
     `base ${options.base ?? 'none'}`,
     `basePath ${options.basePath}`,
     `chains ${options.chains}`,
@@ -26,10 +27,11 @@ function shown(options: Options): string {
 describe('Given no arguments, ', () => {
   it(
     'when the flags are read, '
-    + 'then the defaults review the current directory on port 7778, chains following the commits, and open it.',
+    + 'then the defaults review the current directory on port 7778, chains following the commits, open it, and stop once it closes.',
     () => {
       assert.equal(shown(parseArgs([])), [
         'target .',
+        'autoclose true',
         'base none',
         'basePath /',
         'chains history',
@@ -52,6 +54,7 @@ describe('Given no arguments, ', () => {
 
 describe('Given flags for a quiet review written to a file, ', () => {
   const argv = [
+    '-autoclose=false',
     '-base', 'main',
     '-base-path', 'rev',
     '-chains', 'structure',
@@ -72,6 +75,7 @@ describe('Given flags for a quiet review written to a file, ', () => {
     () => {
       assert.equal(shown(parseArgs(argv)), [
         'target feature',
+        'autoclose false',
         'base main',
         'basePath /rev/',
         'chains structure',

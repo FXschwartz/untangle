@@ -5,10 +5,11 @@ interface Flag {
   name: string;
   type: 'string' | 'int' | 'bool';
   usage: string;
-  default?: string | number;
+  default?: string | number | boolean;
 }
 
 const FLAGS: Flag[] = [
+  { name: 'autoclose', type: 'bool', usage: 'stop once the review’s last open page closes (a reload keeps it)', default: true },
   { name: 'base', type: 'string', usage: 'compare with this branch or commit instead of the pull request’s base' },
   { name: 'base-path', type: 'string', usage: 'base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)' },
   { name: 'chains', type: 'string', usage: 'what chains follow: "history", the commits that started each change, or "structure", the code alone', default: 'history' },
@@ -27,6 +28,7 @@ const FLAGS: Flag[] = [
 
 export interface Options {
   target: string;
+  autoclose: boolean;
   base: string | null;
   basePath: string;
   chains: 'history' | 'structure';
@@ -103,6 +105,7 @@ export function parseArgs(argv: string[]): Options {
   if (chains !== 'history' && chains !== 'structure') throw new UsageError(`invalid value "${chains}" for flag -chains: history or structure`);
   return {
     target: rest[0] || '.',
+    autoclose: values.has('autoclose') ? bool('autoclose') : true,
     base: str('base'),
     basePath,
     chains,

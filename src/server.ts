@@ -30,6 +30,11 @@ export interface ServerOptions {
   /** Whether the port was asked for: if not, a busy port falls back to a free one. */
   portExplicit: boolean;
   basePath: string;
+  /**
+   * Called once the last page that said it opened has closed, no page opened again within
+   * `after` ms (a reload), and no call is still being answered.
+   */
+  idle?: { after: number; then(): void };
 }
 
 const MAX_BODY = 32 << 20;
@@ -40,6 +45,10 @@ export class ReviewServer {
   readonly token = crypto.randomBytes(18).toString('base64url');
   private server: http.Server | null = null;
   private cookie = '';
+  // The pages open now, by the id each one made up, and the calls still being answered.
+  private pages = new Set<string>();
+  private calls = 0;
+  private idleTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly opts: ServerOptions,
@@ -73,11 +82,35 @@ export class ReviewServer {
   }
 
   close(): Promise<void> {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
     return new Promise((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
       this.server.closeAllConnections();
     });
+  }
+
+  // A page says when it opens and when it closes (a reload does both).
+  private presence(id: string, open: boolean) {
+    if (open) {
+      this.pages.add(id);
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+      return;
+    }
+    if (!this.pages.delete(id) || this.pages.size || !this.opts.idle) return;
+    const { after, then } = this.opts.idle;
+    // A mark saved as the page went is still answered first.
+    const wait = (ms: number) => {
+      this.idleTimer = setTimeout(() => {
+        if (this.pages.size) return;
+        if (this.calls) return wait(250);
+        this.idleTimer = null;
+        then();
+      }, ms);
+    };
+    wait(after);
   }
 
   private send(res: http.ServerResponse, code: number, type: string, body: string, headers: Record<string, string> = {}) {
@@ -156,12 +189,21 @@ export class ReviewServer {
           return this.json(res, 400, { error: 'not JSON' });
         }
       }
+      if (route === 'api/presence' && req.method === 'POST') {
+        const said = body as { id?: unknown; open?: unknown } | null;
+        if (!said || typeof said.id !== 'string' || typeof said.open !== 'boolean') return this.json(res, 400, { error: 'say which page (id) and whether it is open' });
+        this.presence(said.id, said.open);
+        return this.json(res, 200, { pages: this.pages.size });
+      }
+      this.calls++;
       try {
         const head = req.headers['x-untangle-head'];
         const out = await this.api.call(route.slice(4), req.method || 'GET', url.searchParams, body, typeof head === 'string' ? head : null);
         return this.json(res, out.status ?? 200, out.data);
       } catch (e) {
         return this.json(res, 500, { error: (e as Error).message });
+      } finally {
+        this.calls--;
       }
     }
     return this.send(res, 404, 'text/plain', 'Not found');

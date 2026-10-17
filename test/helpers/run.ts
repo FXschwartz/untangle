@@ -13,6 +13,8 @@ export interface UntangleRun {
   stop(): Promise<void>;
   /** Everything untangle has printed so far. */
   output(): string;
+  /** Settles with untangle's exit code when it exits, by itself or stopped. */
+  exited: Promise<number | null>;
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -123,13 +125,22 @@ function chainsFlag(chains: 'history' | 'structure' | null | undefined, args: st
   return chains === null || args?.includes('-chains') ? [] : ['-chains', chains ?? 'structure'];
 }
 
+/**
+ * Tests stop the review themselves, and some leave its page for another: it keeps serving when
+ * its page closes unless the test asks for autoclose, or null for untangle's own default (on).
+ */
+function autocloseFlag(autoclose: boolean | null | undefined): string[] {
+  return autoclose === null ? [] : [`-autoclose=${autoclose ?? false}`];
+}
+
 /** Serves the directory with `-port 0 -no-open` and resolves with the printed URL. */
-export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; chains?: 'history' | 'structure' | null; quiet?: boolean; open?: boolean; port?: number | null; env?: NodeJS.ProcessEnv }): Promise<UntangleRun> {
+export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; chains?: 'history' | 'structure' | null; autoclose?: boolean | null; quiet?: boolean; open?: boolean; port?: number | null; env?: NodeJS.ProcessEnv }): Promise<UntangleRun> {
   const { gh, release } = ownedGh(opts.gh);
   const quiet = opts.quiet === false ? [] : ['-quiet'];
   const open = opts.open ? [] : ['-no-open'];
   const port = opts.port === null ? [] : ['-port', String(opts.port ?? 0)];
-  const child = spawnUntangle([...leading(opts.base), ...open, ...port, ...quiet, ...chainsFlag(opts.chains, opts.args), ...(opts.args ?? []), dir], opts.cacheDir, gh, opts.env);
+  const child = spawnUntangle([...leading(opts.base), ...open, ...port, ...quiet, ...chainsFlag(opts.chains, opts.args), ...autocloseFlag(opts.autoclose), ...(opts.args ?? []), dir], opts.cacheDir, gh, opts.env);
+  const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
   const text = collect(child);
   const output = () => `${text.out()}\n${text.err()}`;
   try {
@@ -137,6 +148,7 @@ export async function startUntangle(dir: string, opts: { base?: string | null; c
     return {
       url,
       output,
+      exited,
       stop: async () => {
         await stopProcess(child);
         release();

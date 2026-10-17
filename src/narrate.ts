@@ -166,14 +166,22 @@ export class Narrator implements Progress {
     this.pending = [];
   }
 
-  ready(url: string) {
+  ready(url: string, autoclose = false) {
     this.end(false);
     this.status.phase = 'ready';
     this.changed(true);
     if (this.opts.quiet) return;
     this.write('');
     this.write(`  Review at ${this.c('1', url)}`);
-    this.write(this.c('2', '  Ctrl+C to stop.'));
+    this.write(this.c('2', autoclose ? '  Closing its page stops untangle, as Ctrl+C does.' : '  Ctrl+C to stop.'));
+  }
+
+  /** Says why untangle stops now, leaving a running step unfinished. */
+  stopping(why: string) {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
+    this.current = null;
+    if (!this.opts.quiet) this.write(`  ${why}`);
   }
 
   serving(url: string) {

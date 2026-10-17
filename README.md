@@ -48,8 +48,12 @@ untangle [flags] <pr-url>
 
 untangle serves the review on `127.0.0.1` and opens it: in Orca's browser when it runs in one
 of Orca's terminals (a tab in that terminal's worktree), else in your default browser; `BROWSER`
-overrides both. The link carries a token, as Jupyter's does. An open page keeps working after untangle stops, but marks are only saved while
-it runs.
+overrides both. The link carries a token, as Jupyter's does.
+
+Closing the review's page stops untangle, five seconds later: launch, review, close and move on.
+A reload, or another page of the same review still open, keeps it serving, and so does
+`-autoclose=false`, until Ctrl+C. An open page keeps working after untangle stops, but marks are
+only saved while it runs.
 
 ## Install
 

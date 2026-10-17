@@ -697,6 +697,11 @@ untangle [flags] <pr-url>      # cloned into the cache first
   - **Stack:** TypeScript on Node, reusing this prototype, web-tree-sitter, Shiki and
     `vscode-jsonrpc`, the LSP layer VS Code is built on.
   - **Access:** localhost only, with a random token in the URL, as Jupyter does.
+  - **Done when the page is:** each page (the startup page too) tells untangle when it opens and,
+    with a beacon, when it closes. Once the last one has closed and none opens within 5 s (a
+    reload), untangle answers the calls still pending (a mark saved as the page went) and stops.
+    A page the browser discards to save memory says nothing, so it keeps serving that one.
+    `-autoclose=false` keeps it serving until Ctrl+C.
 - **Open in editor:** file headers and peeks link to the editor, `vscode://file/<path>:<line>`
   by default, or a command you configure.
 - **Static export:** `untangle -export` writes the page as one HTML file with everything
@@ -911,6 +916,10 @@ through the page.
   - Found: the analysis holds Node's thread (3.3 s on #168), so the page's next question waited
     and the step before it seemed to run on. The page now waits on untangle for each change, and a
     step that holds the thread starts once untangle has told the page.
+  - Then untangle stops once its page closes, as asked, since the usual run is to launch it,
+    review, close the page and move on: `-autoclose`, on unless set to false. Chosen: the page
+    says it closed with a beacon, rather than untangle watching a connection drop, so a tab the
+    browser discards doesn't stop it. Done: [Where it runs](#where-it-runs).
 
 ## References
 

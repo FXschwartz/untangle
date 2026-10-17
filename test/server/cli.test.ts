@@ -23,6 +23,8 @@ const usageText = [
   'A pull request URL is cloned into the cache first. The review opens in your browser.',
   '',
   'flags:',
+  '  -autoclose',
+  '    \tstop once the review’s last open page closes (a reload keeps it) (default true)',
   '  -base string',
   '    \tcompare with this branch or commit instead of the pull request’s base',
   '  -base-path string',
