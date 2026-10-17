@@ -200,6 +200,7 @@ main > :nth-child(n+3) { animation-delay: 100ms; }
         r.frac = Math.max(r.frac, n / of);
         el.querySelector('.cbar i').style.transform = 'scaleX(' + (n / of).toFixed(4) + ')';
         pace(r, n, of, now);
+        el.querySelector('.eta').textContent = r.end == null ? '' : left(Math.max(0, r.end - now));
       }
       if (at.hidden) { at.hidden = false; if (!r.fresh) grow(at); }
     } else if (!at.hidden && !r.leaving) {
