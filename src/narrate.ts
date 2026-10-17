@@ -6,20 +6,30 @@ export interface StepStatus {
   state: 'running' | 'done' | 'failed';
   ms?: number;
   detail?: string;
+  /** How far the step is through what it counts: done, of total. */
+  count?: [number, number];
   notes: string[];
 }
 
 export interface Status {
   phase: 'starting' | 'building' | 'ready' | 'failed';
   title: string;
+  /** Where the review compares: repo · base → head. */
+  where?: string;
+  /** The steps the run expects, in order: the page shows those still to come. */
+  plan?: string[];
   steps: StepStatus[];
   notes: string[];
   error?: string;
+  /** Counts the changes, so the page can wait for the next one. */
+  rev: number;
 }
 
 export class Narrator implements Progress {
-  readonly status: Status = { phase: 'starting', title: '', steps: [], notes: [] };
+  readonly status: Status = { phase: 'starting', title: '', steps: [], notes: [], rev: 0 };
   private current: { step: StepStatus; start: number } | null = null;
+  private waiters = new Set<() => void>();
+  private soon: NodeJS.Timeout | null = null;
   // Notes of the running step print under it once it ends, so the step line stays in place.
   private pending: string[] = [];
   private drawn = false;
@@ -31,6 +41,27 @@ export class Narrator implements Progress {
     this.tty = !!process.stderr.isTTY && !opts.quiet;
     const color = opts.color && !!process.stderr.isTTY && !process.env.NO_COLOR;
     this.c = (code, s) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
+  }
+
+  /** Calls back once, on the status's next change. Returns a function that cancels it. */
+  next(fn: () => void): () => void {
+    this.waiters.add(fn);
+    return () => this.waiters.delete(fn);
+  }
+
+  // A step starting or ending is told at once; details at most every 150 ms.
+  private changed(now = false) {
+    if (!now) {
+      this.soon ??= setTimeout(() => this.changed(true), 150);
+      this.soon.unref();
+      return;
+    }
+    if (this.soon) clearTimeout(this.soon);
+    this.soon = null;
+    this.status.rev++;
+    const waiting = [...this.waiters];
+    this.waiters.clear();
+    waiting.forEach((fn) => fn());
   }
 
   private write(line: string) {
@@ -60,15 +91,23 @@ export class Narrator implements Progress {
 
   title(text: string, sub: string) {
     this.status.title = text;
+    this.status.where = sub;
+    this.changed(true);
     if (!this.opts.quiet) {
       this.write('  ' + this.c('1', text));
       this.write('  ' + this.c('2', sub));
     }
   }
 
+  /** The steps the run expects, in order. A step it skips (a cached one) is passed by a later one. */
+  plan(labels: string[]) {
+    this.status.plan = labels;
+    this.changed(true);
+  }
+
   // Arrow functions: callers pass these around as callbacks.
   step = (label: string) => {
-    this.finish();
+    this.end(false);
     this.status.phase = 'building';
     const step: StepStatus = { label, state: 'running', ms: 0, notes: [] };
     this.status.steps.push(step);
@@ -81,16 +120,20 @@ export class Narrator implements Progress {
     this.ticker.unref();
     if (!this.tty && !this.opts.quiet) process.stderr.write(`  … ${label}\n`);
     this.draw();
+    this.changed(true);
   }
 
-  detail = (text: string) => {
+  detail = (text: string, count?: [number, number]) => {
     if (!this.current) return;
     this.current.step.detail = text;
+    this.current.step.count = count;
     this.draw();
+    this.changed();
   }
 
   note = (text: string) => {
     (this.current ? this.current.step.notes : this.status.notes).push(text);
+    this.changed();
     if (this.opts.quiet) return;
     if (this.current) this.pending.push(text);
     else this.write('    ' + this.c('2', text));
@@ -102,6 +145,11 @@ export class Narrator implements Progress {
 
   /** Ends the running step. */
   finish(failed = false) {
+    this.end(failed);
+    this.changed(true);
+  }
+
+  private end(failed: boolean) {
     if (this.ticker) clearInterval(this.ticker);
     this.ticker = null;
     if (!this.current) return;
@@ -109,6 +157,7 @@ export class Narrator implements Progress {
     step.ms = Date.now() - start;
     step.state = failed ? 'failed' : 'done';
     step.detail = undefined;
+    step.count = undefined;
     this.current = null;
     if (!this.opts.quiet) {
       this.write(`  ${failed ? this.c('31', '✗') : this.c('32', '✓')} ${step.label.padEnd(16)} ${this.c('2', seconds(step.ms))}`);
@@ -118,8 +167,9 @@ export class Narrator implements Progress {
   }
 
   ready(url: string) {
-    this.finish();
+    this.end(false);
     this.status.phase = 'ready';
+    this.changed(true);
     if (this.opts.quiet) return;
     this.write('');
     this.write(`  Review at ${this.c('1', url)}`);
@@ -131,9 +181,10 @@ export class Narrator implements Progress {
   }
 
   fail(message: string) {
-    this.finish(true);
+    this.end(true);
     this.status.phase = 'failed';
     this.status.error = message;
+    this.changed(true);
     this.write(`  ${this.c('31', 'error:')} ${message}`);
   }
 }

@@ -18,6 +18,12 @@ export interface Api {
   call(route: string, method: string, query: URLSearchParams, body: unknown, head: string | null): Promise<{ status?: number; data: unknown }>;
 }
 
+/** The build's progress, and a way to wait for its next change. */
+export interface Progressing {
+  status: Status;
+  next(fn: () => void): () => void;
+}
+
 export interface ServerOptions {
   host: string;
   port: number;
@@ -27,6 +33,8 @@ export interface ServerOptions {
 }
 
 const MAX_BODY = 32 << 20;
+// How long the progress page's question waits for a change before it's answered anyway.
+const STATUS_WAIT = 15_000;
 
 export class ReviewServer {
   readonly token = crypto.randomBytes(18).toString('base64url');
@@ -35,7 +43,7 @@ export class ReviewServer {
 
   constructor(
     private readonly opts: ServerOptions,
-    private readonly status: Status,
+    private readonly progress: Progressing,
     private readonly api: Api,
     private readonly progressPage: string,
     private readonly log: (line: string) => void,
@@ -96,8 +104,9 @@ export class ReviewServer {
       return this.send(res, 404, 'text/plain', 'Not found');
     }
     const route = url.pathname.slice(base.length);
-    // The page polls its metrics every few seconds: not worth a line each.
-    if (route !== 'api/metrics') this.log(`${req.method} /${route}${url.search ? ' ?' + [...url.searchParams.keys()].join('&') : ''}`);
+    // The page asks for its metrics every few seconds, and for the build's progress at each change:
+    // not worth a line each.
+    if (route !== 'api/metrics' && route !== 'api/status') this.log(`${req.method} /${route}${url.search ? ' ?' + [...url.searchParams.keys()].join('&') : ''}`);
     if (route === 'favicon.ico') return this.send(res, 204, 'text/plain', '');
 
     // The token from the printed URL becomes a cookie, and the address bar loses it.
@@ -112,7 +121,23 @@ export class ReviewServer {
       const page = this.api.page();
       return this.send(res, 200, 'text/html', page ?? this.progressPage);
     }
-    if (route === 'api/status' && req.method === 'GET') return this.json(res, 200, this.status);
+    if (route === 'api/status' && req.method === 'GET') {
+      // Given the revision it shows, the progress page hears back at the next one.
+      const seen = url.searchParams.get('rev');
+      if (seen === null || Number(seen) !== this.progress.status.rev) return this.json(res, 200, this.progress.status);
+      return new Promise<void>((resolve) => {
+        let cancel = () => {};
+        const answer = () => {
+          clearTimeout(timer);
+          cancel();
+          if (!res.writableEnded && !res.destroyed) this.json(res, 200, this.progress.status);
+          resolve();
+        };
+        const timer = setTimeout(answer, STATUS_WAIT);
+        cancel = this.progress.next(answer);
+        res.on('close', () => { clearTimeout(timer); cancel(); resolve(); });
+      });
+    }
     if (route.startsWith('assets/') && req.method === 'GET') {
       const a = this.api.asset(route.slice(7));
       if (!a) return this.send(res, 404, 'text/plain', 'Not found');

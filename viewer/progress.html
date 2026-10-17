@@ -6,59 +6,331 @@
 <title>Untangling… · untangle</title>
 <!--FONTS-->
 <style>
-:root { --paper: #0B0B0D; --surface: #121215; --ink: #E8E8EC; --ink-2: #A6A6B0; --ink-3: #6F6F7A; --ok: #58C597; --bad: #FF9B95; --mark: #E9B44C; --ui: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; --code: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color-scheme: dark; }
+:root {
+  --ground: #0B0B0D; --sheet: #121215; --raised: #1B1B20; --hair: #26262D; --hair-2: #33333B;
+  --text: #E8E8EC; --text-2: #A6A6B0; --text-3: #6F6F7A; --text-4: #4E4E58;
+  --accent: #E9B44C; --done: #58C597; --bad: #FF9B95;
+  --ui: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --code: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.2, 0, 0, 1); --fast: 120ms; --med: 200ms; --slow: 280ms;
+  color-scheme: dark;
+}
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: var(--paper); color: var(--ink); font: 400 15px/1.6 var(--ui); -webkit-font-smoothing: antialiased; display: grid; place-items: center; padding: 24px 16px; }
-main { width: min(640px, 100%); display: grid; gap: 18px; }
-h1 { margin: 0; font-size: 20px; font-weight: 600; text-wrap: balance; }
-.sub { color: var(--ink-3); font-size: 13.5px; }
-ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; border-radius: 12px; background: var(--surface); padding: 12px 16px; }
-li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 4px 10px; font: 400 13px/1.6 var(--ui); }
-li .t, li .d, li .n { font-family: var(--code); font-size: 12px; }
-li .i { color: var(--ink-3); } li.done .i { color: var(--ok); } li.failed .i { color: var(--bad); } li.running .i { color: var(--mark); }
-li .t { color: var(--ink-3); }
-li .d, li .n { grid-column: 2 / 4; color: var(--ink-3); overflow-wrap: anywhere; }
-.err { color: var(--bad); white-space: pre-wrap; font: 400 12.5px/1.5 var(--code); }
-.hint { color: var(--ink-3); font-size: 13px; }
+body { margin: 0; min-height: 100vh; background: var(--ground); color: var(--text); font: 400 14px/1.5 var(--ui); -webkit-font-smoothing: antialiased; padding: clamp(24px, 10vh, 112px) 16px 48px; }
+/* Wide enough for a checkout's path on one line. */
+main { width: min(1040px, 100%); margin: 0 auto; display: grid; gap: 20px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.top { display: grid; gap: 6px; min-width: 0; }
+.eyebrow { display: flex; align-items: baseline; gap: 8px; font: 600 11px/16px var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.eyebrow .sp { flex: 1; }
+.total { font: 400 12px/16px var(--code); letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+h1 { margin: 0; font: 600 22px/1.3 var(--ui); text-wrap: balance; overflow-wrap: anywhere; }
+.where { font: 400 12.5px/1.5 var(--code); color: var(--text-3); overflow-wrap: anywhere; }
+.where:empty { display: none; }
+
+/* The whole build: each step by its usual share, a counted step by its items. */
+.meter { position: relative; height: 4px; border-radius: 4px; background: var(--hair); overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--accent); transition: width 420ms var(--ease), background-color var(--slow) var(--ease); overflow: hidden; }
+.meter.busy i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .45), transparent); transform: translateX(-100%); animation: sweep 1.6s var(--ease) infinite; }
+.meter.ok i { background: var(--done); }
+.meter.bad i { background: var(--bad); }
+@keyframes sweep { to { transform: translateX(100%); } }
+
+.notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.notes:empty { display: none; }
+.notes li, .nt, .dt { font: 400 12px/1.6 var(--code); color: var(--text-3); overflow-wrap: anywhere; }
+
+.panel { position: relative; border-radius: 12px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair); padding: 6px 0; }
+/* The running step's ground: one piece that glides from step to step. */
+.hl { position: absolute; left: 6px; right: 6px; top: 0; height: 0; border-radius: 8px; background: var(--raised); opacity: 0; pointer-events: none; transition: transform var(--slow) var(--ease), height var(--med) var(--ease), opacity var(--med) var(--ease); }
+.hl::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent); }
+ol { margin: 0; padding: 0; list-style: none; }
+.st { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; padding: 7px 18px; }
+.st .lb { font: 500 13.5px/20px var(--ui); color: var(--text-2); transition: color var(--med) var(--ease); min-width: 0; }
+.st.running .lb { color: var(--text); }
+.st.pending .lb, .st.skipped .lb { color: var(--text-3); }
+.st .tm { font: 400 12px/20px var(--code); color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.st.running .tm { color: var(--text-2); }
+.st .more { grid-column: 2 / 4; min-width: 0; }
+.now { display: grid; gap: 6px; padding-top: 6px; }
+.cnt { display: flex; align-items: center; gap: 14px; }
+.cnt[hidden], .now[hidden] { display: none; }
+.cbar { flex: 1; height: 3px; border-radius: 2px; background: var(--hair-2); overflow: hidden; }
+.cbar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform 300ms var(--ease); }
+.eta { font: 400 12px/16px var(--code); color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.eta:empty { display: none; }
+.dt { color: var(--text-2); }
+.nt:first-child { padding-top: 2px; }
+
+/* A step's mark: a ring to come, a turning arc while it runs, a check, a cross, or a dashed ring when cached. */
+.ic svg { display: block; overflow: visible; }
+.ic circle, .ic path { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.trk { stroke: var(--text-4); transition: stroke var(--med) var(--ease); }
+.arc { stroke: var(--accent); stroke-dasharray: 26 100; opacity: 0; transform-origin: 8px 8px; transition: opacity var(--fast) var(--ease); }
+.ck { stroke: var(--done); stroke-dasharray: 10; stroke-dashoffset: 10; transition: stroke-dashoffset var(--slow) var(--ease) 60ms; }
+.x { stroke: var(--bad); stroke-dasharray: 10; stroke-dashoffset: 10; transition: stroke-dashoffset var(--slow) var(--ease); }
+.running .trk { stroke: var(--hair-2); }
+.running .arc { opacity: 1; animation: turn .9s linear infinite; }
+.done .trk { stroke: var(--done); }
+.done .ck { stroke-dashoffset: 0; }
+.failed .trk { stroke: var(--bad); }
+.failed .x { stroke-dashoffset: 0; }
+.skipped .trk { stroke-dasharray: 1.4 3.2; }
+.gone .running .arc { animation-play-state: paused; }
+.gone .st.pending { opacity: .55; }
+@keyframes turn { to { transform: rotate(360deg); } }
+
+.err { white-space: pre-wrap; font: 400 12.5px/1.6 var(--code); color: var(--bad); border-radius: 10px; background: rgba(255, 155, 149, .08); box-shadow: inset 0 0 0 1px rgba(255, 155, 149, .22); padding: 12px 16px; }
+.err[hidden], .hint[hidden] { display: none; }
+.hint { margin: 0; color: var(--text-3); font-size: 13px; max-width: 72ch; }
+
+/* Arriving: the page settles in from just below. */
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+main > * { animation: rise 360ms var(--ease) both; }
+main > :nth-child(2) { animation-delay: 50ms; }
+main > :nth-child(n+3) { animation-delay: 100ms; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>
-<main>
-  <h1 id="title">Untangling the pull request…</h1>
-  <div class="sub" id="sub">The first time, the language server reads both sides of the diff, which can take a minute or two. After that, this review opens at once.</div>
-  <ol id="steps"></ol>
-  <div class="err" id="err" hidden></div>
+<main id="page">
+  <header class="top">
+    <div class="eyebrow"><span id="phase">Building the review</span><span class="sp"></span><span class="total" id="total"></span></div>
+    <h1 id="title">Untangling the pull request…</h1>
+    <div class="where" id="where"></div>
+  </header>
+  <div class="meter busy" id="meter" role="progressbar" aria-label="The review’s build" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="fill"></i></div>
+  <ul class="notes" id="notes"></ul>
+  <div class="panel"><div class="hl" id="hl" aria-hidden="true"></div><ol id="steps" aria-label="Steps"></ol></div>
+  <div class="err" id="err" role="alert" hidden></div>
+  <p class="hint" id="hint" hidden>The first time, the language server reads both sides of the diff, which can take a minute or two. After that, this review opens at once.</p>
+  <div class="sr" id="said" aria-live="polite"></div>
 </main>
 <script>
 (function () {
   'use strict';
+  const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const secs = (ms) => (ms < 1000 ? ms + ' ms' : ms < 60000 ? (ms / 1000).toFixed(1) + ' s' : Math.floor(ms / 60000) + ' min ' + Math.round((ms % 60000) / 1000) + ' s');
-  const icon = { running: '…', done: '✓', failed: '✗' };
-  let misses = 0;
+  // A path may break after its slashes, so a long one wraps at a folder rather than inside a name.
+  const soft = (s) => esc(s).replace(/\//g, '/<wbr>');
+  const secs = (ms) => (ms < 1000 ? Math.round(ms) + ' ms' : ms < 60000 ? (ms / 1000).toFixed(1) + ' s' : Math.floor(ms / 60000) + ' min ' + Math.round((ms % 60000) / 1000) + ' s');
+  // A running clock shows whole seconds, so it ticks rather than flickers.
+  const clock = (ms) => (ms < 60000 ? Math.floor(ms / 1000) + ' s' : Math.floor(ms / 60000) + ' min ' + String(Math.floor((ms % 60000) / 1000)).padStart(2, '0') + ' s');
+  const left = (ms) => (ms < 5000 ? 'a few seconds left' : ms < 60000 ? 'about ' + Math.max(5, Math.round(ms / 5000) * 5) + ' s left' : 'about ' + Math.round(ms / 60000) + ' min left');
+  const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const EASE = 'cubic-bezier(.2, 0, 0, 1)';
+  // The share of a fresh build each step usually takes: the bar moves by these, and through a
+  // counted step by its items.
+  const SHARE = { 'pull request': 2, branch: 1, checkouts: 4, packages: 8, diff: 1, 'Dart analyzer': 60, commits: 4, analysis: 8, history: 2 };
+  const share = (label) => SHARE[label] || 2;
+  const SAID = { pending: 'to come', running: 'running', done: 'done', failed: 'failed', skipped: 'cached' };
+  const MARK = '<svg viewBox="0 0 16 16" width="16" height="16"><circle class="trk" cx="8" cy="8" r="6.25"/><circle class="arc" cx="8" cy="8" r="6.25" pathLength="100"/><path class="ck" d="M5.1 8.3l2 2 3.9-4.3" pathLength="10"/><path class="x" d="M5.75 5.75l4.5 4.5m0-4.5l-4.5 4.5" pathLength="10"/></svg>';
+
+  const list = $('steps'), hl = $('hl'), meter = $('meter');
+  const rows = new Map();
+  let booted = false, over = false, fill = 0, notes = 0, misses = 0, rev = null;
+
+  // Grows an element in from nothing; shrinks one away (then hides it, or removes it).
+  function grow(el) {
+    if (!booted || still()) return;
+    const h = el.offsetHeight;
+    el.style.overflow = 'hidden';
+    el.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 240, easing: EASE }).onfinish = () => { el.style.overflow = ''; };
+  }
+  function shrink(el, then) {
+    if (still()) return then();
+    el.style.overflow = 'hidden';
+    el.animate([{ height: el.offsetHeight + 'px', opacity: 1 }, { height: '0px', opacity: 0 }], { duration: 200, easing: EASE }).onfinish = () => { el.style.overflow = ''; then(); };
+  }
+
+  // The run's rows: its steps so far, the planned steps a later one passed (cached), and those to come.
+  function rowsOf(s) {
+    const plan = s.plan || [], out = [], seen = {};
+    let at = 0;
+    for (const st of s.steps) {
+      const j = plan.indexOf(st.label, at);
+      if (j >= 0) {
+        for (; at < j; at++) out.push({ label: plan[at], state: 'skipped', notes: [] });
+        at = j + 1;
+      }
+      out.push(st);
+    }
+    for (; at < plan.length; at++) out.push({ label: plan[at], state: s.phase === 'ready' ? 'skipped' : 'pending', notes: [] });
+    out.forEach((r) => { seen[r.label] = (seen[r.label] || 0) + 1; r.key = r.label + '\u0000' + seen[r.label]; });
+    return out;
+  }
+
+  // How long a counted step has left, at the pace of its last few seconds: the analyzer's first
+  // files are its slowest.
+  function pace(r, n, of, now) {
+    r.seen = r.seen.filter((x) => now - x.at < 4000 && x.n <= n);
+    r.seen.push({ at: now, n });
+    if (n >= of) { r.end = null; return; }
+    const items = n - r.seen[0].n, spent = now - r.seen[0].at;
+    if (items < 3 || spent < 1000) return;
+    const end = now + (of - n) * (spent / items);
+    r.end = r.end == null ? end : r.end * 0.7 + end * 0.3;
+  }
+
+  function update(r, w, now) {
+    const el = r.el;
+    if (r.state !== w.state) {
+      el.classList.replace(r.state, w.state);
+      if (booted && !still() && (w.state === 'done' || w.state === 'failed')) el.querySelector('.ic').animate([{ transform: 'scale(.82)' }, { transform: 'scale(1.08)', offset: 0.6 }, { transform: 'none' }], { duration: 320, easing: EASE });
+      if (w.state === 'running') $('said').textContent = w.label + '…';
+      r.state = w.state;
+    }
+    el.querySelector('.sr').textContent = ' (' + SAID[w.state] + ')';
+    // The clock starts at the earliest start the reports allow, so it never runs backwards.
+    if (w.state === 'running') r.t0 = Math.min(r.t0 == null ? Infinity : r.t0, now - (w.ms || 0));
+    r.ms = w.ms || 0;
+    el.querySelector('.tm').textContent = w.state === 'skipped' ? 'cached' : w.state === 'pending' ? '' : w.state === 'running' ? clock(now - r.t0) : secs(r.ms);
+    if (w.state === 'done' || w.state === 'skipped') r.frac = 1;
+    // What it's doing now, and how far it is through what it counts.
+    const at = el.querySelector('.now');
+    if (w.state === 'running' && (w.detail || w.count)) {
+      el.querySelector('.dt').innerHTML = w.detail ? soft(w.detail) : '';
+      const cnt = el.querySelector('.cnt');
+      cnt.hidden = !(w.count && w.count[1] > 0);
+      if (cnt.hidden) r.end = null;
+      else {
+        const [n, of] = w.count;
+        r.frac = Math.max(r.frac, n / of);
+        el.querySelector('.cbar i').style.transform = 'scaleX(' + (n / of).toFixed(4) + ')';
+        pace(r, n, of, now);
+      }
+      if (at.hidden) { at.hidden = false; if (!r.fresh) grow(at); }
+    } else if (!at.hidden && !r.leaving) {
+      r.leaving = true;
+      r.end = null;
+      shrink(at, () => { at.hidden = true; r.leaving = false; });
+    }
+    // Notes, as they come.
+    const box = el.querySelector('.nts');
+    for (; r.notes < w.notes.length; r.notes++) {
+      const n = document.createElement('div');
+      n.className = 'nt';
+      n.innerHTML = soft(w.notes[r.notes]);
+      box.appendChild(n);
+      if (!r.fresh) grow(n);
+    }
+  }
+
+  // The running step's ground goes where that step is.
+  function place() {
+    const r = over ? null : [...rows.values()].find((x) => x.state === 'running');
+    hl.style.opacity = r ? '1' : '0';
+    if (!r) return;
+    hl.style.transform = 'translateY(' + r.el.offsetTop + 'px)';
+    hl.style.height = r.el.offsetHeight + 'px';
+  }
+
+  function render(s) {
+    const now = performance.now();
+    const want = rowsOf(s);
+    const keys = new Set(want.map((w) => w.key));
+    for (const [k, r] of rows) if (!keys.has(k)) { rows.delete(k); shrink(r.el, () => r.el.remove()); }
+    let before = list.firstChild;
+    for (const w of want) {
+      let r = rows.get(w.key);
+      if (!r) {
+        const el = document.createElement('li');
+        el.className = 'st ' + w.state;
+        el.innerHTML = '<span class="ic" aria-hidden="true">' + MARK + '</span><span class="lb">' + esc(w.label) + '<span class="sr"></span></span><span class="tm"></span>'
+          + '<div class="more"><div class="now" hidden><div class="cnt" hidden><span class="cbar"><i></i></span><span class="eta"></span></div><div class="dt"></div></div><div class="nts"></div></div>';
+        r = { el, state: w.state, notes: 0, t0: null, ms: 0, frac: 0, seen: [], end: null, fresh: true };
+        rows.set(w.key, r);
+        list.insertBefore(el, before);
+      } else if (r.el !== before) list.insertBefore(r.el, before);
+      update(r, w, now);
+      // A new row grows in whole, with what it already says.
+      if (r.fresh) { r.fresh = false; grow(r.el); }
+      before = r.el.nextSibling;
+    }
+
+    if (s.title && $('title').textContent !== s.title) {
+      $('title').textContent = s.title;
+      document.title = 'Untangling ' + s.title + ' · untangle';
+      if (booted && !still()) $('title').animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: EASE });
+    }
+    $('where').textContent = s.where || '';
+    $('phase').textContent = s.phase === 'ready' ? 'Opening the review' : s.phase === 'failed' ? 'The review could not be built' : 'Building the review';
+    for (; notes < s.notes.length; notes++) {
+      const li = document.createElement('li');
+      li.innerHTML = soft(s.notes[notes]);
+      $('notes').appendChild(li);
+      grow(li);
+    }
+
+    const all = want.reduce((x, w) => x + share(w.label), 0) || 1;
+    const got = want.reduce((x, w) => x + share(w.label) * rows.get(w.key).frac, 0);
+    fill = s.phase === 'ready' ? 1 : Math.max(fill, got / all);
+    $('fill').style.width = (fill * 100).toFixed(2) + '%';
+    meter.setAttribute('aria-valuenow', String(Math.round(fill * 100)));
+    meter.classList.toggle('busy', s.phase === 'starting' || s.phase === 'building');
+    meter.classList.toggle('ok', s.phase === 'ready');
+    meter.classList.toggle('bad', s.phase === 'failed');
+
+    const analyzer = want.find((w) => w.label === 'Dart analyzer');
+    $('hint').hidden = !analyzer || !(analyzer.state === 'pending' || analyzer.state === 'running') || s.phase === 'failed';
+    if (s.phase === 'failed') {
+      $('err').hidden = false;
+      $('err').textContent = s.error || 'The review could not be built.';
+    }
+    place();
+  }
+
+  // Between reports, the running step's clock and the whole build's keep time.
+  function tick() {
+    if (over) return;
+    const now = performance.now();
+    let total = 0;
+    for (const r of rows.values()) {
+      if (r.state !== 'running') { total += r.ms; continue; }
+      total += now - r.t0;
+      r.el.querySelector('.tm').textContent = clock(now - r.t0);
+      r.el.querySelector('.eta').textContent = r.end == null ? '' : left(Math.max(0, r.end - now));
+    }
+    if (rows.size) $('total').textContent = clock(total);
+  }
+
+  function stop(message) {
+    over = true;
+    $('page').classList.add('gone');
+    meter.classList.remove('busy');
+    place();
+    $('err').hidden = false;
+    $('err').textContent = message;
+  }
+
+  // Each answer comes at the build's next change: the page asks again at once.
   async function poll() {
     let s;
     try {
-      const r = await fetch('api/status', { cache: 'no-store' });
-      if (!r.ok) throw new Error(r.status);
-      s = await r.json();
+      const res = await fetch('api/status' + (rev == null ? '' : '?rev=' + rev), { cache: 'no-store' });
+      if (!res.ok) throw new Error(String(res.status));
+      s = await res.json();
       misses = 0;
     } catch (e) {
-      if (++misses > 3) { document.getElementById('err').hidden = false; document.getElementById('err').textContent = 'untangle stopped. Run it again to see this review.'; return; }
+      if (++misses > 3) return stop('untangle stopped. Run it again to see this review.');
       return setTimeout(poll, 1000);
     }
-    if (s.phase === 'ready') return location.reload();
-    if (s.title) document.getElementById('title').textContent = s.title;
-    document.getElementById('steps').innerHTML = s.notes.map((n) => `<li><span class="i"></span><span class="n">${esc(n)}</span></li>`).join('')
-      + s.steps.map((st) => `<li class="${st.state}"><span class="i">${icon[st.state]}</span><span>${esc(st.label)}</span><span class="t">${st.ms != null ? secs(st.ms) : ''}</span>${st.detail ? `<span class="d">${esc(st.detail)}</span>` : ''}${st.notes.map((n) => `<span class="n">${esc(n)}</span>`).join('')}</li>`).join('');
-    if (s.phase === 'failed') {
-      const err = document.getElementById('err');
-      err.hidden = false;
-      err.textContent = s.error || 'The review could not be built.';
-      return;
+    rev = s.rev;
+    render(s);
+    booted = true;
+    if (s.phase === 'ready') {
+      // The bar fills and the last check is drawn, then the review replaces this page.
+      over = true;
+      place();
+      return setTimeout(() => location.reload(), still() ? 0 : 320);
     }
-    setTimeout(poll, 700);
+    if (s.phase === 'failed') { over = true; $('page').classList.add('gone'); return place(); }
+    poll();
   }
+
+  new ResizeObserver(place).observe(list);
+  setInterval(tick, 200);
   poll();
 })();
 </script>

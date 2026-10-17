@@ -151,6 +151,86 @@ describe('Given a step ended by the review becoming ready after one second, ', (
   });
 });
 
+/** A quiet narrator, and what a page waiting on its status hears each time it asks. */
+function waited() {
+  mock.timers.enable({ apis: ['Date', 'setInterval', 'setTimeout'], now: 1000 });
+  const narrator = new Narrator({ quiet: true, verbose: false, color: false });
+  const heard: string[] = [];
+  const ask = () => narrator.next(() => {
+    const { rev, steps } = narrator.status;
+    const step = steps[steps.length - 1];
+    heard.push(`rev ${rev}: ${step.label} ${step.state}${step.detail ? `, ${step.detail}` : ''}${step.count ? `, ${step.count.join(' of ')}` : ''}`);
+  });
+  return {
+    narrator,
+    heard,
+    ask,
+    remove() {
+      narrator.finish();
+      mock.timers.reset();
+    },
+  };
+}
+
+describe('Given the page waiting for the status to change, ', () => {
+  let run: ReturnType<typeof waited>;
+
+  before(() => {
+    run = waited();
+    run.ask();
+  });
+  after(() => run.remove());
+
+  describe('when a step starts, ', () => {
+    before(() => run.narrator.step('Dart analyzer'));
+
+    it('then the page hears at once, with the step running.', () => {
+      assert.deepEqual(run.heard, ['rev 1: Dart analyzer running']);
+    });
+  });
+});
+
+describe('Given a running step that counts its files, and the page waiting, ', () => {
+  let run: ReturnType<typeof waited>;
+
+  before(() => {
+    run = waited();
+    run.narrator.step('Dart analyzer');
+    run.ask();
+  });
+  after(() => run.remove());
+
+  describe('when two files are read within 150 ms, ', () => {
+    let early = '';
+
+    before(() => {
+      run.narrator.detail('Dart files 1 of 116: lib/a.dart', [1, 116]);
+      mock.timers.tick(50);
+      run.narrator.detail('Dart files 2 of 116: lib/b.dart', [2, 116]);
+      mock.timers.tick(99);
+      early = run.heard.join('\n');
+      mock.timers.tick(1);
+    });
+
+    it('then the page hears once, 150 ms after the first, with the second and its count.', () => {
+      assert.equal(`${early}|${run.heard.join('\n')}`, '|rev 2: Dart analyzer running, Dart files 2 of 116: lib/b.dart, 2 of 116');
+    });
+  });
+
+  describe('when the step ends, ', () => {
+    let status = '';
+
+    before(() => {
+      run.narrator.finish();
+      status = JSON.stringify(run.narrator.status.steps[0]);
+    });
+
+    it('then it keeps neither what it was reading nor its count.', () => {
+      assert.equal(status, '{"label":"Dart analyzer","state":"done","ms":150,"notes":[]}');
+    });
+  });
+});
+
 describe('Given a script with only a narration timer, ', () => {
   let script = '';
 

@@ -17,7 +17,7 @@ export interface Extracted {
 const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/;
 
 /** Resolve each changed file once, sharing its facts between chains and definition peeks. */
-export async function extract(diff: Diff, head: string, base: string, progress: { detail(line: string): void; verbose(line: string): void }): Promise<Extracted> {
+export async function extract(diff: Diff, head: string, base: string, progress: { detail(line: string, count?: [number, number]): void; verbose(line: string): void }): Promise<Extracted> {
   const files = diff.compares.base.files.filter((file) => file.hunks && file.p.endsWith('.dart'));
   const defs = definitionCollector(head);
   const defsOld = definitionCollector(base);
@@ -65,7 +65,7 @@ export async function extract(diff: Diff, head: string, base: string, progress: 
         const current = side === 'head';
         const abs = path.join(current ? head : base, file.p);
         if (!fs.existsSync(abs)) continue;
-        progress.detail(`Dart files ${++done} of ${paths.length}: ${file.p}`);
+        progress.detail(`Dart files ${++done} of ${paths.length}: ${file.p}`, [done, paths.length]);
         const facts = await analyzer.file(abs);
         const lines = current ? headLines : baseLines;
         const collector = current ? defs : defsOld;

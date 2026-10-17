@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs, usage, UsageError, type Options } from './args.js';
-import { buildReview, type ReviewData } from './build.js';
+import { buildReview, buildSteps, type ReviewData } from './build.js';
 import { reviewDir } from './cache.js';
 import { readHistory } from './history.js';
 import { gitMaybe } from './exec.js';
@@ -62,7 +62,7 @@ async function main(): Promise<number> {
   if (!exporting) {
     server = new ReviewServer(
       { host: opts.host, port: opts.port, portExplicit: opts.portExplicit, basePath: opts.basePath },
-      say.status,
+      say,
       {
         page: () => (render && session ? render(session.config()) : null),
         asset: (name) => {
@@ -190,6 +190,7 @@ async function main(): Promise<number> {
   };
 
   try {
+    say.plan([byUrl ? 'pull request' : 'branch', ...buildSteps(opts.chains), 'history']);
     say.step(byUrl ? 'pull request' : 'branch');
     const t = await resolve(say);
     const n = names(t);

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { buildSteps } from '../../dist/build.js';
 import { has } from '../../dist/exec.js';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
@@ -104,6 +105,29 @@ describe('Given a directory on its head commit whose packages are resolved, ', {
         '         duplicate chain names:',
         '      1 commits, lines attributed in N ms',
       ].join('\n'));
+    });
+  });
+
+  describe('when it is reviewed without -chains, ', () => {
+    let steps = '';
+    let ownCache = '';
+
+    before(async () => {
+      ownCache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+      const run = await startUntangle(repo.dir, { base: 'main', cacheDir: ownCache, quiet: false, chains: null });
+      try {
+        steps = [...(await untilReady(run)).matchAll(/^  ✓ (.{16}) /gm)].map((match) => match[1].trim()).join(', ');
+      } finally {
+        await run.stop();
+      }
+    });
+
+    after(() => {
+      if (ownCache) fs.rmSync(ownCache, { recursive: true, force: true });
+    });
+
+    it('then its chains follow the commits: the build replays them, in the steps its page plans.', () => {
+      assert.equal(steps, ['branch', ...buildSteps('history'), 'history'].join(', '));
     });
   });
 

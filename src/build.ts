@@ -29,8 +29,8 @@ export interface ReviewData {
 export interface Progress {
   /** Starts a step; the next step (or done) ends it. */
   step(label: string): void;
-  /** What the current step is doing now. */
-  detail(text: string): void;
+  /** What the current step is doing now, and how far it is through what it counts. */
+  detail(text: string, count?: [number, number]): void;
   /** A line worth keeping in the narration. */
   note(text: string): void;
   verbose(text: string): void;
@@ -48,6 +48,11 @@ const MODEL_STAGE = ['analysis/analyze.js', 'analysis/dart.js', 'analysis/units.
 /** What chains follow: the commits that started each change, or the code's structure alone. */
 export type ChainsBy = 'history' | 'structure';
 
+/** The steps a build runs, in order, when nothing is cached: the page lists those to come. */
+export function buildSteps(chains: ChainsBy): string[] {
+  return ['checkouts', 'packages', 'diff', 'Dart analyzer', ...(chains === 'history' ? ['commits'] : []), 'analysis'];
+}
+
 const readJson = <T>(file: string): T | null => {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
@@ -56,6 +61,8 @@ const readJson = <T>(file: string): T | null => {
   }
 };
 const writeJson = (file: string, data: unknown) => fs.writeFileSync(file, JSON.stringify(data));
+// A turn of the event loop: the page hears that a step started before the step holds the thread.
+const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 interface Answers extends Extracted {
   version: string;
@@ -111,6 +118,7 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
   }
 
   progress.step('analysis');
+  await turn();
   const t0 = Date.now();
   const model = await analyze({
     repo: target.repo,
@@ -173,6 +181,7 @@ async function askAnalyzer(target: Target, dir: string, label: string, version: 
   const { headDir, baseDir } = await prepareCheckouts(target, progress);
 
   progress.step('diff');
+  await turn();
   const diff = exportDiff(target.repo, { base: { left: target.baseSha, right: target.headSha, label } }, generatedPatterns(target.repo, target.headSha));
   const files = diff.compares.base.files;
   progress.note(`${files.length} files changed, ${files.filter((f) => !f.hunks).length} of them generated`);
