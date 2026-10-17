@@ -21,6 +21,7 @@ import YAML from 'yaml';
 import { ADAPTERS } from './adapters.js';
 import { dartParser } from './dart.js';
 import { readingUnits, testCall } from './units.js';
+import { testOutline } from './outline.js';
 import { assembleIntroducedChains } from './chains.js';
 import { commitFamilies, subjectParts } from './commits.js';
 import { CALLABLE_KINDS, TYPE_KINDS, declarationAt, indexOf, memberAt as resolvedMemberAt, memberName } from './structure.js';
@@ -1603,6 +1604,8 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, grp: b.group || undefined, mk: b.memberKey, unit: b.unit?.id, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
           move: b.move ? { f: fileIndex.get(b.move.file), b: b.move.from.id, rows: b.move.rows.map(rowOut) } : undefined,
           movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: b.movedTo.block.rows[0].n, changes: b.movedTo.block.edits.length } : undefined })),
+        // A test file's tests as sentences: its group and test calls, matched and compared.
+        outline: f.lang === 'dart' && TEST_FILE.test(f.p) ? testOutline(f) || undefined : undefined,
       })),
       units: units.map((u) => ({ id: u.id, kind: u.kind, name: u.name, file: u.file, start: u.start, end: u.end, blocks: [...u.blocks].map((b) => b.id) })),
       edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan, sym: e.group != null && e.op === 'token' ? symOf(e) : undefined })),
