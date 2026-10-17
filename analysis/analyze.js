@@ -10,6 +10,9 @@
 // 3. Chains: changes linked by the language server (a changed line uses something declared
 //    on another changed line). Parameters and locals carry a chain across changes;
 //    functions, methods, fields and types start their own chain.
+// 4. With the review's provenance (which commit started each changed line), chains follow the
+//    commits instead (commits.js): one chain per commit and its follow-ups, however large.
+//    Renames keep their own chains.
 import '../viewer/core.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +22,7 @@ import { ADAPTERS } from './adapters.js';
 import { dartParser } from './dart.js';
 import { readingUnits, testCall } from './units.js';
 import { assembleIntroducedChains } from './chains.js';
+import { commitFamilies, subjectParts } from './commits.js';
 import { CALLABLE_KINDS, TYPE_KINDS, declarationAt, indexOf, memberAt as resolvedMemberAt, memberName } from './structure.js';
 
 const C = globalThis.ReviewCore;
@@ -42,11 +46,12 @@ const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/
 // each identifier on the head side is defined ("path:line:col" -> [file, line0, col0]). old: per
 // comparison, the old side's checkout and its definitions. calls: outgoing calls reachable from
 // what changed tests call. supers: what each changed declaration overrides.
-export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}, structure = null, calls = null, supers = null, log = () => {} }) {
+export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}, structure = null, calls = null, supers = null, provenance = null, log = () => {} }) {
   const REPO = repo;
   const HEAD = path.resolve(headDir) + '/';
   const CALLS = calls;
   const SUPERS = supers;
+  const PROVENANCE = provenance;
   const OLD = Object.fromEntries(Object.entries(oldSides).map(([name, o]) => [name, { dir: path.resolve(o.dir) + '/', raw: o.raw, structure: o.structure }]));
   const gitShow = (rev, p) => { try { return execFileSync('git', ['-C', REPO, 'show', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
   const parser = await dartParser();
@@ -1326,6 +1331,44 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       [c.root, ...c.also].forEach((d) => { if (d && d !== keep.root && !keep.also.includes(d)) keep.also.push(d); });
       return false;
     });
+
+    // ---------- chains by commit
+    // Each commit and its follow-ups make one chain (commits.js), however large: the commit is
+    // the unit its author declared. Renames keep their own chains, and a block that is nothing
+    // but renames stays out of the commit's chain.
+    let history = null;
+    if (PROVENANCE && PROVENANCE.commits.some((c) => !c.merge)) {
+      history = commitFamilies({ provenance: PROVENANCE, files, blocks: allBlocks });
+      // A rename: every edit of the group swaps one name for another (not one literal for another).
+      const oneName = (list) => { const words = list.filter((d) => d.tk.k !== 'ws'); return words.length === 1 && identToken(words[0]) && !/^(true|false|null)$/.test(words[0].tk.t); };
+      // The same names swapped in different places of the syntax are one rename.
+      const swaps = new Map();
+      groups.filter((g) => g.edits.every((e) => e.atoms.length === 1 && oneName(e.atoms[0].del) && oneName(e.atoms[0].ins))).forEach((g) => {
+        const name = editLabel(g.edits[0]);
+        if (!swaps.has(name)) swaps.set(name, { kind: 'group', group: g, groups: new Set(), root: null, blocks: new Set(), name, also: [] });
+        const c = swaps.get(name);
+        c.groups.add(g.id);
+        g.edits.forEach((e) => c.blocks.add(e.block));
+      });
+      const renames = [...swaps.values()].filter((c) => c.blocks.size > 1);
+      const renamed = new Set(renames.flatMap((c) => [...c.groups]));
+      const mechanical = (b) => b.edits.some((e) => renamed.has(e.group)) && b.edits.every((e) => e.punct || renamed.has(e.group));
+      // A commit's root is what it changes before what tests it.
+      const bestRoot = (blocks) => {
+        const inside = [...decls.values()].filter((d) => blocks.has(d.block) && d.kind !== 'import' && d.kind !== 'setup')
+          .map((d) => ({ d, n: [...d.users].filter((u) => blocks.has(u)).length }));
+        inside.sort((x, y) => isTestFile(x.d.file) - isTestFile(y.d.file) || rootRank(x.d) - rootRank(y.d) || y.n - x.n || (x.d.key < y.d.key ? -1 : 1));
+        return inside.length ? inside[0].d : null;
+      };
+      const byCommit = [];
+      history.families.forEach((fam, fi) => {
+        const own = new Set([...fam.blocks].filter((b) => !mechanical(b)));
+        if (own.size) byCommit.push({ kind: 'commit', root: bestRoot(own), blocks: own, name: subjectParts(PROVENANCE.commits[fam.root].subject).text, also: [], support: [...own].every((b) => isTestFile(b.file.p)), familyIndex: fi });
+      });
+      renames.forEach((c) => { c.familyIndex = history.families.length; });
+      chains = byCommit.concat(renames);
+    }
+
     chains.sort((x, y) => y.blocks.size - x.blocks.size || (x.name < y.name ? -1 : 1));
     chains.forEach((c, i) => { c.id = i; c.files = new Set([...c.blocks].map((b) => b.file.p)).size; });
 
@@ -1352,7 +1395,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
 
     // Graph per chain: nodes are members; blocks whose edits are all one same-change group
     // that appears 3+ times in the chain collapse into one node, and the tests of one test file
-    // are one node.
+    // are one node (by commit, its new tests and their setup too).
     for (const c of chains) {
       const groupCount = new Map();
       c.blocks.forEach((b) => { const gs = new Set(b.edits.map((e) => e.group)); if (gs.size === 1 && [...gs][0] !== undefined) groupCount.set([...gs][0], (groupCount.get([...gs][0]) || 0) + 1); });
@@ -1362,8 +1405,13 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         const gs = new Set(b.edits.map((e) => e.group));
         const g = gs.size === 1 ? [...gs][0] : undefined;
         const testCase = isTestFile(b.file.p) && /::(test:.*|main|\(top\))$/.test(b.memberKey);
-        const key = b.unit ? 'unit:' + b.unit.id : g !== undefined && groupCount.get(g) >= 3 ? 'group:' + g : testCase ? 'tests:' + b.file.p : 'member:' + b.memberKey;
-        if (!nodes.has(key)) nodes.set(key, { key, blocks: [], files: new Set(), group: key.startsWith('group:') ? g : null, member: b.unit ? b.unit.name : testCase ? null : b.member, file: b.file.p, test: b.test, unit: b.unit?.id, tests: key.startsWith('tests:') ? new Set() : null });
+        const newTest = history && isTestFile(b.file.p) && ['test', 'setup'].includes(b.unit?.kind);
+        const collapsed = g !== undefined && groupCount.get(g) >= 3;
+        // A same change's own chain shows its places as one, even in a test group's setup.
+        const own = c.groups ? c.groups.has(g) : c.group && c.group.id === g;
+        const key = collapsed && own ? 'group:' + g : newTest ? 'tests:' + b.file.p : b.unit ? 'unit:' + b.unit.id : collapsed ? 'group:' + g : testCase ? 'tests:' + b.file.p : 'member:' + b.memberKey;
+        const tests = key.startsWith('tests:');
+        if (!nodes.has(key)) nodes.set(key, { key, blocks: [], files: new Set(), group: key.startsWith('group:') ? g : null, member: tests ? null : b.unit ? b.unit.name : testCase ? null : b.member, file: b.file.p, test: b.test, unit: tests ? undefined : b.unit?.id, tests: tests ? new Set() : null });
         const n = nodes.get(key);
         n.blocks.push(b); n.files.add(b.file.p);
         if (n.tests && b.test) n.tests.add(b.test);
@@ -1381,6 +1429,18 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
           edges.get(k).labels.add(d.name);
         });
       });
+      // By commit: the declarations other chains change that this one uses (a function a commit
+      // calls, changed by another commit), linked without moving their changes here.
+      const ext = new Map();
+      if (history) c.blocks.forEach((b) => {
+        (usesOf.get(b) || new Map()).forEach((_, dk) => {
+          const d = decls.get(dk);
+          if (d.removed || (d.kind !== 'member' && d.kind !== 'type') || c.blocks.has(d.block)) return;
+          if (!ext.has(dk)) ext.set(dk, { d, from: new Set() });
+          ext.get(dk).from.add(nodeOf.get(b));
+        });
+      });
+      c.ext = [...ext.values()];
       c.focus = {};
       decls.forEach((d) => {
         if (!c.blocks.has(d.block) || d.removed) return;
@@ -1416,8 +1476,10 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     // A collapsed same-change group is still available in the group view. A self-contained
     // new implementation is still available by file. Neither is a one-node chain, and
     // file-local new code does not need a separate chain navigation entry.
+    // By commit, every chain stays: a commit's changes are its chain, however few.
     chains = chains.filter((c) => {
       const changes = new Set([...c.blocks].filter((block) => block.edits.length).map((block) => block.unit || block));
+      if (history) return changes.size > 0;
       return changes.size > 1 && c.graph.nodes.length > 1 && (c.kind !== 'declaration' || c.files > 1);
     });
     chains.forEach((c, i) => { c.id = i; });
@@ -1450,22 +1512,25 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         });
       });
     });
-    // Depth: longest path from a chain nobody uses, ignoring back edges of cycles.
+    // Depth: longest path from a chain nobody uses, ignoring back edges of cycles. By commit,
+    // chains have no levels: they follow the commits.
+    const levelUses = (c) => (history ? [] : [...c.uses]);
     const depth = new Map();
     const usedBy = new Map(chains.map((c) => [c.id, []]));
-    chains.forEach((c) => c.uses.forEach((o) => usedBy.get(o).push(c.id)));
+    chains.forEach((c) => levelUses(c).forEach((o) => usedBy.get(o).push(c.id)));
     const state = new Map();
     const order = [];
-    const visit = (id) => { state.set(id, 1); [...chains[id].uses].sort((a, b) => a - b).forEach((o) => { if (!state.has(o)) visit(o); }); state.set(id, 2); order.push(id); };
+    const visit = (id) => { state.set(id, 1); levelUses(chains[id]).sort((a, b) => a - b).forEach((o) => { if (!state.has(o)) visit(o); }); state.set(id, 2); order.push(id); };
     chains.forEach((c) => { if (!state.has(c.id)) visit(c.id); });
     order.reverse().forEach((id) => {
       const parents = usedBy.get(id).filter((p) => order.indexOf(p) < order.indexOf(id));
       depth.set(id, parents.length ? Math.max(...parents.map((p) => depth.get(p) + 1)) : 0);
     });
-    // Families: chains connected by uses or shared changes.
+    // Families: chains connected by uses or shared changes; by commit, the commit's chains.
     const fam = new Map();
     let famId = 0;
     chains.forEach((c) => {
+      if (history) { fam.set(c.id, c.familyIndex); return; }
       if (fam.has(c.id)) return;
       const stack = [c.id];
       fam.set(c.id, famId);
@@ -1481,6 +1546,27 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
 
     // ---------- serialize
     const fileIndex = new Map(files.map((f, i) => [f, i]));
+    // By commit: each commit's chain, what started it and what changed it later. The last
+    // family holds the same changes.
+    const familiesOut = (h) => {
+      const commit = (i) => PROVENANCE.commits[i];
+      const chainsOf = (fi) => chains.filter((c) => c.familyIndex === fi).map((c) => c.id);
+      return h.families.map((f, fi) => {
+        const sub = subjectParts(commit(f.root).subject);
+        return {
+          id: fi, sha: commit(f.root).sha, kind: sub.kind, subject: sub.text, body: commit(f.root).body,
+          commits: f.commits.map((i) => ({ sha: commit(i).sha, subject: commit(i).subject, role: h.roles[i].role })),
+          revisedBy: f.revisedBy.map(([i, lines]) => ({ sha: commit(i).sha, subject: commit(i).subject, lines })),
+          buildsOn: f.buildsOn, revises: f.revises, chains: chainsOf(fi),
+        };
+      }).concat([{ id: h.families.length, same: true, chains: chainsOf(h.families.length) }]);
+    };
+    // By commit: each declaration a chain uses that other chains change, with the chain to read it
+    // in (a commit's before a rename's) and the members here that use it.
+    const extOut = (c) => c.ext.map(({ d, from }) => {
+      const owners = chains.filter((o) => o.blocks.has(d.block)).sort((x, y) => (x.kind === 'commit' ? 0 : 1) - (y.kind === 'commit' ? 0 : 1) || x.id - y.id);
+      return owners.length ? { name: label(d), file: d.file, block: d.block.id, chain: owners[0].id, from: [...from].sort() } : null;
+    }).filter(Boolean).sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
     // What a same-change token resolves to on the new side: [key, label]. The group view lists
     // its places under each declaration.
     const symOf = (e) => {
@@ -1521,11 +1607,14 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       units: units.map((u) => ({ id: u.id, kind: u.kind, name: u.name, file: u.file, start: u.start, end: u.end, blocks: [...u.blocks].map((b) => b.id) })),
       edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan, sym: e.group != null && e.op === 'token' ? symOf(e) : undefined })),
       groups: groups.map((g) => ({ id: g.id, count: g.count, files: g.files, parts: g.parts.map((p) => p.edits[0].id), edits: g.edits.map((e) => e.id) })),
-      chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, links: c.links, uses: [...c.uses].sort((a, b) => a - b), shares: [...c.shares].sort((a, b) => a - b), depth: c.depth, family: c.family, adds: [...c.blocks].reduce((x, b) => x + b.adds, 0), dels: [...c.blocks].reduce((x, b) => x + b.dels, 0), focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),
+      chainsBy: history ? 'history' : 'structure',
+      families: history ? familiesOut(history) : undefined,
+      chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, ext: history ? extOut(c) : undefined, links: c.links, uses: [...c.uses].sort((a, b) => a - b), shares: [...c.shares].sort((a, b) => a - b), depth: c.depth, family: c.family, adds: [...c.blocks].reduce((x, b) => x + b.adds, 0), dels: [...c.blocks].reduce((x, b) => x + b.dels, 0), focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),
       generated: generated.map((f) => ({ p: f.p, s: f.s, a: f.a, d: f.d, gen: f.gen, hunks: f.hunks ? f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, rows: h.l.map((l) => [l[0], l.slice(1)]) })) : null })),
     };
     out.compares[name] = ser;
     const inChain = new Set(chains.flatMap((c) => [...c.blocks]));
+    if (history) log(`${name}: by commit, ${history.families.length} commit chains from ${PROVENANCE.commits.filter((c) => !c.merge).length} commits`);
     log(`${name}: ${files.length} files, ${allBlocks.length} change blocks, ${edits.length} edits, ${groups.length} same-change groups (${groups.reduce((s, g) => s + g.edits.length, 0)} edits), ${chains.length} chains covering ${inChain.size} blocks, ${allBlocks.length - inChain.size} not in a chain, generated ${generated.length} (${generated.filter((g) => g.hunks).length} peekable)`);
     chains.slice(0, 14).forEach((c) => log(`   chain ${String(c.blocks.size).padStart(3)} blocks · ${String(c.files).padStart(2)} files · ${c.graph.nodes.length} nodes · ${c.name}${c.also.length ? '  also: ' + c.also.map(label).join(', ') : ''}  links: ${c.links.length}`));
     const names = chains.map((c) => c.name); log('   duplicate chain names:', names.filter((n, i) => names.indexOf(n) !== i).length);

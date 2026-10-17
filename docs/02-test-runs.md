@@ -1,5 +1,95 @@
 # Test runs: chain grouping across PRs
 
+## 2026-10-16: one chain per commit
+
+Reviewing branches by commit showed three problems:
+
+- **New tests split.** A large commit's steps came from the structural rules, so a new test file
+  could sit in two steps (a member's chain and a ripple's).
+- **Scaffolding gathered.** The repeated `setUpAll`/`tearDownAll` lines of several new test files
+  formed one "same change" chain, apart from each file's commit.
+- **A brace outside.** A removed `}` belonged to no chain. No commit removed it: one commit moved
+  it down, and git's diff of the whole review shows it removed at the old place and added at the
+  new one.
+
+The rules changed accordingly: each commit's chain holds all of it; only renames stay apart; a
+change no commit made joins the nearest change of its file; a test group's setup goes block by
+block. Rename sites in setup code had stayed out of their rename's chain, which left 116 of
+offline_sync #168's 483 changes outside chains until setup blocks joined renames too.
+
+The analyzer facts cached for ten reviews, replayed through both modes (changes are reading
+units; history chains are the commits' plus the renames):
+
+| Review | Commits | Structure: chains, outside | History: chains, outside | Largest commit chain |
+|---|--:|---|---|---|
+| #5866 doctor | 12 | 6, 24 of 121 | 9 + 0, 0 | 47 (39%) |
+| #5869 OTP login | 9 | 36, 37 of 218 | 6 + 0, 0 | 99 (45%) |
+| #5868 | 1 | 1, 6 of 9 | 1 + 0, 0 | 9 (100%) |
+| #5864 at 5a3750e | 5 | 2, 13 of 33 | 5 + 0, 0 | 10 (30%) |
+| #5864 at ac5ee48 | 4 | 4, 2 of 27 | 4 + 0, 0 | 10 (37%) |
+| serverpod c738d28..3a5ebde | 34 | 81, 113 of 377 | 19 + 5, 0 | 111 (29%) |
+| serverpod c738d28..b512c4f | 17 | 40, 75 of 275 | 13 + 0, 0 | 92 (33%) |
+| offline_sync merge admission | 3 | 10, 13 of 81 | 3 + 2, 0 | 33 (41%) |
+| offline_sync ebf9385..e083615 | 13 | 29, 41 of 303 | 13 + 2, 0 | 55 (18%) |
+| offline_sync #168 | 15 | 39, 37 of 483 | 14 + 7, 0 | 234 (48%) |
+
+Links to the declarations other chains change: offline_sync #168's 21 chains carry 119, from
+the `userId → spaceId` rename's two to 22 in the commit that aligned the tests with the
+conventions (functions the first commit changed).
+
+Limits:
+
+- A dominant commit is one long chain: offline_sync #168's first commit holds 234 of 483
+  changes, in 30 files. Its members read in levels from its root, within the chain.
+- A single-commit PR is one chain, plus its renames.
+
+## 2026-10-16: chains by commit
+
+`-chains history` groups by the commit that started each changed line, with follow-ups folded
+in ([rules](01-ux-proposal.md#chains-by-commit)). A prototype first compared it with the literal
+alternative, joining commits that changed the same surviving line, on the 13 public snapshots
+of the cohesion corpus (each cell: groups · the largest one's share of the lines):
+
+| PR | Commits | Same-line union | Origin + follow-ups |
+|---|--:|---|---|
+| offline_sync merge admission | 3 | 3 · 44% | 3 · 44% |
+| #5866 doctor | 12 | 1 · 100% | 10 · 41% |
+| #5869 OTP login | 9 | 6 · 51% | 6 · 51% |
+| #5868 | 1 | 1 · 100% | 1 · 100% |
+| #5864 at 5a3750e | 5 | 2 · 97% | 5 · 30% |
+| #5864 at ac5ee48 | 4 | 4 · 43% | 4 · 43% |
+| offline_sync #168 | 13 | 1 · 100% | 13 · 56% |
+| offline_sync #157 | 8 | 4 · 93% | 6 · 51% |
+| offline_sync #166 | 4 | 2 · 98% | 1 · 100% |
+| offline_sync #162 | 4 | 2 · 59% | 3 · 59% |
+| #5706 embedded database | 7 | 4 · 74% | 6 · 53% |
+| #5471 | 11 | 1 · 100% | 5 · 62% |
+| #5630 projections | 20 | 2 · 100% | 13 · 37% |
+
+One sweeping commit (docs trimmed everywhere, tests aligned with conventions, formatting)
+joins every intent under the union. Under origins, a sweeping commit only revises.
+
+The implementation then replayed the analyzer facts cached for six of those snapshots through
+both modes (`bench/cohesion.ts --history`; changes are reading units). Edit identities,
+generated files and complete reading units held in every case.
+
+| PR | Structure: chains, changes outside | History: chains (commits), changes outside | Replay |
+|---|---|---|--:|
+| #5866 doctor | 6, 24 of 121 | 9 (9), 0 | 106 ms |
+| #5869 OTP login | 36, 37 of 218 | 20 (6), 0 | 232 ms |
+| #5868 | 1, 6 of 9 | 1 (1), 0 | 69 ms |
+| #5864 at 5a3750e | 2, 13 of 33 | 5 (5), 0 | 99 ms |
+| #5864 at ac5ee48 | 4, 2 of 27 | 4 (4), 0 | 83 ms |
+| offline_sync merge admission | 10, 13 of 81 | 6 (3), 0 | 79 ms |
+
+Limits:
+
+- A dominant first commit is read in steps, which come from the structural rules within that
+  commit: offline_sync #168's first commit holds 2,278 of its 4,093 lines, in 58 files.
+- A single-commit PR is one commit's chain, read in steps when it has more than 30 changes.
+- Messy histories still yield small chains with weak subjects; a block goes to the commit that
+  started most of its lines, which absorbs many of them.
+
 ## 2026-10-16: complete reading units, connected chains
 
 The first implementation fixed fragmented new classes but introduced a navigation regression:

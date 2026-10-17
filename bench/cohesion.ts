@@ -6,18 +6,24 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { analyze } from '../analysis/analyze.js';
 import { dartParser } from '../analysis/dart.js';
+import { generatedPatterns } from '../dist/pipeline/diff.js';
+import { generatedBy, provenance } from '../dist/provenance.js';
 
 interface Case {
   name: string;
   answers: string;
+  /** The git repository with the case's commits; the head checkout when omitted. */
+  repo?: string;
   baselineReview?: string;
   state?: string;
 }
 
-const [manifestPath, outputPath, baselineModule] = process.argv.slice(2);
-if (!manifestPath || !outputPath || !baselineModule) {
-  throw new Error('Usage: node bench/cohesion.ts <manifest.json> <output-directory> <baseline-analyze.mjs>');
+const [manifestPath, outputPath, baselineModule, mode] = process.argv.slice(2);
+if (!manifestPath || !outputPath || !baselineModule || (mode && mode !== '--history')) {
+  throw new Error('Usage: node bench/cohesion.ts <manifest.json> <output-directory> <baseline-analyze.mjs> [--history]');
 }
+// The candidate's chains follow the commits; the baseline's, the code alone.
+const byCommit = mode === '--history';
 
 const baselineAnalyze = (await import(pathToFileURL(path.resolve(baselineModule)).href)).analyze;
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { cases: Case[] };
@@ -49,6 +55,8 @@ function metrics(model: any, reviewed: Set<string>) {
       .filter((block: any) => block.edits.length && !linked.has(block.id))),
     outsideScenarios: model.units.filter((unit: any) => unit.kind === 'test' && unit.blocks.every((id: string) => !linked.has(id))).length,
     largestFamily: Math.max(0, ...families.values()),
+    commitChains: model.families ? model.families.filter((family: any) => !family.same && family.chains.length).length : undefined,
+    largestCommitChain: model.families ? Math.max(0, ...model.families.filter((family: any) => !family.same).map((family: any) => reading(family.chains.flatMap((id: number) => model.chains[id].blocks).map((id: string) => byId.get(id)).filter(Boolean)))) : undefined,
     largestChains: model.chains.map((chain: any) => ({
       name: chain.name, files: chain.files,
       changes: reading(chain.blocks.map((id: string) => byId.get(id)).filter(Boolean)),
@@ -74,14 +82,22 @@ function verifyUnits(model: any) {
     assert.ok(isTestFile(unit.file) || owners.length <= 1, `${unit.file}: ${unit.name} must not have multiple implementation owners`);
     assert.ok(unit.blocks.every((id: string) => blocks.get(id)?.unit === unit.id), `${unit.name} must retain its block ownership`);
     if (!owners.length) continue;
+    // By commit, a test group's setup is no declaration: each of its blocks goes with its commit.
+    // A test file's new tests read as one node, so a test is complete within that node.
+    const byCommit = model.chainsBy === 'history';
+    if (byCommit && unit.kind === 'setup') continue;
+    const shared = byCommit && isTestFile(unit.file);
 
     for (const owner of owners) {
       assert.ok(unit.blocks.every((id: string) => owner.blocks.includes(id)), `${unit.name} must be complete`);
-      const nodes = owner.graph.nodes.filter((node: any) => node.unit === unit.id);
+      const nodes = owner.graph.nodes.filter((node: any) => (shared ? unit.blocks.some((id: string) => node.blocks.includes(id)) : node.unit === unit.id));
       assert.equal(nodes.length, 1, `${unit.name} must be one graph node`);
-      assert.deepEqual(new Set(nodes[0].blocks), new Set(unit.blocks));
+      if (shared) assert.ok(unit.blocks.every((id: string) => nodes[0].blocks.includes(id)), `${unit.name} must be within one graph node`);
+      else assert.deepEqual(new Set(nodes[0].blocks), new Set(unit.blocks));
     }
   }
+  // By commit, a commit's changes are its chain however few; the rest holds for the code's chains.
+  if (model.chainsBy === 'history') return;
   for (const chain of model.chains) {
     assert.ok(chain.graph.nodes.length > 1, `${chain.name} must connect more than one node`);
     const changes = new Set(chain.blocks.filter((id: string) => blocks.get(id)?.edits.length).map((id: string) => blocks.get(id).unit || id));
@@ -165,7 +181,11 @@ for (const [index, item] of manifest.cases.entries()) {
   const before = (await baselineAnalyze(input)).compares.base;
   const baselineMs = performance.now() - started;
   const changed = performance.now();
-  const after = (await analyze(input)).compares.base;
+  const comparison0 = answers.diff.compares.base;
+  const marked = new Set<string>(comparison0.files.filter((file: any) => file.ga === 'true').map((file: any) => file.p));
+  const repo = item.repo ?? answers.headDir;
+  const history = byCommit ? await provenance(repo, comparison0.left, comparison0.right, generatedBy(generatedPatterns(repo, comparison0.right), marked)) : null;
+  const after = (await analyze({ ...input, provenance: history })).compares.base;
   const analysisMs = performance.now() - changed;
   const failures: string[] = [];
   let introducedTypes = 0;

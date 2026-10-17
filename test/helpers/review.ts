@@ -3,7 +3,7 @@ import { type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildReview, type Progress, type ReviewData } from '../../dist/build.js';
+import { buildReview, type ChainsBy, type Progress, type ReviewData } from '../../dist/build.js';
 import { resolveDirectory, type Target } from '../../dist/target.js';
 import { stubGh, type GhStub } from './gh.ts';
 import { TempRepo, type Person } from './repo.ts';
@@ -22,8 +22,20 @@ export interface BuiltReview {
   remove(): void;
 }
 
+/** A commit on the feature branch: its files overwrite the branch's, and null removes one. */
+export interface FeatureCommit {
+  subject: string;
+  body?: string;
+  files: Record<string, string | null>;
+}
+
 /** `main` has `base`, `feature` has those files overwritten by `head`, compared with main. */
-export async function buildDartReview(files: { base: Record<string, string>; head: Record<string, string> }): Promise<BuiltReview> {
+export function buildDartReview(files: { base: Record<string, string>; head: Record<string, string> }): Promise<BuiltReview> {
+  return buildDartHistory(files.base, [{ subject: 'change', files: files.head }], 'structure');
+}
+
+/** `main` has `base`, and `feature` makes `commits` one a day after it; compared with main. */
+export async function buildDartHistory(base: Record<string, string>, commits: FeatureCommit[], chains: ChainsBy = 'history'): Promise<BuiltReview> {
   const repo = TempRepo.create();
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
   const gh = stubGh();
@@ -56,16 +68,21 @@ export async function buildDartReview(files: { base: Record<string, string>; hea
   };
   try {
     repo.write('pubspec.yaml', pubspec);
-    for (const [file, content] of Object.entries(files.base)) repo.write(file, content);
+    for (const [file, content] of Object.entries(base)) repo.write(file, content);
     repo.commit({ subject: 'start', author: ada, committer: ada });
     repo.branch('feature');
-    for (const [file, content] of Object.entries(files.head)) repo.write(file, content);
-    const later = { ...ada, date: '2020-06-02T00:00:00Z' };
-    repo.commit({ subject: 'change', author: later, committer: later });
+    commits.forEach((commit, i) => {
+      for (const [file, content] of Object.entries(commit.files)) {
+        if (content == null) repo.delete(file);
+        else repo.write(file, content);
+      }
+      const later = { ...ada, date: `2020-06-${String(i + 2).padStart(2, '0')}T00:00:00Z` };
+      repo.commit({ subject: commit.subject, body: commit.body, author: later, committer: later });
+    });
     process.env.PATH = String(gh.env.PATH);
     process.env.UNTANGLE_CACHE = cacheDir;
     const target = await resolveDirectory(repo.dir, 'main', () => {});
-    const built = await buildReview(target, { noCache: true, label: 'main', title: 'feature' }, quiet);
+    const built = await buildReview(target, { noCache: true, label: 'main', title: 'feature', chains }, quiet);
     restore();
     return { repo, cacheDir, gh, target, data: built.data, remove: discard };
   } catch (error) {

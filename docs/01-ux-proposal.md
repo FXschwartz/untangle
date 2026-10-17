@@ -271,6 +271,53 @@ From the review of v11:
   - one dashed line joins each group of chains connected by "uses" to the chain it shares
     the most changes with.
 
+### Chains by commit
+
+With `-chains history`, chains follow the commits instead of the code's structure alone. A
+commit is the one boundary its author declared; the review collapses its back-and-forths.
+
+1. **Provenance.** The review's first-parent commits are replayed from where the branch
+   started (`src/provenance.ts`). Every line carries its **origin**, the commit that first
+   changed that spot, and every commit that changed it after.
+   - An edited line keeps its origin: a hunk's removed and added lines pair up when at least
+     half their tokens match.
+   - A line only reformatted (whitespace, line breaks, a trailing comma) keeps its history.
+   - A line moved within a commit keeps its history when a neighbour moved with it, or it is
+     40 characters or longer; a moved line of the base is credited to the commit that moved it.
+   - A merge from the base's branch starts nothing.
+2. **Follow-ups.** A commit **revises** another when it edits, moves or removes lines that
+   commit started. A commit that revised one chain, and changed more of its lines than it
+   started of its own, is a **follow-up**: it joins that chain. Any other commit starts a
+   chain with what it started: one that **builds on** the chain it revised, or that
+   **revises** several.
+3. **Blocks.** A block goes to the chain that started most of its lines (the older one on a
+   tie), and a whole new declaration goes with it. A test group's setup is no declaration:
+   each of its blocks goes on its own.
+   - A block no commit made goes with the nearest change of its file, the one after it on a
+     tie: the addition that replaces it. Git's diff of the whole review can pair lines the
+     commits never touched; a closing brace pushed down shows as removed there and added
+     further on.
+   - A file where no commit of the branch wrote a line stays outside chains.
+4. **One chain per commit,** however large: the commit is the unit its author declared.
+   Splitting a large one by the structural rules brought their arbitrary boundaries back,
+   with a new test file divided between steps.
+5. **Renames** keep their own chains, apart from the commits': a same change whose every edit
+   swaps one name for another (`spaceId → userId`), wherever it sits in the syntax. A block
+   that is nothing but renames stays out of its commit's chain. Other same changes, a call
+   added in three places say, read in their commit's chain.
+6. **Links.** A change that uses a function, method, field or type another chain changes
+   links to it, and the changes stay where the rules above put them. The chain's graph shows
+   the declaration in a dotted box, and a note under the member that uses it names the chain
+   to read it in (a commit's before a rename's). Both open that chain at the declaration:
+   the `userId → spaceId` rename of offline_sync #168 links `spaceIdFor`, added by the first
+   commit.
+7. **Display.** A chain is named after the commit that started it and opens with its
+   message, its follow-ups, the commits that changed its lines later, and what it builds on
+   or changes. The sidebar lists the chains in commit order, then the renames. The chain map
+   shows each commit's chain after the chains it builds on or whose lines it changes. Each
+   test file's new tests and their setup are one node, read whole, and a chain's root is
+   production code before tests.
+
 ### Same change
 
 1. Change blocks are the runs of `-`/`+` lines in a hunk.
@@ -669,6 +716,23 @@ through the page.
     shared helpers or displayed names. Added declaration ownership, source-scoped identities,
     complete test titles, and a baseline/candidate cohesion replay over the validation corpus.
   - Validation and remaining limits: [02-test-runs.md](02-test-runs.md).
+- **v18:** chains by commit (`-chains history`), after structural boundaries kept feeling
+  arbitrary: new code split too much, tests hard to follow, and no reason shown for a chain.
+  - Grouping by the commits that touched the same lines collapses most histories into one
+    chain: one sweeping commit (docs, test conventions, formatting) joins every intent. On
+    the 13 public PRs, 7 of the 12 with several commits ended in one group holding 93% or
+    more of their lines. Grouping by the commit that started each line, with follow-ups
+    folded in, gave 3 to 13 chains, the largest holding 30% to 62% (one dominant first
+    commit aside).
+  - Rules: [Chains by commit](#chains-by-commit).
+- **v19:** one chain per commit, after reviewing branches by commit: a new test file split
+  between a large commit's steps, the setup of several new test files gathered into one "same
+  change" chain, and a removed brace outside every chain.
+  - No steps: a commit's chain holds all of it. Only renames stay apart. A change no commit
+    made joins the nearest change of its file.
+  - Asked: keep linking a change to the functions it uses that other commits change, without
+    moving them. Done: dotted nodes and notes that open the other chain.
+  - Validation: [02-test-runs.md](02-test-runs.md#2026-10-16-one-chain-per-commit).
 
 ## References
 

@@ -11,6 +11,7 @@ import { extract, type Extracted } from './analyzer/extract.js';
 import { slim, type SlimDefinitions } from './pipeline/definitions.js';
 import { exportDiff, generatedPatterns } from './pipeline/diff.js';
 import { changedUsages } from './pipeline/links.js';
+import { generatedBy, readProvenance, type Provenance } from './provenance.js';
 import type { History } from './history.js';
 import type { Target } from './target.js';
 import { ROOT, VERSION } from './version.js';
@@ -42,7 +43,10 @@ function fingerprint(files: string[]): string {
   return h.digest('hex').slice(0, 16);
 }
 const EXTRACTION_STAGE = ['dist/analyzer/client.js', 'dist/analyzer/extract.js', 'analyzer/bin/extract.dart', 'analyzer/pubspec.lock', 'dist/pipeline/diff.js', 'dist/pipeline/definitions.js', 'dist/pipeline/links.js', 'dist/model-definitions.js', 'analysis/adapters.js'];
-const MODEL_STAGE = ['analysis/analyze.js', 'analysis/dart.js', 'analysis/units.js', 'analysis/structure.js', 'analysis/chains.js'];
+const MODEL_STAGE = ['analysis/analyze.js', 'analysis/dart.js', 'analysis/units.js', 'analysis/structure.js', 'analysis/chains.js', 'analysis/commits.js', 'dist/provenance.js'];
+
+/** What chains follow: the commits that started each change, or the code's structure alone. */
+export type ChainsBy = 'history' | 'structure';
 
 const readJson = <T>(file: string): T | null => {
   try {
@@ -70,14 +74,17 @@ export interface Checkouts {
  * The review and its checkouts. Bulk extraction exits before grouping; live navigation
  * starts its own language server after the review is ready.
  */
-export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string }, progress: Progress): Promise<{ data: ReviewData; checkouts: Checkouts | null }> {
+export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string; chains?: ChainsBy }, progress: Progress): Promise<{ data: ReviewData; checkouts: Checkouts | null }> {
   const dir = reviewDir(target.repoKey, target.baseSha, target.headSha);
   fs.mkdirSync(dir, { recursive: true });
+  const byCommit = opts.chains === 'history';
   const extractorVersion = fingerprint(EXTRACTION_STAGE), modelVersion = extractorVersion + '.' + fingerprint(MODEL_STAGE);
+  // Each way of chaining keeps its own analysis, so switching between them reuses both.
+  const suffix = byCommit ? '-history' : '';
 
-  const cached = !opts.noCache && readJson<{ version: string }>(path.join(dir, 'meta.json'));
+  const cached = !opts.noCache && readJson<{ version: string }>(path.join(dir, `meta${suffix}.json`));
   if (cached && cached.version === modelVersion) {
-    const data = readJson<ReviewData>(path.join(dir, 'review.json'));
+    const data = readJson<ReviewData>(path.join(dir, `review${suffix}.json`));
     if (data) {
       progress.note(`using the analysis cached in ${tilde(dir)}`);
       return { data, checkouts: null };
@@ -90,6 +97,19 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
   if (answers) progress.note('reusing the analyzer’s facts; running the analysis again');
   else answers = await askAnalyzer(target, dir, opts.label, extractorVersion, progress);
 
+  let provenance: Provenance | null = null;
+  if (byCommit) {
+    progress.step('commits');
+    try {
+      const t1 = Date.now();
+      const marked = new Set(answers.diff.compares.base.files.filter((f) => f.ga === 'true').map((f) => f.p));
+      provenance = await readProvenance(target.repo, target.baseSha, target.headSha, generatedBy(generatedPatterns(target.repo, target.headSha), marked), opts.noCache ? null : dir);
+      progress.verbose(`${provenance.commits.length} commits replayed in ${Date.now() - t1} ms`);
+    } catch (e) {
+      progress.note(`chains follow the code alone: the commits could not be replayed (${(e as Error).message})`);
+    }
+  }
+
   progress.step('analysis');
   const t0 = Date.now();
   const model = await analyze({
@@ -101,6 +121,7 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
     structure: answers.structure,
     calls: answers.calls,
     supers: answers.supers,
+    provenance,
     log: progress.verbose,
   });
   const c = model.compares.base;
@@ -109,11 +130,12 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
   const changes: Change[] = c.files.flatMap((f: { blocks: Change[] }) => f.blocks).filter((b: Change) => b.edits.length);
   const inChain = new Set(c.chains.flatMap((ch: { blocks: string[] }) => ch.blocks));
   const count = (blocks: Change[]) => new Set(blocks.map((block) => block.unit || block.id)).size;
-  progress.note(`${c.chains.length} chains hold ${count(changes.filter((block) => inChain.has(block.id)))} of ${count(changes)} changes; ${c.groups.length} same-change groups (${Date.now() - t0} ms)`);
+  const commitChains = c.families ? `, following ${c.families.filter((f: { same?: boolean; chains: number[] }) => !f.same && f.chains.length).length} commits` : '';
+  progress.note(`${c.chains.length} chains${commitChains} hold ${count(changes.filter((block) => inChain.has(block.id)))} of ${count(changes)} changes; ${c.groups.length} same-change groups (${Date.now() - t0} ms)`);
 
   const data: ReviewData = { model, defs: slim(answers.defs), refs: changedUsages(answers.diff, answers.headDir, answers.defs.raw), defsOld: { base: slim(answers.defsOld) } };
-  writeJson(path.join(dir, 'review.json'), data);
-  writeJson(path.join(dir, 'meta.json'), { version: modelVersion, untangle: VERSION, base: target.baseSha, head: target.headSha, builtAt: new Date().toISOString() });
+  writeJson(path.join(dir, `review${suffix}.json`), data);
+  writeJson(path.join(dir, `meta${suffix}.json`), { version: modelVersion, untangle: VERSION, base: target.baseSha, head: target.headSha, builtAt: new Date().toISOString() });
   return { data, checkouts: { headDir: answers.headDir, baseDir: answers.baseDir } };
 }
 

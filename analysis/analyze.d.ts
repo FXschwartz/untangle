@@ -1,4 +1,5 @@
 import type { Structure } from '../src/analyzer/client.js';
+import type { Provenance } from '../src/provenance.js';
 /** "path:line:col" (1-based line) -> [absolute target file, 0-based line, column]. */
 export type RawDefinitions = Record<string, [string, number, number]>;
 
@@ -34,5 +35,7 @@ export declare function analyze(input: {
   old?: Record<string, { dir: string; raw: RawDefinitions; structure?: Record<string, Structure> }>;
   calls?: CallGraph | null;
   supers?: RawDefinitions | null;
+  /** Which commit started each changed line: chains then follow the commits. */
+  provenance?: Provenance | null;
   log?: (line: string) => void;
 }): Promise<Model>;

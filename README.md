@@ -8,6 +8,12 @@ chain, group and count comes from fixed rules over git and Dart analyzer facts, 
 for fine-grained edit shapes.
 The rules and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md).
 
+With `-chains history`, chains follow the commits instead. Each commit and the commits that
+followed it up are one chain, however large, named after it and opening with its message;
+later edits to its lines collapse into it, so back-and-forths don't repeat. Only renames keep
+their own chains, and a change that uses a function another commit changed links to it. The
+rules are in [Chains by commit](docs/01-ux-proposal.md#chains-by-commit).
+
 New classes, models and functions are read whole. A reading unit is not automatically a chain:
 self-contained new code stays in the file review, and chains connect multiple nodes. New code
 forms chains through resolved dependencies across files, without collecting the independent
@@ -72,7 +78,10 @@ The tests use Node's runner (`node:test`) and need Node 22.18 or later, which ru
    JavaScript retains the compact facts the review needs; the analyzer exits before grouping.
 3. **Analysis.** The rules in [analysis/analyze.js](analysis/analyze.js) use these facts to build
    whole declaration reading units, chains and the chain map. Tree-sitter still supplies atomic
-   edit shapes, preserving edit identities and saved marks.
+   edit shapes, preserving edit identities and saved marks. With `-chains history`, the
+   branch's commits are replayed first, so each changed line knows the commit that started it
+   ([src/provenance.ts](src/provenance.ts)), and chains follow those commits
+   ([analysis/commits.js](analysis/commits.js)).
 4. **Serving.** The page shows progress while the review builds, then the review. The existing
    language server starts after the review is ready to serve live navigation requests.
 

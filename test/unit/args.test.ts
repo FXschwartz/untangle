@@ -7,6 +7,7 @@ function shown(options: Options): string {
     `target ${options.target}`,
     `base ${options.base ?? 'none'}`,
     `basePath ${options.basePath}`,
+    `chains ${options.chains}`,
     `editor ${options.editor ?? 'none'}`,
     `export ${options.exportTo ?? 'none'}`,
     `host ${options.host}`,
@@ -31,6 +32,7 @@ describe('Given no arguments, ', () => {
         'target .',
         'base none',
         'basePath /',
+        'chains structure',
         'editor none',
         'export none',
         'host 127.0.0.1',
@@ -52,6 +54,7 @@ describe('Given flags for a quiet review written to a file, ', () => {
   const argv = [
     '-base', 'main',
     '-base-path', 'rev',
+    '-chains', 'history',
     '-editor', 'code -g {file}:{line}:{col}',
     '-export', 'out.html',
     '-host', '127.0.0.1',
@@ -71,6 +74,7 @@ describe('Given flags for a quiet review written to a file, ', () => {
         'target feature',
         'base main',
         'basePath /rev/',
+        'chains history',
         'editor code -g {file}:{line}:{col}',
         'export out.html',
         'host 127.0.0.1',
@@ -104,6 +108,16 @@ describe('Given an unknown flag, ', () => {
     + 'then the flag is refused.',
     () => {
       assert.throws(() => parseArgs(['-nope']), (error: unknown) => error instanceof UsageError && error.message === 'flag provided but not defined: -nope');
+    },
+  );
+});
+
+describe('Given -chains with a value that is neither history nor structure, ', () => {
+  it(
+    'when the flags are read, '
+    + 'then the value is refused.',
+    () => {
+      assert.throws(() => parseArgs(['-chains', 'commits']), (error: unknown) => error instanceof UsageError && error.message === 'invalid value "commits" for flag -chains: history or structure');
     },
   );
 });

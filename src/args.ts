@@ -11,6 +11,7 @@ interface Flag {
 const FLAGS: Flag[] = [
   { name: 'base', type: 'string', usage: 'compare with this branch or commit instead of the pull request’s base' },
   { name: 'base-path', type: 'string', usage: 'base URL path prefix to serve endpoints and assets from (e.g. /rev-123/)' },
+  { name: 'chains', type: 'string', usage: 'what chains follow: "history", the commits that started each change, or "structure", the code alone', default: 'structure' },
   { name: 'editor', type: 'string', usage: 'open locations with this command, or this URL, where {file}, {line} and {col} are replaced (e.g. "code -g {file}:{line}:{col}"); VS Code\'s vscode:// link when omitted' },
   { name: 'export', type: 'string', usage: 'write the review to this HTML file, to share it read-only, and exit' },
   { name: 'host', type: 'string', usage: 'address to bind', default: '127.0.0.1' },
@@ -28,6 +29,7 @@ export interface Options {
   target: string;
   base: string | null;
   basePath: string;
+  chains: 'history' | 'structure';
   editor: string | null;
   exportTo: string | null;
   host: string;
@@ -97,10 +99,13 @@ export function parseArgs(argv: string[]): Options {
   if (!basePath.endsWith('/')) basePath += '/';
   const port = values.has('port') ? Number(values.get('port')) : 7778;
   if (port > 65535) throw new UsageError(`invalid value "${port}" for flag -port: out of range`);
+  const chains = str('chains') || 'structure';
+  if (chains !== 'history' && chains !== 'structure') throw new UsageError(`invalid value "${chains}" for flag -chains: history or structure`);
   return {
     target: rest[0] || '.',
     base: str('base'),
     basePath,
+    chains,
     editor: str('editor'),
     exportTo: str('export'),
     host: str('host') || '127.0.0.1',

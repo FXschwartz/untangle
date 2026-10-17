@@ -194,6 +194,12 @@ base/head SHAs, and exits nonzero on a failed invariant.
 node bench/cohesion.ts /scratch/manifest.json /scratch/cohesion-results /scratch/baseline/analysis/analyze.js
 ```
 
+With `--history` last, the candidate's chains follow the commits (`-chains history`): the
+commits are replayed from the case's `repo` (the head checkout when omitted), the per-chain
+invariants of the code's chains are skipped, and the results add the commits' chains and the
+largest one, in reading units. A test group's setup may span commits, and a new test must be
+complete within its file's node of tests.
+
 These structural checks complement rendered-page checks and inspection of representative
 chains. A smaller chain count or higher linked percentage alone does not establish cohesion.
 The recorded corpus and limitations are in [the validation report](../docs/02-test-runs.md)

@@ -126,7 +126,7 @@ async function main(): Promise<number> {
   };
   const open = async (t: Target, progress: Narrator, noCache: boolean) => {
     const n = names(t);
-    const built = await buildReview(t, { noCache, label: n.base.replace(' ', ' · '), title: n.title }, progress);
+    const built = await buildReview(t, { noCache, label: n.base.replace(' ', ' · '), title: n.title, chains: opts.chains }, progress);
     built.data = await withHistory(t, built.data, progress);
     const l = new LiveSession(t, { step: () => {}, detail: () => {}, note: (x) => say.verbose(x), verbose: (x) => say.verbose(x) }, built.checkouts);
     const s = new ReviewSession(t, built.data, l, editorFrom(opts.editor), { key: n.key, url: t.pr ? t.pr.url : null, where: n.where, snapshotKey: n.snapshotKey }, progress, built.data.history ?? null);
@@ -197,7 +197,7 @@ async function main(): Promise<number> {
     say.title(n.title, n.where);
     t.notes.forEach((x) => say.note(x));
     if (exporting) {
-      const built = await buildReview(t, { noCache: opts.noCache, label: n.base.replace(' ', ' · '), title: n.title }, say);
+      const built = await buildReview(t, { noCache: opts.noCache, label: n.base.replace(' ', ' · '), title: n.title, chains: opts.chains }, say);
       built.data = await withHistory(t, built.data, say);
       const file = path.resolve(opts.exportTo!);
       fs.writeFileSync(file, reviewPage(built.data, n.title, 'export')({ served: false, key: n.key, state: null, url: t.pr ? t.pr.url : null, where: n.where }));

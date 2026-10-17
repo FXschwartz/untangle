@@ -90,7 +90,7 @@
     // A change's lines from one commit, reviewed under that commit's lens: "<block>@<sha>".
     cmarks: new Set(),
     rev: {},
-    blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(),
+    blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(), noteOpen: new Set(),
     search: { q: '', scope: 'unreviewed' },
     // Files shown whole, lines shown around each section of a diff ({ above, below } by its key),
     // and folders closed in the Files tab.
@@ -179,11 +179,17 @@
     m.chains.forEach((c) => c.uses.forEach((o) => m.usedBy.get(o).push(c.id)));
     const fams = new Map();
     m.chains.forEach((c) => { if (!fams.has(c.family)) fams.set(c.family, []); fams.get(c.family).push(c); });
-    m.families = [...fams.entries()].map(([id, list]) => {
+    const family = (id, list) => {
       list.sort((x, y) => x.depth - y.depth || y.blocks.length - x.blocks.length || (x.name < y.name ? -1 : 1));
       const top = list.slice().sort((x, y) => y.blocks.length - x.blocks.length || x.id - y.id)[0];
       return { id, chains: list, top, depth: Math.max(...list.map((c) => c.depth)) };
-    }).sort((x, y) => y.chains.length - x.chains.length || x.id - y.id);
+    };
+    // By commit, a family is a commit's chain, in the order the commits were made; the renames
+    // come last.
+    m.byCommit = !!raw.families;
+    m.families = m.byCommit
+      ? raw.families.filter((f) => fams.has(f.id)).map((f) => ({ ...family(f.id, fams.get(f.id)), commit: f.same ? null : f, same: !!f.same }))
+      : [...fams.entries()].map(([id, list]) => family(id, list)).sort((x, y) => y.chains.length - x.chains.length || x.id - y.id);
     m.byMember = new Map();
     m.files.forEach((f) => f.blocks.forEach((b) => { if (b.edits.length && b.mk && !/::\(top\)$/.test(b.mk)) { if (!m.byMember.has(b.mk)) m.byMember.set(b.mk, []); m.byMember.get(b.mk).push(b); } }));
     m.standalone = [];
@@ -790,10 +796,11 @@
       && (!ctx.chain || ctx.chain.blockSet.has(b.id)) && (!ctx.unit || b.unit === ctx.unit));
     const allDone = blocks.length > 0 && blocks.every(done);
     const open = stats(blocks).open;
-    // Reviewed sections fold, and so do long ones in a chain, unless a conversation is open in them.
+    // Reviewed sections fold, and so do long ones in a chain (new code aside), unless a
+    // conversation is open in them.
     const folds = !!f.blocks;
     const threads = threadsIn(f, S.hi, S.s0, S.e0);
-    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && !ctx.unit && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key) && !threads.open));
+    const collapsed = folds && (state.collapsed.has(S.key) || ((allDone || (!!ctx.chain && !ctx.unit && !ctx.whole && S.e0 - S.s0 > BIG)) && !state.expanded.has(S.key) && !threads.open));
     return { S, blocks, open, allDone, folds, collapsed, threads };
   }
   const grown = (key) => state.more.get(key) || { above: 0, below: 0 };
@@ -1151,12 +1158,12 @@
       }
     });
     posOf.forEach(({ x, y, n }) => {
-      const cls = ['g-node', n.ok ? 'ok' : '', n.out ? 'out' : '', n.root ? 'root' : '', n.grp ? 'grp' : '', spec.focus ? (n.key === spec.focus ? 'focus' : near.has(n.key) ? '' : 'dim') : ''].filter(Boolean).join(' ');
+      const cls = ['g-node', n.ok ? 'ok' : '', n.out ? 'out' : '', n.root ? 'root' : '', n.grp ? 'grp' : '', n.ui ? 'ui' : '', n.ext ? 'ext' : '', spec.focus ? (n.key === spec.focus ? 'focus' : near.has(n.key) ? '' : 'dim') : ''].filter(Boolean).join(' ');
       svg += `<g class="${cls}" ${n.attr} tabindex="0" role="button" aria-label="${esc(n.l2 + ', ' + n.l1)}"><title>${esc(n.tip)}</title>
         <rect class="g-box" x="${x}" y="${y}" width="${W0}" height="${NH}" rx="8"/>
         <rect class="g-bar" x="${x}" y="${y}" width="6" height="${NH}" rx="3"/>
         <text class="g-l1" x="${x + 15}" y="${y + 20}">${esc(trunc(n.l1, Math.floor((W0 - 70) / 6.4)))}</text>
-        <text class="g-l2" x="${x + 15}" y="${y + 39}">${esc(trunc(n.l2, Math.floor((W0 - 24) / 7.7)))}</text>
+        <text class="g-l2" x="${x + 15}" y="${y + 39}">${esc(trunc(n.l2, Math.floor((W0 - 24) / (n.ui ? 6.6 : 7.7))))}</text>
         <text class="g-cnt" x="${x + W0 - 10}" y="${y + 20}" text-anchor="end">${esc(n.cnt)}</text>
       </g>`;
     });
@@ -1168,16 +1175,36 @@
   function graphSvg(c) {
     const m = M();
     const focusKey = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node].key : null;
+    // By commit: the declarations other chains change that this one uses, dashed, in a last column.
+    const last = Math.max(0, ...c.graph.nodes.map((n) => n.layer)) + 1;
+    const ext = (c.ext || []).map((x, i) => ({ key: 'ext:' + i, x }));
     return layeredSvg({
-      id: 'c' + c.id, label: `Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses.`, focus: focusKey,
-      edges: c.graph.edges,
+      id: 'c' + c.id, label: `Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses${ext.length ? ', dotted when another chain changes it' : ''}.`, focus: focusKey,
+      edges: c.graph.edges.concat(ext.flatMap(({ key, x }) => x.from.map((from) => ({ from, to: key, labels: [memberParts(x.name).name] })))),
       nodes: c.graph.nodes.map((n) => {
         const s = stats(n.blocks.map((id) => m.blockById.get(id)));
         const { l1, l2, owner } = nodeLabels(n);
         return { key: n.key, layer: n.layer, l1, l2, cnt: outOfLens(s) ? '' : s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open && !outOfLens(s), out: outOfLens(s), root: n.key === c.graph.root, grp: n.group !== null && n.group !== undefined,
           attr: `data-node="${n.idx}"`, tip: (owner ? owner + '.' : '') + l2 + ' · ' + n.file };
-      }),
+      }).concat(ext.map(({ key, x }) => ({ key, layer: last, l1: 'in ' + m.chains[x.chain].name, l2: memberParts(x.name).name, cnt: '↗', ext: true,
+        attr: extAttrs(x), tip: `${x.name} · changed in ${m.chains[x.chain].name}` }))),
     });
+  }
+  // Opens another chain at the change of a declaration this one uses.
+  const extAttrs = (x) => `data-act="ext" data-to="${x.chain}" data-block="${esc(x.block)}"`;
+  // A member's uses of declarations other chains change (without a member, the chain's), by the
+  // chain each is changed in.
+  function extNoteHtml(c, n) {
+    const m = M();
+    const byChain = new Map();
+    (c.ext || []).filter((x) => !n || x.from.includes(n.key)).forEach((x) => { if (!byChain.has(x.chain)) byChain.set(x.chain, []); byChain.get(x.chain).push(x); });
+    if (!byChain.size) return '';
+    const parts = [...byChain].map(([id, list]) => {
+      const names = list.slice(0, 3).map((x) => `<button type="button" class="linkish" ${extAttrs(x)} title="${esc(x.name)}"><code>${esc(memberParts(x.name).name)}</code></button>`);
+      const more = list.length > 3 ? ` and ${list.length - 3} more` : '';
+      return `${names.join(', ')}${more}, changed in <button type="button" class="linkish" data-chain="${id}">${esc(trunc(m.chains[id].name, 64))}</button>`;
+    });
+    return `<p class="sec-note">Uses ${parts.join('; ')}.</p>`;
   }
   function mapSvg(fam) {
     const ids = new Set(fam.chains.map((c) => c.id));
@@ -1260,7 +1287,7 @@
   // from". One at a time, under the button that opened it; items are the page's usual buttons
   // (data-act, data-chain, …).
   const MENU = { open: null, el: null, html: '' };
-  const chainItem = (c) => { const st = stats(blocksOf(c.blocks)); const n = splitName(c.name); return { label: n.name, own: n.own, mono: true, icon: ICON.chain, data: { chain: c.id }, key: st.open ? `${st.open} to review` : 'reviewed' }; };
+  const chainItem = (c) => { const st = stats(blocksOf(c.blocks)); const n = splitName(c.name); return { label: n.name, own: n.own, mono: !proseName(c), icon: ICON.chain, data: { chain: c.id }, key: st.open ? `${st.open} to review` : 'reviewed' }; };
   // What a view's ⋯ holds: how it shows the code, and where else to go from it.
   function viewMenuItems() {
     const v = state.view, m = M(), items = [];
@@ -2018,6 +2045,8 @@
   };
   // A chain's name with its owner apart: "BridgeMcpServer." and "logPath".
   const splitName = (name) => { const m = /^(_?[A-Z][\w$]*\.)(.+)$/.exec(name); return m ? { own: m[1], name: m[2] } : { own: '', name }; };
+  // A commit's chain, and the step that gathers a commit's other changes, are named in words.
+  const proseName = (c) => c.kind === 'commit';
   // What's left to review of a set of changes, in words.
   // Under a lens, a scope with nothing in it: no mark, no action, "nothing in the lens".
   const outOfLens = (st) => lensOn() && !st.total;
@@ -2073,6 +2102,7 @@
   // unlinked chains, then the changes outside chains.
   function chainOrder() {
     const m = M();
+    if (m.byCommit) return m.families.flatMap((f) => f.chains).map((c) => c.id);
     const linked = m.families.filter((f) => f.chains.length > 1).flatMap((f) => f.chains);
     const lone = m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
     return linked.concat(lone).map((c) => c.id);
@@ -2140,28 +2170,52 @@
     if (more > 0) h += `<button type="button" class="lnk" data-act="graph-show" title="Show all of them, in the graph">+${more} more</button>`;
     return `<div class="strip" role="group" aria-label="The chain’s members">${h}</div>`;
   }
+  // Why a commit's chain exists: its message, the commits that followed it up, the ones that
+  // changed its lines later, and the chains it builds on or changes.
+  function commitNoteHtml(fam) {
+    const f = fam.commit, m = M();
+    const open = state.noteOpen.has(f.id);
+    const paras = (f.body || '').split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+    const body = paras.length ? `<p class="cm-text">${messageHtml(open ? paras.join('\n\n') : paras[0])}</p>${paras.length > 1 ? `<button type="button" class="linkish" data-act="note-more" data-family="${f.id}">${open ? 'Show less' : 'Show the whole message'}</button>` : ''}` : '';
+    const commit = (x) => `${esc(subjectOf(x).text)} <code>${shortSha(x.sha)}</code>`;
+    const chainOf = (id) => {
+      const g = m.families.find((x) => x.id === id);
+      return g && g.commit ? `<button type="button" class="linkish" data-chain="${g.chains[0].id}">${esc(trunc(g.commit.subject, 64))}</button>` : '';
+    };
+    const follow = f.commits.filter((x) => x.role === 'follow-up');
+    const rel = [
+      follow.length ? `Followed up by ${follow.map(commit).join('; ')}.` : '',
+      f.revisedBy.length ? `Changed later by ${f.revisedBy.map((x) => `${commit(x)} (${plural(x.lines, 'line')})`).join('; ')}.` : '',
+      f.buildsOn != null && chainOf(f.buildsOn) ? `Builds on ${chainOf(f.buildsOn)}.` : '',
+      f.revises.map(chainOf).filter(Boolean).length ? `Changes the lines of ${f.revises.map(chainOf).filter(Boolean).join(', ')}.` : '',
+    ].filter(Boolean);
+    return `<div class="cm-note"><p class="cm-subj">${f.kind ? `<span class="tag">${esc(f.kind)}</span> ` : ''}${messageHtml(f.subject)} <code>${shortSha(f.sha)}</code></p>${body}${rel.map((x) => `<p class="cm-rel">${x}</p>`).join('')}</div>`;
+  }
   function renderChain(id) {
     const m = M();
     const c = m.chains[id];
     if (!c) return '<div class="empty">This chain doesn’t exist in this comparison.</div>';
     const all = blocksOf(c.blocks);
     const s = stats(all);
-    const kind = c.kind === 'declaration' ? 'new implementation' : c.kind === 'group' && !c.rootKind ? 'same change' : kindWord[c.rootKind] || 'chain';
+    const kind = c.kind === 'declaration' ? 'new implementation' : c.kind === 'group' && !c.rootKind ? (m.byCommit ? 'rename' : 'same change') : c.kind === 'commit' ? 'commit' : kindWord[c.rootKind] || 'chain';
+    // By commit: the commit this chain is.
+    const fam = m.byCommit ? m.families.find((f) => f.id === c.family) : null;
     const suite = c.kind !== 'declaration' || c.graph.nodes.every((node) => ['test', 'setup'].includes(m.unitById.get(node.unit)?.kind));
     const oneTestFile = suite && new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
     let h = headerHtml({
-      crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
+      crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b${proseName(c) ? ' class="ui"' : ''} title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
       nav: true,
       tools: oneTestFile ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
       action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
       // The members stay under the header, so going from one to another needs no scrolling back.
       pinned: oneTestFile ? '' : stripHtml(c),
+      below: fam && fam.commit ? commitNoteHtml(fam) : '',
     });
-    if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + testListHtml(c, all);
+    if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + extNoteHtml(c) + testListHtml(c, all);
     if (UI.graph) {
       h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
-        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span></div></div>`;
+        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span>${(c.ext || []).length ? '<span>A dotted box is changed in another chain: click it to go there.</span>' : ''}</div></div>`;
     }
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     if (focused) {
@@ -2179,12 +2233,13 @@
       const rel = (out.length === 1 ? [`uses ${nodeLabels(c.graph.nodes.find((x) => x.key === out[0].to)).l2}`] : out.length ? [`uses ${out.length}`] : []).concat(usedByN ? [`used by ${usedByN}`] : []).join(' · ');
       const full = usesFull.concat(usedByN ? [`used by ${usedByN} member${usedByN > 1 ? 's' : ''}`] : []).join('; ');
       h += `<section class="sec${lensOn() && !blocks.some((b) => b.edits.length && blockIn(b)) ? ' lens-out' : ''}" id="sec-${n.idx}"><div class="sec-h"><b>${esc(l2)}</b><span>${esc(owner ? owner + ' · ' + l1 : l1)}</span>${n.key === c.graph.root ? '<span class="tag">root</span>' : ''}${rel ? `<span title="${esc(full)}">${esc(rel)}</span>` : ''}<span class="sp"></span>`
-        + `<span class="hov"><span>${leftWords(ns)} · ${plusMinus(sumOf(blocks, 'adds'), sumOf(blocks, 'dels'))}</span>${outOfLens(ns) ? '' : `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(n.blocks.join(' '))}">${ns.open ? 'Mark reviewed' : 'Mark unreviewed'}</button>`}</span></div>`;
+        + `<span class="hov"><span>${leftWords(ns)} · ${plusMinus(sumOf(blocks, 'adds'), sumOf(blocks, 'dels'))}</span>${outOfLens(ns) ? '' : `<button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(n.blocks.join(' '))}">${ns.open ? 'Mark reviewed' : 'Mark unreviewed'}</button>`}</span></div>`
+        + extNoteHtml(c, n);
       if (n.group !== null && n.group !== undefined) {
         const g = m.groupById.get(n.group);
         h += `<p class="sec-note">The same change in ${blocks.length} places. Each place shows the whole edit.</p>` + instancesHtml(g, blocks, 'chain' + c.id + ':' + n.idx);
       } else {
-        h += subHunksHtml(blocks, { chain: c, unit: n.unit, key: 'c' + c.id + 'n' + n.idx });
+        h += subHunksHtml(blocks, { chain: c, unit: n.unit, whole: blocks.every((b) => b.unit), key: 'c' + c.id + 'n' + n.idx });
         // The member's other changes belong to other chains: folded context here.
         const rest = n.member ? [...new Set(blocks.map((b) => b.mk))].flatMap((k) => m.byMember.get(k) || []).filter((b) => !c.blockSet.has(b.id)) : [];
         if (rest.length) {
@@ -2200,6 +2255,7 @@
   }
   function renderMap(famId) {
     const m = M();
+    if (m.byCommit) return renderCommitMap();
     const fam = m.families.find((f) => f.id === famId) || m.families[0];
     const linked = m.families.filter((f) => f.chains.length > 1);
     const nx = nextUnreviewed();
@@ -2214,6 +2270,47 @@
     h += `<div class="graph-box"><div class="graph-scroll tall">${mapSvg(fam)}</div>
       <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Faint arrows skip levels.</span><span><i class="lg-share"></i>shares changes</span><span>Click a chain to open it.</span></div></div>`;
     return h;
+  }
+  // By commit: each commit's chain after the chains it builds on or whose lines it changes, an
+  // arrow from each of them. Renames are listed apart.
+  function commitMapSvg(fams) {
+    const chainOf = new Map(fams.map((f) => [f.id, f.chains[0]]));
+    const after = new Map(fams.map((f) => [f.id, [...new Set([f.commit.buildsOn, ...f.commit.revises])].filter((x) => x != null && chainOf.has(x))]));
+    const level = new Map();
+    fams.forEach((f) => level.set(f.id, Math.max(-1, ...after.get(f.id).map((x) => level.get(x))) + 1));
+    // Only direct links: one already implied by a longer path is left out.
+    const next = new Map(fams.map((f) => [f.id, []]));
+    fams.forEach((f) => after.get(f.id).forEach((x) => next.get(x).push(f.id)));
+    const implied = (x, to) => {
+      const seen = new Set(), stack = next.get(x).filter((y) => y !== to);
+      while (stack.length) { const y = stack.pop(); if (y === to) return true; if (!seen.has(y)) { seen.add(y); stack.push(...next.get(y)); } }
+      return false;
+    };
+    const edges = [];
+    fams.forEach((f) => after.get(f.id).forEach((x) => { if (!implied(x, f.id)) edges.push({ from: 'k' + chainOf.get(x).id, to: 'k' + chainOf.get(f.id).id, labels: [] }); }));
+    return layeredSvg({
+      id: 'commits', w: 280, cap: 9, faintLong: true, label: `Map of ${fams.length} commits’ chains; arrows point from a chain to the chains that build on it or change its lines.`,
+      edges,
+      nodes: fams.map((f) => {
+        const c = chainOf.get(f.id), s = stats(blocksOf(c.blocks));
+        return { key: 'k' + c.id, layer: level.get(f.id), l1: f.commit.kind || 'commit', l2: f.commit.subject, ui: true, cnt: outOfLens(s) ? '' : s.open ? s.open + '/' + s.total : '✓ ' + s.total, out: outOfLens(s), ok: !s.open,
+          attr: `data-chain="${c.id}"`, tip: f.commit.subject };
+      }),
+    });
+  }
+  function renderCommitMap() {
+    const m = M();
+    const fams = m.families.filter((f) => f.commit);
+    const nx = nextUnreviewed();
+    const h = headerHtml({
+      crumbs: '<b class="ui">Chain map</b>',
+      facts: fams.length ? plural(fams.length, 'commit') : 'No commit has a chain of its own',
+      action: nx ? '<button type="button" class="btn primary" data-act="next-open" title="The next chain with changes to review (n)">Next chain to review</button>' : '<span class="facts">All reviewed</span>',
+      below: '<p class="fv-note">Each commit’s changes are one chain, with the commits that followed it up. A chain comes after the chains it builds on or whose lines it changes; renames are listed apart.</p>',
+    });
+    if (!fams.length) return h + '<div class="empty">Every change here is a rename: they are listed apart, in the sidebar.</div>';
+    return h + `<div class="graph-box"><div class="graph-scroll tall">${commitMapSvg(fams)}</div>
+      <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Faint arrows skip levels.</span><span>Click a chain to open it.</span></div></div>`;
   }
   function renderStandalone() {
     const m = M();
@@ -2855,13 +2952,18 @@
         const st = stats(blocksOf(c.blocks));
         const on = v.kind === 'chain' && v.id === c.id;
         const n = splitName(c.name), d = Math.min(depth, 6);
-        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
+        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm${proseName(c) ? ' ui' : ''}">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
       };
-      const linked = m.families.filter((f) => f.chains.length > 1);
-      const lone = m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
-      h += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
+      const linked = m.byCommit ? m.families : m.families.filter((f) => f.chains.length > 1);
+      const lone = m.byCommit ? [] : m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
+      h += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${m.byCommit ? 'The commits’ chains, and which builds on which' : `${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels`}"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
       if (hxOn()) h += `<button type="button" class="sb-row map" data-act="history-open"${v.kind === 'history' ? ' aria-current="true"' : ''} title="The commits: each one, what it touched, its checks and reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt">${HISTORY.commits.length}</span></button>`;
-      linked.forEach((f) => { h += `<div class="sb-group"><span title="${esc(f.top.name)}">The ${esc(trunc(f.top.name, 34))} family</span></div>` + f.chains.map((c, k) => row(c, c.depth, k + 1 < f.chains.length ? f.chains[k + 1].depth : -1)).join(''); });
+      if (m.byCommit) {
+        // A commit's chain is one row, in the order the commits were made; renames come last.
+        h += m.families.filter((f) => !f.same).map((f) => row(f.chains[0], 0, 0)).join('');
+        m.families.filter((f) => f.same).forEach((f) => { h += '<div class="sb-group"><span title="A name swapped for another in several places, apart from the commits’ chains">Renamed in several places</span></div>' + f.chains.map((c) => row(c, 0, 0)).join(''); });
+      }
+      linked.forEach((f) => { if (m.byCommit) return; h += `<div class="sb-group"><span title="${esc(f.top.name)}">The ${esc(trunc(f.top.name, 34))} family</span></div>` + f.chains.map((c, k) => row(c, c.depth, k + 1 < f.chains.length ? f.chains[k + 1].depth : -1)).join(''); });
       if (lone.length) h += '<div class="sb-group"><span>Unlinked</span></div>' + lone.map((c) => row(c, 0, 0)).join('');
       const st = stats(m.standalone);
       if (st.total) h += `<div class="sb-group"><span>Outside chains</span></div><button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''} title="Changes that don’t use, and aren’t used by, anything changed elsewhere: ${leftWords(st)}">${markHtml(st)}<span class="nm ui">Not in a chain</span><span class="cnt">${st.open || ''}</span></button>`;
@@ -4205,6 +4307,13 @@
       UI.graph = false; saveUI(); render();
       return backTo(at);
     }
+    if (act === 'ext') {
+      const id = Number(d.to), to = M().chains[id];
+      if (!to) return;
+      const i = to.graph.nodes.findIndex((n) => n.blocks.includes(d.block));
+      state.view = { kind: 'chain', id }; state.peek = null; state.focus = null; state.tab = 'chains';
+      return render(i >= 0 ? { section: i } : { top: true });
+    }
     if (act === 'to-node') {
       const i = Number(d.i);
       if (state.focus && state.focus.chain === state.view.id) { state.focus = { chain: state.view.id, node: i }; return render({ section: i }); }
@@ -4280,6 +4389,7 @@
     if (act === 'mark-standalone') { toggleBlocks(m.standalone); hint({ mark: m.standalone.map((b) => b.id) }); return render(); }
     if (act === 'mark-edits') { const ids = d.edits.split(' ').map(Number); setEdits(ids, !ids.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'toggle-member') { state.memberOpen.has(d.key) ? state.memberOpen.delete(d.key) : state.memberOpen.add(d.key); return render(); }
+    if (act === 'note-more') { const id = Number(d.family); state.noteOpen.has(id) ? state.noteOpen.delete(id) : state.noteOpen.add(id); return render(); }
     if (act === 'next-open') { const nx = nextUnreviewed(); if (nx) { state.view = nx; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); } return; }
     if (act === 'mark-group') { const g = m.groupById.get(Number(d.groupId)); setEdits(g.edits, !g.edits.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'group-all') { state.groupAll.add(d.key); return render(); }
@@ -4353,7 +4463,7 @@
       if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
       return;
     }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext"]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   viewer.addEventListener('change', (e) => {
     if (e.target.name === 'rv-event') GH.event = e.target.value;

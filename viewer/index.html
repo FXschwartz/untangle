@@ -295,6 +295,15 @@ button.sb-group:hover { color: var(--text-2); }
 .fv-note { position: sticky; left: 0; max-width: min(760px, 100%); padding: 0 22px 12px; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
 .fv-note code { color: var(--text-2); }
 .fv-note.warm { color: var(--accent-ink); }
+.cm-note { position: sticky; left: 0; display: grid; gap: 6px; max-width: min(760px, 100%); padding: 0 22px 14px; font-size: 12.5px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.cm-note p { margin: 0; }
+.cm-subj { color: var(--text); font-weight: 600; }
+.cm-subj .tag { font-weight: 500; vertical-align: 1px; }
+.cm-text { white-space: pre-wrap; }
+.cm-rel { color: var(--text-3); }
+.cm-note code { font-size: 11.5px; color: var(--text-2); }
+.cm-note a { color: var(--gh); text-decoration: none; } .cm-note a:hover { text-decoration: underline; }
+.cm-note .linkish { justify-self: start; }
 /* A chain's members in a row, root first; Graph opens the drawing. */
 .strip { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 22px 14px; }
 .strip > .sp { flex: 1; }
@@ -336,6 +345,10 @@ button.sb-group:hover { color: var(--text-2); }
 .g-node:focus-visible { outline: none; }
 .g-l1 { fill: var(--text-3); font: 500 10.5px var(--ui); }
 .g-l2 { fill: var(--text); font: 600 12px var(--code); }
+.g-node.ui .g-l2 { font: 600 12px var(--ui); }
+.g-node.ext .g-box { stroke-dasharray: 1.5 3; stroke-linecap: round; stroke-width: 1.5; fill: transparent; }
+.g-node.ext .g-bar { fill: var(--text-4); }
+.g-node.ext .g-l2 { fill: var(--text-2); }
 .g-node.ok .g-l2 { fill: var(--text-3); }
 .g-cnt { fill: var(--text-3); font: 500 10.5px var(--ui); }
 .g-edge { fill: none; stroke: currentColor; stroke-width: 1.2; }
