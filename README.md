@@ -23,6 +23,14 @@ consumers of shared utilities. New tests keep each complete scenario together. E
 changes still follow their signature, rename and call-site chains. Counts and keyboard navigation
 use reading units; individual edit marks and saved reviews remain available underneath.
 
+Tests read as the sentences they assert: a test's group and test titles join into one ("Given …,
+when …, then …."). A chain shows each test file it changes as an outline of those sentences,
+nested as the calls nest: what changed reads bright, the groups that complete each sentence
+dimmed, a rewording with its changed words marked. A row opens its code in place; ↗ opens the
+file with the test's groups pinned above the code. The Tests view, under History, lists every
+sentence the pull request adds, rewords, regroups or removes, each with the commit that wrote it.
+The rules are in [Tests as sentences](docs/01-ux-proposal.md#tests-as-sentences).
+
 ```
 untangle [flags] [directory]
 untangle [flags] <pr-url>
@@ -84,6 +92,8 @@ The tests use Node's runner (`node:test`) and need Node 22.18 or later, which ru
    branch's commits are replayed first, so each changed line knows the commit that started it
    ([src/provenance.ts](src/provenance.ts)), and chains follow those commits
    ([analysis/commits.js](analysis/commits.js)).
+   [analysis/outline.js](analysis/outline.js) outlines each test file's group and test calls,
+   both sides matched, so tests read as sentences.
 4. **Serving.** The page shows progress while the review builds, then the review. The existing
    language server starts after the review is ready to serve live navigation requests.
 

@@ -339,6 +339,56 @@ commit is the one boundary its author declared; the review collapses its back-an
      families and the map's order. Blame ignores whitespace, so a commit that re-indents a
      line leaves it with the commit that wrote it.
 
+### Tests as sentences
+
+A test's group and test titles join into the sentence it asserts ("Given …, when …, then …."),
+and reviewing a test starts there: the code is there to confirm it.
+
+1. **The outline.** A test file's `test`, `testWidgets` and `group` calls on both sides, and any
+   call with a string first argument that holds them (Serverpod's `withServerpod`), nested as
+   they nest (`analysis/outline.js`). A test's sentence is the titles from its outermost group
+   down to it, joined as written. A wrapper whose title isn't a clause (`withServerpod('[Clocks]',
+   …)`) is a label: it heads its tests and stays out of their sentences.
+2. **Matching.** By position, as the analyzer has it: a call whose line stayed is the same call;
+   then a call with the same title that moved, under the same group when it can be; then a
+   rewritten call line, among its siblings in order (a new title on the same call); then a test
+   that reads the same sentence in new groups.
+3. **Compared as sentences.** A test is new, **reworded** (a title on its path changed: renaming
+   a Given rewords every test under it, touched or not), **regrouped** (the same words in new
+   groups, commas and spaces aside) or unchanged; a group is new or renamed. A removed call is
+   listed with the sentences it held.
+4. **Its own lines.** Each call carries the blocks in its range, in its own lines (without its
+   title and the calls under it: a group's setup) and in its title. Lines that only close
+   brackets don't count: the diff pairs closing braces as it likes, and an unchanged group would
+   own a stray `});` that a test's mark then covered.
+5. **In a chain.** A chain reads its test members as their files' outlines, after its code: what
+   it changed in what they assert, with every group that completes each sentence (dimmed when
+   unchanged, with the commit that wrote it when another chain did). A group the chain wrote or
+   renamed brings the tests under it, whichever commit wrote them.
+   - Unchanged siblings fold under "+N unchanged whens"; code edited under sentences that stay
+     (setup, bodies) follows the outline, and changes outside every call (imports, helpers)
+     come last, both open: they're the chain's code.
+   - A row opens its code in place: a test its whole body, a group its own lines with its calls
+     folded to their titles. ↗ opens the file at the call.
+   - A rewording marks the words that changed. A title with two clauses ("when …, then ….") is
+     one row.
+   - A same change keeps its places; a rename chain reads as before.
+6. **Marks.** A test's mark covers its body; a group's, its setup and everything under it. The
+   pill, j, k and Space go through the rows with lines left to review: a test's body, a group's
+   own lines and title.
+7. **The Tests view,** under History in the sidebar: every sentence the review's tests add,
+   reword, regroup or remove, file by file, each with the commit (or chain) that wrote it, which
+   opens that chain at the row. Filters keep one kind; Sentences shows each test as its whole
+   sentence, a renamed group's changed words on the first test it heads. Files that change no
+   sentence come last, in one row that opens.
+8. **Pinned groups.** Over a test file's code, in any view, and over an outline, the groups of
+   the line at the top of the view whose own lines have scrolled away stay pinned under the
+   header, with the test's title when the line is in its body.
+
+On offline_sync #168, 3,460 changed test lines fit in 137 rows: 70 new sentences, 6 reworded, 3
+regrouped and 1 removed, in 8 of its 43 test files. The other 35 change no sentence: 134 calls
+with edited setup or bodies. 16 of the new sentences had a Given or when their chain didn't show.
+
 ### Same change
 
 1. Change blocks are the runs of `-`/`+` lines in a hunk.
@@ -771,6 +821,17 @@ through the page.
     a test refactor wrote 100 of the 112 lines of another commit's chain by plain blame; with
     whitespace ignored, that chain's commit keeps 64 and the refactor 12. Blame now ignores
     whitespace, for the lens too.
+
+- **v21:** tests as sentences. A test's titles join into the sentence it asserts, but the diff
+  buries it in code and cuts it: a then added to an existing Given showed without that Given.
+  - Five places were drawn on offline_sync #168: outlines in the chain, bodies folded with the
+    groups pinned in the code, a Tests tab, a Tests view, and sentence headers on the hunks.
+  - Asked: the outline in the chain and the Tests view, with the pinned groups when a test opens
+    in its file, and the proposed answers (code under unchanged sentences after the outline,
+    unchanged siblings folded, changed words marked in place, a two-clause title as one row, a
+    group's mark covering everything under it). Done: [Tests as sentences](#tests-as-sentences).
+  - Found: the diff pairs closing braces freely, so an unchanged Given could own a stray `});`
+    and show a setup change; lines that only close brackets don't count as a call's own.
 
 ## References
 
