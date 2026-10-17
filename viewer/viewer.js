@@ -27,6 +27,7 @@
     goToFile: path1('M6 5.914l2.06-2.06v-.708L5.915 1l-.707.707.043.043.25.25 1 1h-3a2.5 2.5 0 0 0 0 5H4V7h-.5a1.5 1.5 0 1 1 0-3h3L5.207 5.293 5.914 6 6 5.914zM11 2H8.328l-1-1H12l.71.29 3 3L16 5v9l-1 1H6l-1-1V6.5l1 .847V14h9V6h-4V2zm1 0v3h3l-3-3z'),
     up: path1('M13.854 7l-5-5h-.707l-5 5 .707.707L8 3.561V14h1V3.56l4.146 4.147.708-.707z'),
     down: path1('M3.147 9l5 5h.707l5-5-.707-.707L9 12.439V2H8v10.44L3.854 8.292 3.147 9z'),
+    tests: svg('<path d="M6 1h4v1h-.5v4.17l3.83 6.7A1.5 1.5 0 0 1 12.03 15H3.97a1.5 1.5 0 0 1-1.3-2.13L6.5 6.17V2H6V1zm1.5 1v4.43l-.07.25L5.37 10.3h5.26L8.57 6.68 8.5 6.43V2h-1zM4.8 11.3l-1.25 2.19a.5.5 0 0 0 .43.51h8.05a.5.5 0 0 0 .43-.75L11.2 11.3H4.8z"/>'),
     map: svg('<path d="M2.5 5.77705V12.0978L5.5 10.2228V3.90205L2.5 5.77705ZM6.5 3.90205V10.2228L9.5 12.0978V5.77705L6.5 3.90205ZM6 11.0896L2.265 13.4239L1.5 12.9999V5.49993L1.735 5.07593L5.735 2.57593H6.265L10 4.9103L13.735 2.57593L14.5 2.99993V10.4999L14.265 10.9239L10.265 13.4239H9.735L6 11.0896ZM10.5 5.77705V12.0978L13.5 10.2228V3.90205L10.5 5.77705Z"/>'),
     mapFilled: svg('<path d="M2 5.5V13L5.5 10.8125V3.3125L2 5.5Z"/><path d="M9.5 12.6875V5.1875L6.5 3.3125V10.8125L9.5 12.6875Z"/><path d="M10.5 12.6875V5.1875L14 3V10.5L10.5 12.6875Z"/>'),
     split: svg('<path d="M14 1H3L2 2v11l1 1h11l1-1V2l-1-1zM8 13H3V2h5v11zm6 0H9V2h5v11z"/>'),
@@ -95,7 +96,7 @@
     blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(), noteOpen: new Set(),
     // Test outlines: rows opened on their code ("<file>#<call>"), and folds opened (unchanged calls
     // under a group, code under unchanged sentences, changes outside the tests).
-    olOpen: new Set(), olUnfold: new Set(),
+    olOpen: new Set(), olUnfold: new Set(), testsFilter: 'all',
     search: { q: '', scope: 'unreviewed' },
     // Files shown whole, lines shown around each section of a diff ({ above, below } by its key),
     // and folders closed in the Files tab.
@@ -1377,7 +1378,7 @@
       const g = !f && m.generated.find((x) => x.p === v.path);
       if (f) fileItems(f, false);
       else if (g) fileItems(g, true);
-    } else if (v.kind === 'standalone' || v.kind === 'group') showing(null);
+    } else if (v.kind === 'standalone' || v.kind === 'group' || v.kind === 'tests') showing(null);
     else if (v.kind === 'source') {
       const s = sources.get(srcKey(v)) || {};
       const ed = editorItem({ side: v.side, p: v.path, ext: v.ext, abs: s.abs, line: v.line || 1 });
@@ -2405,7 +2406,9 @@
       return `<span class="g${gs.s === 'new' ? ' gnew' : ''}">${olWords(g.t, was)}</span>`;
     }).join(' ');
     const was = n.ot != null && s.s === 'reworded' ? n.ot : null;
-    const writer = o.chips && (s.s === 'new' || s.s === 'reworded') ? olWriter(f, n) : null;
+    // Reworded through a renamed group: the chain that renamed it.
+    const by = s.s === 'reworded' && n.ot == null ? olPath(n).slice(0, -1).reverse().find((g) => g.st === 'renamed' && (g.head || []).length) || n : n;
+    const writer = o.chips && (s.s === 'new' || s.s === 'reworded') ? olWriter(f, by) : null;
     const marks = s.s ? s.all : [];
     const st = stats(marks), open = state.olOpen.has(key);
     const tick = marks.length && !outOfLens(st) ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark this test reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>';
@@ -2642,6 +2645,46 @@
     });
     const testFiles = focused ? tests.files.filter((f) => tests.secs.get(f).includes(focused.idx)) : tests.files;
     if (testFiles.length) h += `<div class="ol-sect">Tests${testFiles.length > 1 ? ` · ${testFiles.length} files` : ''}</div>` + testFiles.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('');
+    return h;
+  }
+  // ---------- the Tests view: every sentence the review's tests add, reword, regroup or remove, file
+  // by file, each with the chain that wrote it, then the code edited under sentences that stay.
+  function testsTotals() {
+    const m = M();
+    if (m.testsTotals) return m.testsTotals;
+    const t = { new: 0, reworded: 0, regrouped: 0, removed: 0, files: 0, outlined: 0 };
+    m.files.forEach((f) => {
+      if (!olOf(f)) return;
+      t.outlined++;
+      const c = olCounts(olScope(f, null));
+      ['new', 'reworded', 'regrouped', 'removed'].forEach((k) => { t[k] += c[k]; });
+      if (c.new + c.reworded + c.regrouped + c.removed) t.files++;
+    });
+    t.all = t.new + t.reworded + t.regrouped + t.removed;
+    return (m.testsTotals = t);
+  }
+  function renderTests() {
+    const m = M();
+    const scopes = m.files.filter((f) => olOf(f)).map((f) => olScope(f, null));
+    const said = scopes.filter((sc) => sc.any), code = scopes.filter((sc) => !sc.any && (sc.edited.length || sc.outside.length));
+    const t = testsTotals();
+    const filter = state.testsFilter, mode = UI.testsMode === 'sentences' ? 'sentences' : 'nested';
+    const b = (act, key, cur, label, title) => `<button type="button" data-act="${act}" data-v="${key}" aria-pressed="${cur === key}" title="${esc(title)}">${label}</button>`;
+    let h = headerHtml({
+      crumbs: '<b class="ui">Tests</b>',
+      facts: t.all ? `${olSaid(t)} · ${plural(t.files, 'file')}` : 'No sentence changes',
+      nav: true,
+      pinned: `<div class="ol-bar"><span class="mini-seg" role="group" aria-label="Which sentences">${b('tests-filter', 'all', filter, 'All', 'Every sentence the tests add, reword, regroup or remove')}${b('tests-filter', 'new', filter, 'New', 'The new sentences')}${b('tests-filter', 'reworded', filter, 'Reworded', 'The sentences whose words changed')}${b('tests-filter', 'regrouped', filter, 'Regrouped', 'The same sentences, in new groups')}${b('tests-filter', 'removed', filter, 'Removed', 'The sentences that are gone')}</span><span class="sp"></span><span class="mini-seg" role="group" aria-label="Read as">${b('tests-mode', 'nested', mode, 'Nested', 'Each title once, nested as the groups nest')}${b('tests-mode', 'sentences', mode, 'Sentences', 'Each test as its whole sentence')}</span></div>`,
+    });
+    if (!scopes.length) return h + '<div class="empty">No test file changed in this comparison.</div>';
+    const body = said.map((sc) => olFileHtml(sc, { chips: true, sentences: mode === 'sentences', filter })).join('');
+    h += body || `<div class="empty">No ${filter} sentences in this comparison.</div>`;
+    if (filter === 'all' && code.length) {
+      const open = state.olUnfold.has('tests:code');
+      const calls = code.reduce((x, sc) => x + sc.edited.length, 0);
+      h += `<div class="ol-sect">Code under sentences that stay</div><div class="ol-fold cf" data-act="ol-unfold" data-key="tests:code" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>${plural(code.length, 'file')} change no sentence${calls ? `: ${plural(calls, 'call')} with edited setup or bodies` : ''}</div>`;
+      if (open) h += code.map((sc) => olFileHtml(sc, {})).join('');
+    }
     return h;
   }
   // A chain of tests alone: its test files in a row, each with what it changes in what they assert.
@@ -3367,6 +3410,8 @@
       const lone = m.byCommit ? [] : m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
       h += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${m.byCommit ? 'The commits’ chains, and which builds on which' : `${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels`}"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
       if (hxOn()) h += `<button type="button" class="sb-row map" data-act="history-open"${v.kind === 'history' ? ' aria-current="true"' : ''} title="The commits: each one, what it touched, its checks and reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt">${HISTORY.commits.length}</span></button>`;
+      const tt = testsTotals();
+      if (tt.outlined) h += `<button type="button" class="sb-row map" data-act="tests-open"${v.kind === 'tests' ? ' aria-current="true"' : ''} title="The sentences the tests add, reword, regroup or remove, on one page"><span class="tw">${ICON.tests}</span><span class="nm ui">Tests</span><span class="cnt">${tt.all || ''}</span></button>`;
       if (m.byCommit) {
         // A commit's chain is one row, in the order the commits were made; renames come last.
         h += m.families.filter((f) => !f.same).map((f) => row(f.chains[0], 0, 0)).join('');
@@ -3815,7 +3860,7 @@
     renderReviewBar();
     const v = state.view;
     try {
-      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : v.kind === 'history' ? renderHistory() : renderFile(v.path);
+      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : v.kind === 'history' ? renderHistory() : v.kind === 'tests' ? renderTests() : renderFile(v.path);
     } catch (e) {
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
@@ -4086,7 +4131,7 @@
   }
   // The review pill: where you are among the view's changes to review, and the action that does
   // the most, marking the change and going to the next.
-  const PILL_VIEWS = new Set(['chain', 'file', 'standalone', 'group']);
+  const PILL_VIEWS = new Set(['chain', 'file', 'standalone', 'group', 'tests']);
   let pillHtml = '';
   const openIn = (el) => (el.matches('.hh') ? Number(el.dataset.open) || 1 : 1);
   function renderPill() {
@@ -4751,6 +4796,9 @@
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
     if (act === 'jump') return palOpen();
+    if (act === 'tests-open') { state.view = { kind: 'tests' }; state.peek = null; state.focus = null; return render({ top: true }); }
+    if (act === 'tests-filter') { state.testsFilter = d.v; return render({ top: true }); }
+    if (act === 'tests-mode') { UI.testsMode = d.v; saveUI(); return render(); }
     if (act === 'history-open') { state.view = { kind: 'history' }; state.peek = null; state.focus = null; loadCommits(); return render({ top: true }); }
     if (act === 'lens-all') return setLens(null);
     if (act === 'lens-review') { const rv = HX && HX.live && HX.live.review; if (rv) lensSince(rv.head, 'review', d.go === '1'); return; }
@@ -5249,6 +5297,7 @@
       else if (r.kind === 'conversation' && GH.on) state.view = { kind: 'conversation' };
       else if (r.kind === 'standalone') state.view = { kind: 'standalone' };
       else if (r.kind === 'history' && HX) state.view = { kind: 'history' };
+      else if (r.kind === 'tests') state.view = { kind: 'tests' };
       if (r.from && CONFIG.head && r.from !== CONFIG.head) glowFrom = r.from;
       if (r.lens && HX && r.lens.kind === 'commits') { const shas = (r.lens.shas || []).filter((x) => HX.index.has(x)); if (shas.length) state.lens = { kind: 'commits', shas }; }
       else if (r.lens && HX && r.lens.kind === 'since' && r.lens.from) resumeSince = r.lens;

@@ -61,7 +61,7 @@ const cartTest = (body: string) => `import 'package:sample/cart.dart';\n\nvoid m
 
 /** The outline's rows as read: indented as nested, its mark, its title ([-removed-] and {+added+} words) and its notes. */
 const rowsRead = `[...document.querySelectorAll('#vw-main .ol-row, #vw-main .ol-fold, #vw-main .ol-file')].map((el) => {
-  const words = (tt) => [...tt.childNodes].map((x) => (x.nodeName === 'DEL' ? '[-' + x.textContent + '-]' : x.nodeName === 'INS' ? '{+' + x.textContent + '+}' : x.textContent)).join('').trim();
+  const words = (tt) => [...tt.childNodes].map((x) => (x.nodeName === 'DEL' ? '[-' + x.textContent + '-]' : x.nodeName === 'INS' ? '{+' + x.textContent + '+}' : x.nodeType === 1 ? words(x) : x.textContent)).join('').trim();
   if (el.matches('.ol-file')) return el.querySelector('.nm').textContent + ' · ' + el.querySelector('.n').textContent;
   const d = Number(el.style.getPropertyValue('--d') || 0);
   if (el.matches('.ol-fold')) return '  '.repeat(d + 1) + el.textContent.trim();
@@ -257,6 +257,80 @@ describe('Given a served review by commit: a discount with its tests, more tests
         '    · when the total is taken,',
         '      ~ then it adds the prices. [reworded above]',
         `      · then it is positive. [${moreSha.slice(0, 7)}]`,
+      ].join('\n'));
+    });
+  });
+
+  describe('when the Tests view is opened from the sidebar, ', () => {
+    let page1 = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      page1 = await read(page!, `document.querySelector('[data-act="tests-open"]').textContent + '\\n' + document.querySelector('.fv-head .facts').textContent + '\\n' + ${rowsRead}`);
+    });
+
+    it('then it lists every sentence the tests add or reword, with the commit that wrote each one.', () => {
+      assert.equal(page1, [
+        'Tests4',
+        '3 new · 1 reworded · 1 file',
+        'cart_test.dart · 3 new · 1 reworded',
+        `  ~ Given a cart [-with-]{+holding+} two items, [${nameSha.slice(0, 7)}]`,
+        '    · when the total is taken,',
+        '      ~ then it adds the prices. [reworded above]',
+        `      + then it is positive. [${moreSha.slice(0, 7)}]`,
+        `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
+        `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+      ].join('\n'));
+    });
+  });
+
+  describe('when the Tests view reads each test as its whole sentence, ', () => {
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.click('[data-act="tests-mode"][data-v="sentences"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-row.sent')`);
+      rows = await read(page!, rowsRead);
+      await page!.click('[data-act="tests-mode"][data-v="nested"]');
+    });
+
+    it('then each test reads whole, and a renamed Given shows its changed words on the first test it heads.', () => {
+      assert.equal(rows, [
+        'cart_test.dart · 3 new · 1 reworded',
+        `  ~ Given a cart [-with-]{+holding+} two items, when the total is taken, then it adds the prices. [${nameSha.slice(0, 7)}]`,
+        `  + Given a cart holding two items, when the total is taken, then it is positive. [${moreSha.slice(0, 7)}]`,
+        `  + Given a cart with a discount of one, when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
+        `  + Given a cart with a discount of one, when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+      ].join('\n'));
+    });
+  });
+
+  describe('when the Tests view keeps only the reworded sentences, ', () => {
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.click('[data-act="tests-filter"][data-v="reworded"]');
+      await page!.until(`!document.querySelector('#vw-main .ol-row.new')`);
+      rows = await read(page!, rowsRead);
+      await page!.click('[data-act="tests-filter"][data-v="all"]');
+    });
+
+    it('then only the reworded test shows, with the groups that complete its sentence.', () => {
+      assert.equal(rows, [
+        'cart_test.dart · 3 new · 1 reworded',
+        `  ~ Given a cart [-with-]{+holding+} two items, [${nameSha.slice(0, 7)}]`,
+        '    · when the total is taken,',
+        '      ~ then it adds the prices. [reworded above]',
       ].join('\n'));
     });
   });
