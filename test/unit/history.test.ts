@@ -456,6 +456,44 @@ describe('Given two commits, one dropping a line and adding another, the next re
   );
 });
 
+describe('Given a commit that adds a function and a later one that only indents its body, ', () => {
+  let repo: TempRepo | undefined;
+  let base: string;
+  let head: string;
+  let files: ReviewFile[];
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('lib/a.dart', 'void keep() {}\n');
+    base = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.write('lib/a.dart', 'void keep() {}\nvoid add() {\nprint(1);\n}\n');
+    repo.commit({ subject: 'adds a function', author: ada, committer: ada });
+    repo.write('lib/a.dart', 'void keep() {}\nvoid add() {\n  print(1);\n}\n');
+    head = repo.commit({ subject: 'indents it', author: ada, committer: ada });
+    files = reviewFiles(repo.dir, base, head);
+  });
+
+  after(() => repo?.remove());
+
+  it(
+    'when the history of those hunks is read, '
+    + 'then the indented line stays with the commit that wrote it.',
+    async () => {
+      const history = await readHistory(repo!.dir, base, head, files, null);
+      assert.equal(
+        attributed(files, history),
+        [
+          'lib/a.dart',
+          ' void keep() {} [-]',
+          '+void add() { [adds a function]',
+          '+  print(1); [adds a function]',
+          '+} [adds a function]',
+        ].join('\n'),
+      );
+    },
+  );
+});
+
 describe('Given a review of two commits and the head of the first, ', () => {
   let repo: TempRepo | undefined;
   let base: string;

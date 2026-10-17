@@ -151,7 +151,10 @@ async function readFiles(repo: string, base: string, head: string, commits: Hist
   return paths;
 }
 
-/** Which commit wrote each added and removed line of the review's diff. */
+/**
+ * Which commit wrote each added and removed line of the review's diff. Whitespace doesn't count:
+ * a commit that only re-indents a line leaves it with the commit that wrote it.
+ */
 async function attribute(repo: string, base: string, head: string, commits: HistoryCommit[], files: ModelFile[]): Promise<Array<number[][] | null>> {
   const index = new Map(commits.map((c, i) => [c.sha, i]));
   // Who has a commit as a parent: the commit that removed a line is the child of the last one
@@ -179,7 +182,7 @@ async function attribute(repo: string, base: string, head: string, commits: Hist
     if (!f.hunks || !f.hunks.length) return;
     const adds = f.hunks.some((h) => h.rows.some((r) => r[0] === '+'));
     const dels = f.hunks.some((h) => h.rows.some((r) => r[0] === '-'));
-    const blame = (args: string[]) => gitAsync(repo, ['blame', '--porcelain', ...args, '--', f.p]).then(blameLines, () => new Map<number, string>());
+    const blame = (args: string[]) => gitAsync(repo, ['blame', '--porcelain', '-w', ...args, '--', f.p]).then(blameLines, () => new Map<number, string>());
     const [added, removed] = await Promise.all([
       adds && f.s !== 'D' ? blame([`${base}..${head}`]) : Promise.resolve(new Map<number, string>()),
       dels && f.s !== 'A' ? blame(['--reverse', `${base}..${head}`]) : Promise.resolve(new Map<number, string>()),

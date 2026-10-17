@@ -431,9 +431,9 @@ commit is the one boundary its author declared; the review collapses its back-an
   lens, named on the head commit in the top bar: lines outside it fade (nothing is hidden),
   counts and keys follow it, and under a commit's lens a mark covers that commit's lines, so a
   change is done when all its commits are. Blame over the pull request's commits attributes
-  each changed line, and git log lists each commit's files, once per review (0.2 s on #5864,
-  0.7 s on #5630); "since" a head is a diff from it. The lanes follow VS Code's Source Control
-  Graph (`scmHistory.ts`, MIT).
+  each changed line (whitespace ignored), and git log lists each commit's files, once per
+  review (0.2 s on #5864, 0.7 s on #5630); "since" a head is a diff from it. The lanes follow
+  VS Code's Source Control Graph (`scmHistory.ts`, MIT).
 - **Chain order:** chains keep the map's order, by level and larger first. Reviewed chains
   stay in place, muted. Keys `n` and `p` walk the same order.
 - **Test files in a chain:** a test file's tests are one node in the graph. A chain made only
