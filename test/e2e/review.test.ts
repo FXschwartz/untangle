@@ -155,11 +155,11 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     before(async () => {
       await rest(page!);
       await chain(page!, 'greet(name)');
-      shown = await read(page!, `[${pill}, document.querySelector('.pill-act')?.textContent ?? '', document.querySelector('.fv-head .strip') ? 'pinned' : 'loose', [...document.querySelectorAll('.fv-head .strip .nm')].map((el) => el.textContent).join(' | '), document.querySelector('.graph-box') ? 'graph' : 'no graph'].join('\\n')`);
+      shown = await read(page!, `[${pill}, document.querySelector('.pill-act')?.textContent ?? '', document.querySelector('.fv-head .strip') ? 'chips' : 'no chips', document.querySelector('.fv-head .fv-here')?.textContent ?? '', document.querySelector('.graph-box') ? 'graph' : 'no graph', document.querySelector('.fv-head [data-act="graph"]')?.getAttribute('aria-pressed') ?? ''].join('\\n')`);
     });
 
-    it('then the pill counts the two changes, with the members pinned under the header and the graph shown.', () => {
-      assert.equal(shown, '1 of 2\nMark and go to the nextSpace\npinned\ngreet | app.dart\ngraph');
+    it('then the pill counts the two changes, the header names the member being read instead of chips, and the graph is open in the page.', () => {
+      assert.equal(shown, '1 of 2\nMark and go to the nextSpace\nno chips\nReading greet · 1 of 2\ngraph\ntrue');
     });
   });
 
@@ -267,8 +267,10 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
         'Space: Mark the change reviewed and go to the next one',
         'Shift Space: Mark the hunk, or the member in a chain',
         'n p: Next and previous chain with changes to review',
+        'g: The chain’s graph, over the code, and back',
         'Ctrl K: Jump to a chain, file, symbol or thread',
         'c: Comment on the line you’re on',
+        'Alt ←: Back to where you were',
         'Ctrl B: Show or hide the sidebar',
         'Esc: Close the peek, the palette, a menu or a commit’s details; then show every change again (the lens off)',
         '?: These keys',
@@ -485,7 +487,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
-  describe('when a member of the greeting graph is clicked, ', () => {
+  describe('when a member of the greeting graph is shift-clicked, ', () => {
     let beforeScroll: string;
     let shown: string;
 
@@ -494,7 +496,7 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await chain(page!, 'greet(name)');
       beforeScroll = await read(page!, `String(document.querySelector('#vw-main').scrollTop)`);
       const labelsBefore = await read(page!, `document.querySelectorAll('.g-elabel').length`);
-      await page!.click('g.g-node[aria-label="app.dart, top level"]', { scroll: false });
+      await page!.click('.graph-box g.g-node[aria-label="app.dart, top level"]', { scroll: false, shift: true });
       await page!.until(`!!document.querySelector('.focus-bar')`);
       const afterScroll = await read(page!, `String(document.querySelector('#vw-main').scrollTop)`);
       const label = await read(page!, `[...document.querySelectorAll('.g-elabel')].map((el) => el.textContent).join(' | ')`);
@@ -507,26 +509,125 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
-  describe('when the graph icon is clicked, and the page is reloaded, ', () => {
-    let hidden: string;
+  describe('when a member of the greeting graph is clicked, ', () => {
+    let went = '';
 
     before(async () => {
       await rest(page!);
       await chain(page!, 'greet(name)');
-      await page!.click('[data-act="graph"]');
-      await page!.until(`!document.querySelector('.graph-box')`);
-      await page!.goto(url);
-      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
-      await chain(page!, 'greet(name)');
-      hidden = await read(page!, `[document.querySelector('.graph-box') ? 'graph' : 'no graph', document.querySelector('[data-act="graph"]')?.getAttribute('aria-pressed') ?? ''].join('\\n')`);
+      await page!.setViewport(1400, 420);
+      await page!.click('.graph-box g.g-node[aria-label="app.dart, top level"]', { scroll: false });
+      await page!.until(`!!document.querySelector('.sec.flash-sec') && (document.querySelector('.fv-here')?.textContent || '').includes('app.dart')`);
+      went = await read(page!, `(() => { const sec = document.querySelector('.sec.flash-sec'); const top = sec.getBoundingClientRect().top - document.querySelector('#vw-main').getBoundingClientRect().top - document.querySelector('.fv-head').offsetHeight; return sec.querySelector('.sec-h b').textContent + ' at ' + Math.round(top) + ' · ' + (document.querySelector('.focus-bar') ? 'filtered' : 'all members') + ' · ' + document.querySelector('.fv-here').textContent; })()`);
     });
 
     after(async () => {
-      await fresh();
+      await page!.setViewport(1400, 900);
     });
 
-    it('then the graph stays hidden.', () => {
-      assert.equal(hidden, 'no graph\nfalse');
+    it('then the page goes to that member\'s code, all members still shown, and the header names it.', () => {
+      assert.equal(went, 'app.dart at 8 · all members · Reading app.dart · 2 of 2');
+    });
+  });
+
+  describe('when the graph icon is clicked at the top of the chain, ', () => {
+    let folded = '';
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.setViewport(1400, 420);
+      await page!.click('.fv-head [data-act="graph"]', { scroll: false });
+      await page!.until(`document.querySelector('.fv-head [data-act="graph"]').getAttribute('aria-pressed') === 'false'`);
+      folded = await read(page!, `(() => { const box = document.querySelector('.graph-box').getBoundingClientRect(); const top = document.querySelector('#vw-main').getBoundingClientRect().top + document.querySelector('.fv-head').offsetHeight; return (Math.round(box.bottom - top) <= 0 ? 'under the header' : 'still showing') + ' · ' + (document.querySelector('.gd').hidden ? 'not dropped' : 'dropped'); })()`);
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the page scrolls the graph under the header, into its button.', () => {
+      assert.equal(folded, 'under the header · not dropped');
+    });
+  });
+
+  describe('when the graph icon is hovered past the graph, then left, ', () => {
+    let dropped = '';
+    let left = '';
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.setViewport(1400, 420);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); const sec = [...main.querySelectorAll('.sec')].find((el) => el.querySelector('.sec-h b')?.textContent === 'app.dart'); main.scrollTop += sec.getBoundingClientRect().top - main.getBoundingClientRect().top - main.querySelector('.fv-head').offsetHeight - 8; })()`);
+      await page!.until(`(document.querySelector('.fv-here')?.textContent || '').includes('app.dart')`);
+      await page!.hover('.fv-head [data-act="graph"]', { scroll: false });
+      await page!.until(`!document.querySelector('.gd').hidden`);
+      dropped = await read(page!, `[document.querySelector('.gd .g-node.here')?.getAttribute('aria-label') ?? 'no ring', document.querySelector('.gd-foot').textContent, document.querySelector('.fv-head [data-act="graph"]').getAttribute('aria-expanded')].join('\\n')`);
+      await page!.hover('.pill-n', { scroll: false });
+      await page!.until(`document.querySelector('.gd').hidden`);
+      left = await read(page!, `document.querySelector('.fv-head [data-act="graph"]').getAttribute('aria-expanded')`);
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the graph drops from the header, the member being read ringed and named, and goes back up once the pointer leaves.', () => {
+      assert.equal(`${dropped}\n${left}`, 'app.dart, top level\nCentered on app.dart, the member you’re readingClick a member to go to it · Esc or scrolling folds it\ntrue\nfalse');
+    });
+  });
+
+  describe('when the graph icon is clicked past the graph, the pointer leaves, and Escape is pressed, ', () => {
+    let kept = '';
+    let closed = '';
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.setViewport(1400, 420);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); main.scrollTop = main.scrollHeight; })()`);
+      await page!.until(`document.querySelector('.fv-head [data-act="graph"]').getAttribute('aria-pressed') === 'false'`);
+      await page!.click('.fv-head [data-act="graph"]', { scroll: false });
+      await page!.hover('.pill-n', { scroll: false });
+      await page!.eval(`new Promise((resolve) => setTimeout(resolve, 400))`);
+      kept = await read(page!, `document.querySelector('.gd').hidden ? 'folded' : 'kept'`);
+      await page!.key('Escape');
+      await page!.until(`document.querySelector('.gd').hidden`);
+      closed = await read(page!, `document.querySelector('.gd').hidden ? 'folded' : 'kept'`);
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the click keeps it down after the pointer leaves, and Escape folds it.', () => {
+      assert.equal(`${kept} ${closed}`, 'kept folded');
+    });
+  });
+
+  describe('when g is pressed past the graph and a member of the dropped graph is clicked, ', () => {
+    let went = '';
+
+    before(async () => {
+      await rest(page!);
+      await chain(page!, 'greet(name)');
+      await page!.setViewport(1400, 420);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); main.scrollTop = main.scrollHeight; })()`);
+      await page!.until(`document.querySelector('.fv-head [data-act="graph"]').getAttribute('aria-pressed') === 'false'`);
+      await page!.key('g');
+      await page!.until(`!document.querySelector('.gd').hidden`);
+      await page!.click('.gd g.g-node[aria-label^="greet,"]', { scroll: false });
+      await page!.until(`document.querySelector('.gd').hidden && !!document.querySelector('.sec.flash-sec') && (document.querySelector('.fv-here')?.textContent || '').includes('greet')`);
+      went = await read(page!, `document.querySelector('.sec.flash-sec .sec-h b').textContent + ' · ' + document.querySelector('.fv-here').textContent`);
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then g drops the graph, and the member\'s click folds it and goes to its code.', () => {
+      assert.equal(went, 'greet · Reading greet · 1 of 2');
     });
   });
 
@@ -778,6 +879,11 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
 
     it('then its popover names the running server, its pid, and the memory and CPU.', () => {
       assert.equal(popover, 'grid\nDart analysis server, running\npid\nmemory\ncpu\nserver memory\nserver cpu');
+    });
+
+    it('then the dot reads the memory and CPU that untangle and the server use together.', async () => {
+      const usage = await read(page!, `(() => { const use = document.querySelector('#lsp-use'); const sum = (k1, k2) => [k1, k2].map((k) => { const m = /^([\\d.]+) (KB|MB|GB)$/.exec(document.querySelector('[data-m="' + k + '"]').textContent); return m ? Number(m[1]) * { KB: 1 / 1024, MB: 1, GB: 1024 }[m[2]] : 0; }).reduce((x, y) => x + y, 0); const mem = /^(\\d+) MB · [\\d.]+%$/.exec(use.textContent); return (getComputedStyle(use).display !== 'none' ? 'shown' : 'hidden') + ' · ' + (mem ? (Math.abs(Number(mem[1]) - sum('rss', 'lspRss')) <= 1 ? 'the two memories' : 'other memory: ' + use.textContent) : /^[\\d.]+ GB · [\\d.]+%$/.test(use.textContent) ? 'the two memories' : use.textContent); })()`);
+      assert.equal(usage, 'shown · the two memories');
     });
   });
 

@@ -53,7 +53,7 @@ export interface Browser {
   /** Polls a JS expression until it is truthy. Throws the expression if it never is. */
   until(expression: string, ms?: number): Promise<unknown>;
   eval(expression: string): Promise<unknown>;
-  click(selector: string, opts?: { scroll?: boolean; ctrl?: boolean; meta?: boolean }): Promise<void>;
+  click(selector: string, opts?: { scroll?: boolean; ctrl?: boolean; meta?: boolean; shift?: boolean }): Promise<void>;
   /** Clicks the element whose own text is `name` and whose line contains `line`. */
   clickIn(selector: string, name: string, line: string): Promise<void>;
   shiftClick(selector: string): Promise<void>;
@@ -64,7 +64,7 @@ export interface Browser {
   dragOnto(from: string, onto: string): Promise<void>;
   /** Clicks at a fraction of the element's box, 0 to 1 from the top left. */
   clickRatio(selector: string, xRatio: number, yRatio: number): Promise<void>;
-  hover(selector: string): Promise<void>;
+  hover(selector: string, opts?: { scroll?: boolean }): Promise<void>;
   type(text: string): Promise<void>;
   key(key: string, opts?: { shift?: boolean; ctrl?: boolean }): Promise<void>;
   setViewport(width: number, height: number): Promise<void>;
@@ -327,9 +327,9 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       return poll(evaluate, expression, ms);
     },
     eval: evaluate,
-    async click(selector: string, opts: { scroll?: boolean; ctrl?: boolean; meta?: boolean } = {}) {
+    async click(selector: string, opts: { scroll?: boolean; ctrl?: boolean; meta?: boolean; shift?: boolean } = {}) {
       const box = await boxOf(selector, opts.scroll !== false);
-      await clickAt(box.left + box.width / 2, box.top + box.height / 2, (opts.ctrl ? 2 : 0) | (opts.meta ? 4 : 0), 1);
+      await clickAt(box.left + box.width / 2, box.top + box.height / 2, (opts.ctrl ? 2 : 0) | (opts.meta ? 4 : 0) | (opts.shift ? 8 : 0), 1);
     },
     async clickIn(selector: string, name: string, line: string) {
       const find = `[...document.querySelectorAll(${JSON.stringify(selector)})].find((node) => (node.textContent || '') === ${JSON.stringify(name)} && (node.closest('.ln, .sl, .pk-ln')?.textContent || '').includes(${JSON.stringify(line)}))`;
@@ -374,8 +374,8 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       const box = await boxOf(selector, true);
       await clickAt(box.left + box.width * xRatio, box.top + box.height * yRatio, 0, 1);
     },
-    async hover(selector: string) {
-      const box = await boxOf(selector, true);
+    async hover(selector: string, opts: { scroll?: boolean } = {}) {
+      const box = await boxOf(selector, opts.scroll !== false);
       await at(box.left + box.width / 2, box.top + box.height / 2, 'mouseMoved', 0, 0);
     },
     async type(text: string) {

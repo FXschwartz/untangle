@@ -130,8 +130,8 @@ void main() {
 
     before(async () => {
       await browser.click(`[data-chain="${invoice}"]`);
-      const node = await read(browser, `[...document.querySelectorAll('.strip [data-act="to-node"]')].find(el => el.querySelector('.nm').textContent === 'Invoice').dataset.i`);
-      await browser.click(`[data-act="to-node"][data-i="${node}"]`);
+      const node = await read(browser, `[...document.querySelectorAll('.graph-box g.g-node')].find(el => el.querySelector('.g-l2').textContent === 'Invoice').dataset.node`);
+      await browser.click(`.graph-box g.g-node[data-node="${node}"]`);
       await browser.click('.sec-h b');
       const saves = Number(await browser.eval(`performance.getEntriesByType('resource').filter(entry => entry.name.includes('api/state')).length`));
       await browser.key('j');

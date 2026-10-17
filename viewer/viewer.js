@@ -26,6 +26,10 @@
   const ICON = {
     goToFile: path1('M6 5.914l2.06-2.06v-.708L5.915 1l-.707.707.043.043.25.25 1 1h-3a2.5 2.5 0 0 0 0 5H4V7h-.5a1.5 1.5 0 1 1 0-3h3L5.207 5.293 5.914 6 6 5.914zM11 2H8.328l-1-1H12l.71.29 3 3L16 5v9l-1 1H6l-1-1V6.5l1 .847V14h9V6h-4V2zm1 0v3h3l-3-3z'),
     up: path1('M13.854 7l-5-5h-.707l-5 5 .707.707L8 3.561V14h1V3.56l4.146 4.147.708-.707z'),
+    back: path1('M7 3.093l-5 5V8.8l5 5 .707-.707-4.146-4.147H14v-1H3.56L7.708 3.8 7 3.093z'),
+    // Into the file: drawn with 1.5-pixel strokes, which stay whole at any zoom (Go to File's thin
+    // loop breaks up below 100%).
+    intoFile: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.75 2.25h4l3 3v7.25a1.25 1.25 0 0 1-1.25 1.25h-5.75"/><path d="M9.75 2.25v3h3"/><path d="M2 9.25h5.5"/><path d="M5.25 7l2.25 2.25-2.25 2.25"/></svg>',
     down: path1('M3.147 9l5 5h.707l5-5-.707-.707L9 12.439V2H8v10.44L3.854 8.292 3.147 9z'),
     tests: svg('<path d="M6 1h4v1h-.5v4.17l3.83 6.7A1.5 1.5 0 0 1 12.03 15H3.97a1.5 1.5 0 0 1-1.3-2.13L6.5 6.17V2H6V1zm1.5 1v4.43l-.07.25L5.37 10.3h5.26L8.57 6.68 8.5 6.43V2h-1zM4.8 11.3l-1.25 2.19a.5.5 0 0 0 .43.51h8.05a.5.5 0 0 0 .43-.75L11.2 11.3H4.8z"/>'),
     map: svg('<path d="M2.5 5.77705V12.0978L5.5 10.2228V3.90205L2.5 5.77705ZM6.5 3.90205V10.2228L9.5 12.0978V5.77705L6.5 3.90205ZM6 11.0896L2.265 13.4239L1.5 12.9999V5.49993L1.735 5.07593L5.735 2.57593H6.265L10 4.9103L13.735 2.57593L14.5 2.99993V10.4999L14.265 10.9239L10.265 13.4239H9.735L6 11.0896ZM10.5 5.77705V12.0978L13.5 10.2228V3.90205L10.5 5.77705Z"/>'),
@@ -142,7 +146,7 @@
   // This browser's layout: the sidebar's width and whether it shows, the minimap, and a commit's
   // files as a tree or a list.
   const UI_KEY = 'untangle:ui';
-  const UI = { side: 272, sideOff: false, minimap: true, graph: true, filesList: false };
+  const UI = { side: 272, sideOff: false, minimap: true, filesList: false };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
@@ -319,16 +323,23 @@
   }
   const clearCommitMarks = (b) => { if (HISTORY) blockCommits(b).forEach((ci) => state.cmarks.delete(cmKey(b, ci))); };
   // The row a change's mark sits on: its first row, or its first row in the lens.
-  function tickRow(b) {
-    const d = lensData();
-    if (!d || !blockIn(b)) return b.first;
-    if (!d.tick.has(b.id)) {
+  // The row a change's mark sits on: its first changed line that isn't blank (under a lens, in the
+  // lens; with its diff hidden, an added one), else its first changed line.
+  function tickRow(b, quiet) {
+    const d = lensData(), lens = !!d && blockIn(b);
+    const cache = lens ? d.tick : b.ticks || (b.ticks = new Map()), key = (lens ? b.id : '') + (quiet ? ':q' : '');
+    if (!cache.has(key)) {
       const h = b.file.hunks[b.hunk];
-      let at = b.first;
-      for (let ri = b.first; ri < b.first + b.len; ri++) if (h.rows[ri][0] !== ' ' && rowInLens(b.file, b.hunk, ri)) { at = ri; break; }
-      d.tick.set(b.id, at);
+      let at = -1;
+      for (let ri = b.first; ri < b.first + b.len; ri++) {
+        const [t, text] = h.rows[ri];
+        if (t === ' ' || (quiet && t === '-') || (lens && !rowInLens(b.file, b.hunk, ri))) continue;
+        if (at < 0) at = ri;
+        if (text.trim()) { at = ri; break; }
+      }
+      cache.set(key, at < 0 ? b.first : at);
     }
-    return d.tick.get(b.id);
+    return cache.get(key);
   }
   // A row drawn with the lens on and outside it.
   const lensOut = (f, hi, ri) => lensOn() && !rowInLens(f, hi, ri);
@@ -624,7 +635,7 @@
           out += threadsAt(f, 'LEFT', meta.o);
           continue;
         }
-        const first = !placed.has(b.id);
+        const want = tickRow(b, true), first = want >= start && want < end ? ri === want : !placed.has(b.id);
         placed.add(b.id);
         out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel, w: wroteRow(f, hi, ri) });
         continue;
@@ -684,16 +695,18 @@
           out += `<div class="sl gone"><span class="g">${tickHtml(b)}</span><span class="half l"><span class="tx">${b.dels} removed line${b.dels > 1 ? 's' : ''}, reviewed</span></span><span class="half r"><span class="bdgs">${diffToggle(b)}</span></span></div>`;
         }
         dels.forEach((i) => { out += threadsAt(f, 'LEFT', h.meta[i].o); });
+        const want = tickRow(b, true), kWant = Math.max(0, adds.indexOf(want));
         adds.forEach((i, k) => {
           const m2 = h.meta[i];
           const colors = rowColors(h.rows, f.p, i);
-          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true, w: wroteRow(f, hi, i) })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
+          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === kWant ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true, w: wroteRow(f, hi, i) })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
         });
       } else {
         const rows = Math.max(dels.length, adds.length);
         const outL = (i) => i != null && lensOut(f, hi, i);
+        const want = tickRow(b);
         let kTick = 0;
-        if (lensOn() && blockIn(b)) for (let k = 0; k < rows; k++) if ((dels[k] != null && !outL(dels[k])) || (adds[k] != null && !outL(adds[k]))) { kTick = k; break; }
+        for (let k = 0; k < rows; k++) if (dels[k] === want || adds[k] === want) { kTick = k; break; }
         for (let k = 0; k < rows; k++) {
           const li = dels[k], ai = adds[k];
           const lm = li != null ? h.meta[li] : null, am = ai != null ? h.meta[ai] : null;
@@ -1117,7 +1130,7 @@
     const near = new Set();
     if (spec.focus) { near.add(spec.focus); spec.edges.forEach((e) => { if (e.from === spec.focus) near.add(e.to); if (e.to === spec.focus) near.add(e.from); }); }
     let svg = `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(spec.label)}">
-      <defs><marker id="gar-${spec.id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>`;
+      <defs><marker id="gar-${spec.marker || spec.id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>`;
     let labels = '';
     const ports = new Map();
     const port = (key, side, otherY) => { const k = key + side; if (!ports.has(k)) ports.set(k, []); ports.get(k).push(otherY); };
@@ -1177,7 +1190,7 @@
       }
       const dim = spec.focus && !(e.from === spec.focus || e.to === spec.focus);
       const long = spec.faintLong && Math.abs(a.n.layer - b.n.layer) > 1;
-      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}${e.share ? ' share' : ''}" d="M${c[0]} ${c[1]} C ${c[2]} ${c[3]}, ${c[4]} ${c[5]}, ${c[6]} ${c[7]}"${e.share ? '' : ` marker-end="url(#gar-${spec.id})"`}/>`;
+      svg += `<path class="g-edge${dim ? ' dim' : ''}${long ? ' long' : ''}${e.share ? ' share' : ''}" d="M${c[0]} ${c[1]} C ${c[2]} ${c[3]}, ${c[4]} ${c[5]}, ${c[6]} ${c[7]}"${e.share ? '' : ` marker-end="url(#gar-${spec.marker || spec.id})"`}/>`;
       // What an arrow uses is named only on the arrows of the member clicked.
       if (e.labels && e.labels.length && spec.focus && !dim) {
         const text = trunc(e.labels[0], 18) + (e.labels.length > 1 ? ' +' + (e.labels.length - 1) : '');
@@ -1203,14 +1216,14 @@
     });
     return svg + labels + '</svg>';
   }
-  function graphSvg(c) {
+  function graphSvg(c, tag) {
     const m = M();
     const focusKey = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node].key : null;
     // By commit: the declarations other chains change that this one uses, dashed, in a last column.
     const last = Math.max(0, ...c.graph.nodes.map((n) => n.layer)) + 1;
     const ext = (c.ext || []).map((x, i) => ({ key: 'ext:' + i, x }));
     return layeredSvg({
-      id: 'c' + c.id, label: `Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses${ext.length ? ', dotted when another chain changes it' : ''}.`, focus: focusKey,
+      id: 'c' + c.id, marker: 'c' + c.id + (tag || ''), label: `Graph of the ${c.graph.nodes.length} changed members in this chain; arrows point from a change to what it uses${ext.length ? ', dotted when another chain changes it' : ''}.`, focus: focusKey,
       edges: c.graph.edges.concat(ext.flatMap(({ key, x }) => x.from.map((from) => ({ from, to: key, labels: [memberParts(x.name).name] })))),
       nodes: c.graph.nodes.map((n) => {
         const s = stats(n.blocks.map((id) => m.blockById.get(id)));
@@ -2101,6 +2114,81 @@
   // The keyboard's click (a mouse's already opened the composer on its way up).
   addBtn.addEventListener('click', (e) => { e.stopPropagation(); if (Date.now() - dragUp > 400 && addAt) openCompose(addAt, e.shiftKey); });
 
+  // ---------- going back: each view the page moves to is a step in the browser's history, so Back
+  // (the header's arrow, the browser's, Alt ←, a mouse's back button) brings back the view before,
+  // scrolled where it was, with its sidebar tab. Without the browser's history, the steps are the
+  // page's alone.
+  const NAV = { stack: [], at: -1, hist: true, dir: 0, saveT: 0 };
+  const BACK_KEY = /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘[' : 'Alt ←';
+  const navKey = (v) => [v.kind, v.id, v.path, v.family, v.side, v.ext, v.commit].join('|');
+  const navState = (e) => ({ untangle: 1, at: e.at, view: e.view, tab: e.tab, top: e.top, name: e.name });
+  // What a view is called, on the button that goes back to it.
+  function viewName(v) {
+    const m = M();
+    if (v.kind === 'chain') return m.chains[v.id] ? m.chains[v.id].name : 'the chain';
+    if (v.kind === 'file') return fileName(v.path);
+    if (v.kind === 'source') return v.ext != null ? v.label || 'the file' : fileName(v.path || '');
+    return { map: 'the chain map', standalone: 'Not in a chain', group: 'the same change', search: 'the search', conversation: 'the conversation', history: 'History', tests: 'Tests' }[v.kind] || 'the view before';
+  }
+  // As a render starts: a view that isn't the step's is a new step, and the step it leaves keeps
+  // where it was scrolled.
+  function navStep(keep) {
+    const key = navKey(state.view), cur = NAV.stack[NAV.at];
+    if (cur && cur.key === key) { cur.view = state.view; cur.tab = state.tab; return; }
+    if (cur) { cur.top = keep; navSave(cur); }
+    NAV.stack.length = NAV.at + 1;
+    const e = { key, at: NAV.at + 1, view: state.view, tab: state.tab, top: 0, name: viewName(state.view) };
+    try {
+      if (e.at === 0) {
+        // The page's first step: after a reload, the steps behind it are still the browser's.
+        const s0 = history.state;
+        if (s0 && s0.untangle && s0.at > 0) e.at = s0.at;
+        history.replaceState(navState(e), '');
+      } else if (NAV.hist) history.pushState(navState(e), '');
+    } catch (err) { NAV.hist = false; }
+    NAV.stack[e.at] = e;
+    NAV.at = e.at;
+  }
+  // A step's place, kept in the browser's history while it's the step there.
+  function navSave(e) {
+    try { if (NAV.hist && history.state && history.state.untangle && history.state.at === e.at) history.replaceState(navState(e), ''); } catch (err) { /* the browser limits how often */ }
+  }
+  // The view a step was, as this page has it now: a chain by its name, a file that's still here.
+  function navView(st) {
+    const v = st.view, m = M();
+    if (!v || !v.kind) return null;
+    if (v.kind === 'chain') { const c = m.chains[v.id] && m.chains[v.id].name === st.name ? m.chains[v.id] : m.chains.find((x) => x.name === st.name); return c ? { kind: 'chain', id: c.id } : null; }
+    if (v.kind === 'file') return m.files.some((f) => f.p === v.path) || m.generated.some((f) => f.p === v.path) ? v : null;
+    if (v.kind === 'group') return m.groupById.has(Number(v.id)) ? v : null;
+    if (v.kind === 'map') return v.family == null || m.families.some((f) => f.id === v.family) ? v : { kind: 'map', family: null };
+    if (v.kind === 'history') return HX ? v : null;
+    if (v.kind === 'conversation') return GH.on ? v : null;
+    return v;
+  }
+  function navGo(st) {
+    const v = navView(st);
+    NAV.dir = st.at < NAV.at ? -1 : 1;
+    const cur = NAV.stack[NAV.at];
+    if (cur) cur.top = main.scrollTop;
+    NAV.at = st.at;
+    if (v) { state.view = v; state.peek = null; state.focus = null; if (st.tab) state.tab = st.tab; }
+    NAV.stack[st.at] = { key: navKey(state.view), at: st.at, view: state.view, tab: state.tab, top: st.top || 0, name: st.name };
+    render(v ? { scroll: st.top || 0 } : {});
+    NAV.dir = 0;
+  }
+  function navBack() {
+    if (NAV.at <= 0) return;
+    if (NAV.hist) return history.back();
+    const prev = NAV.stack[NAV.at - 1];
+    if (prev) navGo(navState(prev));
+  }
+  window.addEventListener('popstate', (e) => { if (e.state && e.state.untangle && e.state.view) navGo(e.state); });
+  const navBackHtml = () => {
+    if (NAV.at <= 0) return '';
+    const to = NAV.stack[NAV.at - 1];
+    return `<button type="button" class="ib fv-back" data-act="back" title="${esc(`Back to ${to && to.name ? to.name : 'where you were'} (${BACK_KEY})`)}" aria-label="Back">${ICON.back}</button>`;
+  };
+
   // ---------- views
   const SEP = '<span class="sep" aria-hidden="true">/</span>';
   const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1);
@@ -2126,13 +2214,14 @@
   const leftWords = (s) => (!s.total ? (lensOn() ? 'nothing in the lens' : 'no changes') : !s.open ? (s.total === 1 ? 'its change reviewed' : `all ${s.total} changes reviewed`) : s.open === s.total ? `${s.total} change${s.total === 1 ? '' : 's'}` : `${s.open} of ${s.total} to review`);
   const plusMinus = (a, d) => `<span class="a">+${fmt(a)}</span> <span class="d">−${fmt(d)}</span>`;
   const sumOf = (blocks, k) => blocks.reduce((x, b) => x + b[k], 0);
-  // A view's header, in one row: where you are, what it holds, the previous and next change, the
-  // view's own toggles (`tools`), its menu (⋯) and its one action. `pinned`: what stays on screen
-  // under it (a chain's members); `below`: what follows it, scrolling away with the code.
+  // A view's header, in one row: where you are, what it holds, what it says about where you are in
+  // it (`lead`), the previous and next change, the view's own toggles (`tools`), its menu (⋯) and its
+  // one action. `pinned`: what stays on screen under it (a chain's commits); `below`: what follows
+  // it, scrolling away with the code.
   function headerHtml(o) {
     const nav = o.nav ? iconBtn(ICON.up, 'Previous change', 'data-act="nav" data-step="-1"') + iconBtn(ICON.down, 'Next change', 'data-act="nav" data-step="1"') : '';
     const menu = viewMenuItems().length ? `<button type="button" class="ib" data-act="menu" data-menu="view" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="${MENU.open === 'view'}">${ICON.more}</button>` : '';
-    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}${lensOfferHtml()}<span class="sp"></span>${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
+    return `<div class="fv-head"><div class="fv-row"><nav class="crumbs" aria-label="Where you are">${navBackHtml()}${o.crumbs}</nav>${o.facts ? `<span class="facts">${o.facts}</span>` : ''}${o.chip || ''}${lensOfferHtml()}<span class="sp"></span>${o.lead || ''}${nav || o.tools || menu ? `<span class="tools">${nav}${o.tools || ''}${menu}</span>` : ''}${o.action || ''}</div>${o.pinned || ''}</div>${o.below || ''}`;
   }
   function instancesHtml(g, blocks, key) {
     const list = blocks || g.edits.map((id) => M().blockById.get(M().edits[id].b)).filter((b, i, arr) => arr.indexOf(b) === i);
@@ -2246,6 +2335,30 @@
   const olKey = (f, n) => f.p + '#' + (n.removed ? 'r' + n.j : n.i);
   const olStatus = (s) => (s === 'new' ? 'new' : s === 'reworded' || s === 'renamed' ? 'rew' : s === 'regrouped' ? 'reg' : '');
   const OL_MARK = { new: '+', rew: '~', reg: '↳' };
+  // A test's expect calls, muted, shown with its lines while the row is hovered.
+  const olExpects = (n) => (n.k === 't' && n.x != null ? `<span class="ol-xp" title="${n.x ? `${plural(n.x, 'expect call')} in this test` : 'No expect call in this test'}">${n.x ? plural(n.x, 'expect') : 'no expect'}</span>` : '');
+  // A Given or a when without setUp or setUpAll: a red dot after its title.
+  const olNoSetup = (n) => {
+    const w = n.k !== 't' && !n.l && !n.su && /^\s*(given|when)\b/i.exec(n.t);
+    return w ? `<i class="ol-nosu" title="No setUp or setUpAll in this ${/^g/i.test(w[1]) ? 'Given' : 'when'}"></i>` : '';
+  };
+  // The diff's lines in a call's whole range, on both sides (in a chain, the chain's), shown while
+  // the row is hovered.
+  function olDiff(sc, n) {
+    const f = sc.f;
+    let a = 0, d = 0;
+    const count = (meta, from, to) => {
+      for (let i = from; i < to; i++) {
+        const r = meta[i];
+        if (r.t === '+' && n.s != null && r.n >= n.s && r.n <= n.e) a++;
+        else if (r.t === '-' && n.os != null && r.o >= n.os && r.o <= n.oe) d++;
+      }
+    };
+    if (sc.chain) f.blocks.forEach((b) => { if (sc.chain.blockSet.has(b.id)) count(hunkMeta(f.hunks[b.hunk]), b.first, b.first + b.len); });
+    else f.hunks.forEach((h) => { const meta = hunkMeta(h); count(meta, 0, meta.length); });
+    if (!a && !d) return '';
+    return `<span class="ol-df" title="The lines ${n.removed ? 'it removed' : `this ${n.k === 't' ? 'test' : 'group'} changed`}">${[a ? `<span class="a">+${fmt(a)}</span>` : '', d ? `<span class="d">−${fmt(d)}</span>` : ''].filter(Boolean).join(' ')}</span>`;
+  }
   // What a scope changed in a file's outline: each call's status there and its blocks, the calls to
   // show (what it changed, and the groups above), the calls it removed, the calls whose code it
   // edited under a sentence that stayed, and its blocks outside every call.
@@ -2328,28 +2441,53 @@
     }
     return st.at + line - (old ? st.o : st.n);
   }
-  // A call's own code: its rows (both sides), with the calls under it folded to their titles.
+  // The removed rows of a file, as [old line, place in its stream].
+  function olGone(f) {
+    if (f.olGone) return f.olGone;
+    const out = [];
+    streamOf(f).segs.forEach((g) => { if (!g.gap) hunkMeta(f.hunks[g.hi]).forEach((r, ri) => { if (r.t === '-') out.push([r.o, g.at + ri]); }); });
+    return (f.olGone = out);
+  }
+  // Whether a row of a file's stream is blank, when that's known: a hunk's rows always, the lines
+  // between hunks once the file has loaded.
+  function olBlank(f, at) {
+    const st = streamOf(f), g = segAt(st, at);
+    if (g && !g.gap) return !f.hunks[g.hi].rows[at - g.at][1].trim();
+    const s = sources.get(srcKey({ side: 'head', path: f.p }));
+    const line = s && s.status === 'ok' ? s.lines[(g ? g.n + at - g.at : st.n + at - st.at) - 1] : null;
+    return line != null && !line.trim();
+  }
+  // A call's own code: its lines and the lines it removed, without the calls under it, which fold
+  // to their titles. Blank lines are never shown on their own.
   function olCodeHtml(sc, n) {
     const f = sc.f;
     const ctx = { key: 'ol|' + olKey(f, n), chain: sc.chain || undefined };
-    const span = (s, e, os, oe) => {
-      const a = [s != null ? olPos(f, s, false) : null, os != null ? olPos(f, os, true) : null].filter((x) => x != null);
-      const b = [e != null ? olPos(f, e, false) : null, oe != null ? olPos(f, oe, true) : null].filter((x) => x != null);
-      return a.length ? [Math.min(...a), Math.max(...b) + 1] : null;
-    };
     let h = '';
-    if (n.removed || n.k === 't') {
-      const r = n.removed ? span(null, null, n.os, n.oe) : span(n.s, n.e, n.os, n.oe);
-      if (r) h = streamRowsHtml(f, r[0], r[1], ctx);
+    if (n.removed) {
+      const a = olPos(f, n.os, true), b = olPos(f, n.oe, true);
+      h = streamRowsHtml(f, a, b + 1, ctx);
     } else {
-      let from = n.s;
-      const kids = n.kids.slice().sort((x, y) => x.s - y.s);
-      for (const kid of kids) {
-        if (kid.s > from) { const r = span(from, kid.s - 1); if (r) h += streamRowsHtml(f, r[0], r[1], ctx); }
-        h += `<div class="ln ol-ph"><span class="g"></span><span class="no">${kid.s}</span><span class="sg"></span><span class="tx"><span class="ol-ph-t">${kid.l ? esc(kid.t) : olWords(kid.t)}</span><span class="ol-ph-n">${linesWord(kid.e - kid.s + 1)}</span></span></div>`;
-        from = kid.e + 1;
-      }
-      if (from <= n.e) { const r = span(from, n.e); if (r) h += streamRowsHtml(f, r[0], r[1], ctx); }
+      const kids = n.k === 't' ? [] : n.kids;
+      const under = (line, ranges) => ranges.some(([a, b]) => line >= a && line <= b);
+      const ranges = kids.map((k) => [k.s, k.e]);
+      // Each place in the stream: a row of its own (null), or a call under it, folded.
+      const at = new Map();
+      for (let line = n.s; line <= n.e; line++) if (!under(line, ranges)) at.set(olPos(f, line, false), null);
+      if (n.os != null) olGone(f).forEach(([o, pos]) => { if (o >= n.os && o <= n.oe && !under(o, n.ok || [])) at.set(pos, null); });
+      kids.forEach((k) => at.set(olPos(f, k.s, false), k));
+      let run = [];
+      const flush = () => { if (run.length && !run.every((pos) => olBlank(f, pos))) h += streamRowsHtml(f, run[0], run[run.length - 1] + 1, ctx); run = []; };
+      [...at.keys()].sort((x, y) => x - y).forEach((pos) => {
+        const kid = at.get(pos);
+        if (kid) {
+          flush();
+          h += `<div class="ln ol-ph"><span class="g"></span><span class="no">${kid.s}</span><span class="sg"></span><span class="tx"><span class="ol-ph-t">${kid.l ? esc(kid.t) : olWords(kid.t)}</span><span class="ol-ph-n">${linesWord(kid.e - kid.s + 1)}</span></span></div>`;
+          return;
+        }
+        if (run.length && pos !== run[run.length - 1] + 1) flush();
+        run.push(pos);
+      });
+      flush();
     }
     return `<div class="code ol-code" data-p="${esc(f.p)}" style="--d:${n.removed ? (n.parent ? n.parent.depth + 1 : 0) : n.depth}">${h}</div>`;
   }
@@ -2365,7 +2503,8 @@
     if (s.s === 'regrouped') tags.push(olTag('regrouped', `The same sentence, in a new group. It read: ${n.was || ''}`));
     if (s.s === 'reworded') tags.push(olTag(was ? 'reworded' : 'reworded above', `It read: ${n.was || ''}`));
     if (!test && s.setup && s.s !== 'new') tags.push(olTag(`setup ${olPm(s.adds, s.dels)}`, 'Its own lines changed: its setup, without its title and the calls under it'));
-    if (test && s.s === 'edited') tags.push(olTag(`body ${olPm(s.adds, s.dels)}`, 'Its body changed; its sentence didn’t'));
+    const body = test && s.s === 'edited';
+    if (body) tags.push(olTag(`body ${olPm(s.adds, s.dels)}`, 'Its body changed; its sentence didn’t'));
     const shown = s.s === 'new' || s.s === 'renamed' || (s.s === 'reworded' && was);
     const writer = (o.chips && shown) || (sc.chain && !shown) ? olWriter(f, n) : null;
     const chip = writer && (!sc.chain || writer.id !== sc.chain.id) ? olChip(writer, key) : '';
@@ -2376,8 +2515,8 @@
     const nav = s.own.length ? ` data-mark="${esc(s.own.map((b) => b.id).join(' '))}" data-block="${esc(s.own[0].id)}"${todo ? ' data-nav="1"' : ''}` : '';
     return `<div class="ol-row ${cls}${n.l ? ' lbl' : ''}${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:${n.depth}" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span>`
-      + `<span class="ol-tt">${n.l ? esc(n.t) : olWords(n.t, was)}</span>`
-      + `<span class="ol-meta">${tags.join('')}${chip}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.goToFile}</button>${tick}</span></div>`
+      + `<span class="ol-tt">${n.l ? esc(n.t) : olWords(n.t, was)}${olNoSetup(n)}</span>`
+      + `<span class="ol-meta">${tags.join('')}${olExpects(n)}${body ? '' : olDiff(sc, n)}${chip}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${tick}</span></div>`
       + (open ? olCodeHtml(sc, n) : '');
   }
   function olRemovedHtml(sc, r) {
@@ -2388,7 +2527,7 @@
     const prefix = r.parent ? olPath(r.parent).filter((x) => !x.l).map((x) => x.t.trim()).join(' ').length + 1 : 0;
     let h = `<div class="ol-row del${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${marks.length ? ` data-mark="${esc(marks.map((b) => b.id).join(' '))}" data-block="${esc(marks[0].id)}"${st.open ? ' data-nav="1"' : ''}` : ''} style="--d:${d}" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">−</span><span class="ol-tt">${r.l ? esc(r.t) : olWords(r.t)}</span>`
-      + `<span class="ol-meta">${olTag('removed')}<span class="ol-go-sp"></span>${marks.length ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark the removal reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>'}</span></div>`;
+      + `<span class="ol-meta">${olTag('removed')}${olDiff(sc, r)}<span class="ol-go-sp"></span>${marks.length ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark the removal reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>'}</span></div>`;
     for (const leaf of r.leaves) {
       const rest = leaf.slice(prefix + r.t.trim().length).trim();
       if (rest) h += `<div class="ol-row del sub" style="--d:${d + 1}"><span class="ol-mk"></span><span class="ol-tt">${olWords(rest)}</span><span class="ol-meta"></span></div>`;
@@ -2403,7 +2542,7 @@
     const groups = olPath(n).slice(0, -1).filter((g) => !g.l).map((g) => {
       const gs = sc.st.get(g) || {};
       const was = g.ot != null && gs.s === 'renamed' && !(prev && prev.includes(g)) ? g.ot : null;
-      return `<span class="g${gs.s === 'new' ? ' gnew' : ''}">${olWords(g.t, was)}</span>`;
+      return `<span class="g${gs.s === 'new' ? ' gnew' : ''}">${olWords(g.t, was)}${olNoSetup(g)}</span>`;
     }).join(' ');
     const was = n.ot != null && s.s === 'reworded' ? n.ot : null;
     // Reworded through a renamed group: the chain that renamed it.
@@ -2415,7 +2554,7 @@
     const nav = s.own.length ? ` data-mark="${esc(s.own.map((b) => b.id).join(' '))}" data-block="${esc(s.own[0].id)}"${stats(s.own).open ? ' data-nav="1"' : ''}` : '';
     return `<div class="ol-row sent ${cls}${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:0" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span><span class="ol-tt">${groups} <span class="own">${olWords(n.t, was)}</span></span>`
-      + `<span class="ol-meta">${s.s === 'regrouped' ? olTag('regrouped', `It read: ${n.was || ''}`) : ''}${writer ? olChip(writer, key) : ''}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.goToFile}</button>${tick}</span></div>`
+      + `<span class="ol-meta">${s.s === 'regrouped' ? olTag('regrouped', `It read: ${n.was || ''}`) : ''}${olExpects(n)}${olDiff(sc, n)}${writer ? olChip(writer, key) : ''}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${tick}</span></div>`
       + (open ? olCodeHtml(sc, n) : '');
   }
   // Which tests a filter keeps.
@@ -2428,7 +2567,7 @@
     if (filter !== 'all' && !(filter === 'removed' ? sc.rm.length : [...sc.show].some((n) => olKeeps(sc, n, filter)))) return '';
     const secs = o.secs && o.secs.length ? ` id="sec-${o.secs[0]}" data-secs="${o.secs.join(' ')}"` : '';
     const dir = f.p.slice(0, f.p.length - fileName(f.p).length);
-    let h = `<section class="sec ol-sec"${secs}>`;
+    let h = `<section class="sec ol-sec"${secs} data-olf="${esc(f.p)}">`;
     if (!sc.any && !sc.chain) {
       // Nothing it asserts changed: one row, which opens on the calls whose code changed.
       const key = f.p + '#edited', open = state.olUnfold.has(key);
@@ -2509,29 +2648,6 @@
     });
     return { files: [...secs.keys()].sort((x, y) => x.idx - y.idx), secs, nodes };
   }
-  // A chain's members in a row, by level: the root, then what uses it, and so on, each with what's
-  // left to review in it. The graph above the code draws them.
-  function stripHtml(c) {
-    const byLayer = new Map();
-    c.graph.nodes.forEach((n) => { if (!byLayer.has(n.layer)) byLayer.set(n.layer, []); byLayer.get(n.layer).push(n); });
-    const CAP = 14;
-    let shown = 0, h = '';
-    [...byLayer.keys()].sort((x, y) => x - y).forEach((L, i) => {
-      if (shown >= CAP) return;
-      if (i) h += '<span class="arr" title="used by">←</span>';
-      byLayer.get(L).forEach((n) => {
-        if (shown >= CAP) return;
-        shown++;
-        const st = stats(blocksOf(n.blocks));
-        const { l1, l2, owner } = nodeLabels(n);
-        const on = state.focus && state.focus.chain === c.id && state.focus.node === n.idx;
-        h += `<button type="button" class="node${n.key === c.graph.root ? ' root' : ''}${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}${n.member ? '' : ' ui'}" data-act="to-node" data-i="${n.idx}"${on ? ' aria-current="true"' : ''} title="${esc((owner ? owner + '.' : '') + l2 + ' · ' + l1 + ' · ' + leftWords(st))}">${markHtml(st)}<span class="nm">${esc(l2)}</span>${st.open ? `<span class="c">${st.open}</span>` : ''}</button>`;
-      });
-    });
-    const more = c.graph.nodes.length - shown;
-    if (more > 0) h += `<button type="button" class="lnk" data-act="graph-show" title="Show all of them, in the graph">+${more} more</button>`;
-    return `<div class="strip" role="group" aria-label="The chain’s members">${h}</div>`;
-  }
   // Why a commit's chain exists: its message. The commits that wrote the chain are in its bar.
   function commitNoteHtml(fam) {
     const f = fam.commit;
@@ -2581,6 +2697,7 @@
       + (sha ? `<button type="button" class="lnk" data-act="card" data-sha="${sha}" aria-expanded="${state.card === sha}" title="${state.card === sha ? 'Hide' : 'Show'} the commit’s details, as History shows them">Commit details</button>` : '')
       + '</div>';
   }
+  const graphLegendHtml = (c) => `<div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to go to its code; Shift-click to show only its code, and what its arrows use.</span>${(c.ext || []).length ? '<span>A dotted box is changed in another chain: click it to see its change.</span>' : ''}</div>`;
   function renderChain(id) {
     const m = M();
     const c = m.chains[id];
@@ -2597,18 +2714,17 @@
       crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b${proseName(c) ? ' class="ui"' : ''} title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
       nav: true,
-      tools: testOnly ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
+      // The member being read, and the chain's graph: open in the page at the top, and dropped
+      // from here anywhere else.
+      lead: '<span class="fv-here"></span>',
+      tools: iconBtn(ICON.graph, 'The chain’s graph: hover for a look, click to keep it open (g)', 'data-act="graph" aria-haspopup="dialog" aria-expanded="false"', { label: 'Graph', on: true }),
       action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
-      // The members stay under the header, so going from one to another needs no scrolling back;
-      // by commit, so do the commits that wrote them.
-      pinned: (testOnly ? testStripHtml(c, tests) : stripHtml(c)) + (m.byCommit ? writersHtml(c, fam) : ''),
+      // By commit, the commits that wrote the chain stay under the header.
+      pinned: m.byCommit ? writersHtml(c, fam) : '',
       below: fam && fam.commit ? commitNoteHtml(fam) + (state.card === fam.commit.sha && hxOn() && HX.index.has(state.card) ? detailHtml(HX.index.get(state.card), '') : '') : '',
     });
-    if (testOnly) return h + extNoteHtml(c) + tests.files.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('');
-    if (UI.graph) {
-      h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
-        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span>${(c.ext || []).length ? '<span>A dotted box is changed in another chain: click it to see its change.</span>' : ''}</div></div>`;
-    }
+    h += `<div class="graph-box chain-graph"><div class="graph-scroll">${graphSvg(c)}</div>${graphLegendHtml(c)}</div>`;
+    if (testOnly) return h + extNoteHtml(c) + tests.files.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('') + '<div class="chain-end" aria-hidden="true"></div>';
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     if (focused) {
       const { l2 } = nodeLabels(focused);
@@ -2645,7 +2761,7 @@
     });
     const testFiles = focused ? tests.files.filter((f) => tests.secs.get(f).includes(focused.idx)) : tests.files;
     if (testFiles.length) h += `<div class="ol-sect">Tests${testFiles.length > 1 ? ` · ${testFiles.length} files` : ''}</div>` + testFiles.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('');
-    return h;
+    return h + '<div class="chain-end" aria-hidden="true"></div>';
   }
   // ---------- pinned groups: over a test file's code or outline, the groups of the line at the top
   // of the view whose own lines have scrolled away above it, so a test read in the middle of its
@@ -2693,6 +2809,215 @@
     pin.classList.toggle('on', !!h);
   }
 
+  // ---------- the chain's graph, from the header. At the top of a chain it's open under the header,
+  // in the page, and as the code scrolls it under the header it shrinks into the header's graph
+  // button. Anywhere else in the chain, or in a file whose changes are in chains, hovering the button
+  // drops the graph over the code (a look) and clicking keeps it there, centered on the member being
+  // read. It drops and folds back with one motion, played forward and back.
+  const GD = { enterT: 0, leaveT: 0, folded: null, view: null, anim: null, order: [] };
+  const GD_FRAMES = [
+    { opacity: 0, transform: 'translateY(-8px)', clipPath: 'inset(0 0 100% 0 round 0 0 12px 12px)' },
+    { opacity: 1, transform: 'none', clipPath: 'inset(0 0 0 0 round 0 0 12px 12px)' },
+  ];
+  const GD_MS = 220;
+  // A test's outline row stands for the member whose blocks hold its own lines.
+  const rowNode = (c, row) => { const ids = new Set(row.dataset.mark.split(' ')); return c.graph.nodes.findIndex((n) => n.blocks.some((b) => ids.has(b))); };
+  // The members in the order the page shows them (those it doesn't show, after).
+  function gdOrder(c) {
+    const out = [];
+    main.querySelectorAll('.sec[id^="sec-"]:not(.ol-sec), .ol-row[data-mark]').forEach((el) => {
+      if (el.closest('.gd')) return;
+      const i = el.matches('.ol-row') ? rowNode(c, el) : Number(el.id.slice(4));
+      if (i >= 0 && !out.includes(i)) out.push(i);
+    });
+    c.graph.nodes.forEach((n) => { if (!out.includes(n.idx)) out.push(n.idx); });
+    return out;
+  }
+  // The member being read: the last one whose code (its section, or a test's row) starts above the
+  // reading line.
+  function hereNode(c) {
+    const ref = readY();
+    let at = null;
+    for (const el of main.querySelectorAll('.sec[id^="sec-"], .ol-row[data-mark]')) {
+      if (el.closest('.gd')) continue;
+      if (el.getBoundingClientRect().top > ref) break;
+      at = el;
+    }
+    if (!at) return GD.order.length ? GD.order[0] : null;
+    if (at.matches('.ol-row')) { const i = rowNode(c, at); if (i >= 0) return i; }
+    return at.dataset.secs ? Number(at.dataset.secs.split(' ')[0]) : Number(at.id.slice(4));
+  }
+  // The header names the member being read, and its place in the chain.
+  function spyHere() {
+    const el = main.querySelector('.fv-head .fv-here');
+    if (!el || state.view.kind !== 'chain') return;
+    const c = M().chains[state.view.id], i = c ? hereNode(c) : null, n = i != null && c.graph.nodes[i];
+    const h = n ? `Reading <b>${esc(nodeLabels(n).l2)}</b> · ${GD.order.indexOf(i) + 1} of ${c.graph.nodes.length}` : '';
+    if (el.innerHTML !== h) el.innerHTML = h;
+  }
+  // As the code scrolls the graph under the header, its last stretch shrinks toward the graph's
+  // button, which takes it once it's gone (a pulse). Scrolling back up plays it back.
+  function foldGraph() {
+    const box = main.querySelector('.graph-box.chain-graph'), btn = main.querySelector('.fv-head [data-act="graph"]');
+    if (!box || !btn) return;
+    const r = box.getBoundingClientRect(), top = main.getBoundingClientRect().top + headH();
+    const k = r.height ? Math.max(0, Math.min(1, (top - r.top) / r.height)) : 1, late = Math.max(0, (k - 0.55) / 0.45);
+    if (moving()) {
+      const b = btn.getBoundingClientRect();
+      box.style.transformOrigin = `${Math.round(b.left + b.width / 2 - r.left)}px 0`;
+      box.style.transform = late ? `scale(${1 - late * 0.06})` : '';
+      box.style.opacity = late ? String(1 - late * 0.85) : '';
+    }
+    const folded = r.bottom <= top + 4;
+    btn.setAttribute('aria-pressed', String(!folded));
+    if (folded && GD.folded === false && moving()) { btn.classList.remove('took'); void btn.offsetWidth; btn.classList.add('took'); }
+    GD.folded = folded;
+  }
+  // A chain shorter than the pane gets room after its end, so scrolling can still fold its graph.
+  function roomToFold() {
+    const end = main.querySelector('.chain-end'), box = main.querySelector('.graph-box.chain-graph');
+    if (!end || !box) return;
+    end.style.height = '0px';
+    const bottom = box.getBoundingClientRect().bottom - main.getBoundingClientRect().top + main.scrollTop;
+    end.style.height = Math.max(0, Math.ceil(bottom - headH() - (main.scrollHeight - main.clientHeight))) + 'px';
+  }
+  // Whether the graph is (still partly) in the page, under the header.
+  const gdInPage = () => { const box = main.querySelector('.graph-box.chain-graph'); return !!box && box.getBoundingClientRect().bottom > main.getBoundingClientRect().top + headH() + 4; };
+  function gdFoldNow() {
+    const box = main.querySelector('.graph-box.chain-graph');
+    if (box) main.scrollTo({ top: main.scrollTop + Math.ceil(box.getBoundingClientRect().bottom - (main.getBoundingClientRect().top + headH())), behavior: moving() ? 'smooth' : 'auto' });
+  }
+  // A file's chains, when its changes are in any.
+  function gdFileChains() {
+    const m = M(), f = state.view.kind === 'file' && m.files.find((x) => x.p === state.view.path);
+    if (!f) return null;
+    const ids = [...new Set(f.blocks.flatMap((b) => m.chainsOf.get(b.id) || []))];
+    return ids.length ? { f, ids } : null;
+  }
+  const gdHas = () => (state.view.kind === 'chain' ? !!M().chains[state.view.id] : !!gdFileChains());
+  // The change at a file's reading line, or the nearest one to it.
+  function gdBlockAt(f) {
+    const ref = readY();
+    let line = null;
+    for (const r of main.querySelectorAll('.code[data-p] [data-n]')) {
+      if (!r.dataset.n || r.closest('.gd')) continue;
+      if (r.getBoundingClientRect().top > ref) { if (line == null) line = Number(r.dataset.n); break; }
+      line = Number(r.dataset.n);
+    }
+    if (line == null) return null;
+    let best = null, gap = Infinity;
+    f.blocks.forEach((b) => {
+      const ns = hunkMeta(f.hunks[b.hunk]).slice(b.first, b.first + b.len).map((r) => r.n).filter((x) => x != null);
+      if (!ns.length || !b.edits.length) return;
+      const g = line < ns[0] ? ns[0] - line : line > ns[ns.length - 1] ? line - ns[ns.length - 1] : 0;
+      if (g < gap) { gap = g; best = b; }
+    });
+    return best;
+  }
+  // What the dropped graph shows: the chain, the member it's centered on, and (for a file in
+  // several chains) the others to pick from.
+  function gdTarget() {
+    const m = M(), v = state.view;
+    if (v.kind === 'chain') { const c = m.chains[v.id]; return c ? { chains: [c], chain: c, here: hereNode(c) } : null; }
+    const fc = gdFileChains();
+    if (!fc) return null;
+    const b = gdBlockAt(fc.f), own = b ? m.chainsOf.get(b.id) || [] : [];
+    const pick = state.gdrop && fc.ids.includes(state.gdrop.chain) ? state.gdrop.chain : own.find((id) => fc.ids.includes(id)) ?? fc.ids[0];
+    const c = m.chains[pick], here = b ? c.graph.nodes.findIndex((n) => n.blocks.includes(b.id)) : -1;
+    return { chains: fc.ids.map((id) => m.chains[id]), chain: c, here: here >= 0 ? here : null };
+  }
+  function gdHtml(t) {
+    const tabs = t.chains.length > 1 ? `<div class="gd-tabs" role="tablist" aria-label="The file’s chains">${t.chains.map((c) => `<button type="button" role="tab" data-act="gd-chain" data-chain-id="${c.id}" aria-selected="${c === t.chain}" title="${esc(c.name)}">${esc(trunc(c.name, 48))}</button>`).join('')}</div>` : '';
+    const n = t.here != null ? t.chain.graph.nodes[t.here] : null;
+    const at = n ? `<span>Centered on <b>${esc(nodeLabels(n).l2)}</b>, the member you’re reading</span>` : `<span><b>${esc(t.chain.name)}</b></span>`;
+    return `${tabs}<div class="gd-scroll">${graphSvg(t.chain, 'd')}</div><div class="gd-foot">${at}<span class="sp"></span><span>${state.view.kind === 'chain' ? 'Click a member to go to it' : 'Click a member to open the chain there'} · <kbd>Esc</kbd> or scrolling folds it</span></div>`;
+  }
+  // The member being read, ringed and in the middle (in a "+N more" group, the group).
+  function gdCenter(el, t, at) {
+    const sc = el.querySelector('.gd-scroll');
+    if (!sc) return;
+    let g = t.here != null ? sc.querySelector(`g.g-node[data-node="${t.here}"]`) : null;
+    if (!g && t.here != null) g = sc.querySelector(`.g-more[data-graph-open="c${t.chain.id}:${t.chain.graph.nodes[t.here].layer}"]`);
+    if (g) g.classList.add('here');
+    if (at) { sc.scrollLeft = at.x; sc.scrollTop = at.y; return; }
+    const r = g && g.querySelector('rect');
+    if (!r) return;
+    sc.scrollLeft = +r.getAttribute('x') + +r.getAttribute('width') / 2 - sc.clientWidth / 2;
+    sc.scrollTop = +r.getAttribute('y') + +r.getAttribute('height') / 2 - sc.clientHeight / 2;
+  }
+  const gdBtn = (open) => { const b = main.querySelector('.fv-head [data-act="graph"]'); if (b) b.setAttribute('aria-expanded', String(open)); };
+  // One motion both ways: the drop plays forward, the fold plays the same animation back from
+  // wherever it is.
+  function gdPlay(el, dir) {
+    if (!moving()) { if (GD.anim) GD.anim.cancel(); GD.anim = null; el.hidden = dir < 0; return; }
+    let a = GD.anim;
+    if (!a || a.effect.target !== el) {
+      a = GD.anim = el.animate(GD_FRAMES, { duration: GD_MS, easing: EASE, fill: 'both' });
+      // Drawn open (a render while it was down), it folds from its end.
+      if (dir < 0) a.finish();
+    }
+    a.onfinish = () => { if (GD.anim === a && a.playbackRate < 0) { el.hidden = true; a.cancel(); GD.anim = null; } };
+    a.playbackRate = dir;
+    a.play();
+  }
+  function gdOpen(kept) {
+    const el = main.querySelector('.gd');
+    if (!el) return;
+    if (gdInPage()) { if (kept) gdFoldNow(); return; }
+    const t = gdTarget();
+    if (!t) return;
+    const was = state.gdrop;
+    state.gdrop = { view: viewKey(), kept: !!kept || !!(was && was.kept), chain: t.chain.id };
+    // Folding back already: it comes down again from there, as it was.
+    const folding = !was && GD.anim && GD.anim.effect.target === el && !el.hidden;
+    if (!was && !folding) { el.innerHTML = gdHtml(t); el.hidden = false; gdCenter(el, t); }
+    gdBtn(true);
+    gdPlay(el, 1);
+  }
+  function gdClose() {
+    clearTimeout(GD.enterT); clearTimeout(GD.leaveT); GD.enterT = 0;
+    if (!state.gdrop) return;
+    state.gdrop = null;
+    gdBtn(false);
+    const el = main.querySelector('.gd');
+    if (el && !el.hidden) gdPlay(el, -1);
+  }
+  // Drawn again while it was down: down still, where it was, without moving.
+  function gdRestore(at) {
+    const el = main.querySelector('.gd'), t = el && gdTarget();
+    if (!t) { state.gdrop = null; return; }
+    GD.anim = null;
+    el.innerHTML = gdHtml(t);
+    el.hidden = false;
+    gdCenter(el, t, at);
+    gdBtn(true);
+  }
+  // The button's hover drops it after a moment, and leaving the button and the graph lifts it
+  // (unless a click kept it).
+  const gdSpot = (x) => x instanceof Element && !!x.closest('.fv-head [data-act="graph"], .gd');
+  main.addEventListener('pointerover', (e) => {
+    if (e.pointerType === 'touch' || !gdSpot(e.target)) return;
+    clearTimeout(GD.leaveT);
+    if (!state.gdrop && !GD.enterT && e.target.closest('[data-act="graph"]')) GD.enterT = setTimeout(() => { GD.enterT = 0; gdOpen(false); }, 110);
+  });
+  main.addEventListener('pointerout', (e) => {
+    if (e.pointerType === 'touch' || !gdSpot(e.target) || gdSpot(e.relatedTarget)) return;
+    clearTimeout(GD.enterT); GD.enterT = 0;
+    if (state.gdrop && !state.gdrop.kept) GD.leaveT = setTimeout(() => { if (state.gdrop && !state.gdrop.kept) gdClose(); }, 260);
+  });
+  // A member, from the graph: its code, and a pulse there.
+  function goNode(i) {
+    const c = M().chains[state.view.id], n = c && c.graph.nodes[i];
+    if (!n) return;
+    if (state.focus && state.focus.chain === c.id) { state.focus = { chain: c.id, node: i }; return render({ section: i }); }
+    const ids = new Set(n.blocks);
+    const el = main.querySelector(`#sec-${i}:not(.ol-sec)`) || [...main.querySelectorAll('.ol-row[data-mark]')].find((r) => r.dataset.mark.split(' ').some((x) => ids.has(x)))
+      || [...main.querySelectorAll('[data-secs]')].find((x) => x.dataset.secs.split(' ').includes(String(i)));
+    if (!el) return;
+    const cls = el.matches('.ol-row') ? 'flash' : 'flash-sec';
+    glideTo(el, headH() + 8, 0, () => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); });
+  }
+
   // ---------- the Tests view: every sentence the review's tests add, reword, regroup or remove, file
   // by file, each with the chain that wrote it, then the code edited under sentences that stay.
   function testsTotals() {
@@ -2715,12 +3040,12 @@
     const said = scopes.filter((sc) => sc.any), code = scopes.filter((sc) => !sc.any && (sc.edited.length || sc.outside.length));
     const t = testsTotals();
     const filter = state.testsFilter, mode = UI.testsMode === 'sentences' ? 'sentences' : 'nested';
-    const b = (act, key, cur, label, title) => `<button type="button" data-act="${act}" data-v="${key}" aria-pressed="${cur === key}" title="${esc(title)}">${label}</button>`;
+    const b = (act, key, cur, label, title, n) => `<button type="button" data-act="${act}" data-v="${key}" aria-pressed="${cur === key}" title="${esc(title)}"${n === 0 && cur !== key ? ' disabled' : ''}>${label}${n != null ? `<span class="dt" aria-hidden="true">·</span><i>${n}</i>` : ''}</button>`;
     let h = headerHtml({
       crumbs: '<b class="ui">Tests</b>',
       facts: t.all ? `${olSaid(t)} · ${plural(t.files, 'file')}` : 'No sentence changes',
       nav: true,
-      pinned: `<div class="ol-bar"><span class="mini-seg" role="group" aria-label="Which sentences">${b('tests-filter', 'all', filter, 'All', 'Every sentence the tests add, reword, regroup or remove')}${b('tests-filter', 'new', filter, 'New', 'The new sentences')}${b('tests-filter', 'reworded', filter, 'Reworded', 'The sentences whose words changed')}${b('tests-filter', 'regrouped', filter, 'Regrouped', 'The same sentences, in new groups')}${b('tests-filter', 'removed', filter, 'Removed', 'The sentences that are gone')}</span><span class="sp"></span><span class="mini-seg" role="group" aria-label="Read as">${b('tests-mode', 'nested', mode, 'Nested', 'Each title once, nested as the groups nest')}${b('tests-mode', 'sentences', mode, 'Sentences', 'Each test as its whole sentence')}</span></div>`,
+      pinned: `<div class="ol-bar"><span class="mini-seg" role="group" aria-label="Which sentences">${b('tests-filter', 'all', filter, 'All', 'Every sentence the tests add, reword, regroup or remove', t.all)}${b('tests-filter', 'new', filter, 'New', 'The new sentences', t.new)}${b('tests-filter', 'reworded', filter, 'Reworded', 'The sentences whose words changed', t.reworded)}${b('tests-filter', 'regrouped', filter, 'Regrouped', 'The same sentences, in new groups', t.regrouped)}${b('tests-filter', 'removed', filter, 'Removed', 'The sentences that are gone', t.removed)}</span><span class="sp"></span><span class="mini-seg" role="group" aria-label="Read as">${b('tests-mode', 'nested', mode, 'Nested', 'Each title once, nested as the groups nest')}${b('tests-mode', 'sentences', mode, 'Sentences', 'Each test as its whole sentence')}</span></div>`,
     });
     if (!scopes.length) return h + '<div class="empty">No test file changed in this comparison.</div>';
     const body = said.map((sc) => olFileHtml(sc, { chips: true, sentences: mode === 'sentences', filter })).join('');
@@ -2732,14 +3057,6 @@
       if (open) h += code.map((sc) => olFileHtml(sc, {})).join('');
     }
     return h;
-  }
-  // A chain of tests alone: its test files in a row, each with what it changes in what they assert.
-  function testStripHtml(c, tests) {
-    if (tests.files.length < 2) return '';
-    return `<div class="strip">${tests.files.map((f) => {
-      const sc = olScope(f, c), st = stats(blocksOf(c.blocks).filter((b) => b.file === f)), secs = tests.secs.get(f);
-      return `<button type="button" class="node${st.open ? '' : ' done'}" ${secs.length ? `data-act="to-node" data-i="${secs[0]}"` : 'disabled'} title="${esc(f.p + ' · ' + leftWords(st))}">${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span><span class="c">${esc(olSaid(olCounts(sc)) || 'code only')}</span></button>`;
-    }).join('')}</div>`;
   }
   function renderMap(famId) {
     const m = M();
@@ -2824,6 +3141,7 @@
     let h = headerHtml({
       crumbs: fileCrumbs(f.p),
       facts: `${f.s === 'A' ? 'Added · ' : f.s === 'D' ? 'Deleted · ' : ''}${leftWords(s)} · ${plusMinus(sumOf(f.blocks, 'adds'), sumOf(f.blocks, 'dels'))}${openThreadsHtml(f.p)}`,
+      tools: chains.length ? iconBtn(ICON.graph, `The graph of ${chains.length > 1 ? 'the chains of ' : ''}the change you’re reading: hover for a look, click to keep it open (g)`, 'data-act="graph" aria-haspopup="dialog" aria-expanded="false"') : '',
       chip: chains.length ? `<button type="button" class="chip" data-act="menu" data-menu="chains" aria-haspopup="menu" aria-expanded="${MENU.open === 'chains'}" title="The chains this file's changes are in">In ${chains.length} chain${chains.length > 1 ? 's' : ''}${ICON.chevronDown}</button>` : '',
       nav: true,
       action: s.total ? `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>` : '',
@@ -3110,7 +3428,7 @@
     const meta = (c.brought ? `<code>${shortSha(c.sha)}</code> · brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${dayOf(c.at)}`) + (w ? ` · <b>${w.changes} here</b>` : '');
     const left = st.total ? `${plural(st.total, 'change')}${st.open ? `, ${st.open} to review` : ', all reviewed'}` : 'Nothing of it is left at the head';
     const here = !chain ? '' : w ? `\n${own ? 'The open chain’s commit. ' : ''}Its lines are in ${w.changes} of the open chain’s changes.` : '\nNone of its lines are in the open chain.';
-    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}${w ? ' mine' : ''}" data-commit="${c.sha}" data-ci="${it.i}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.${here}\n\nClick for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${esc(sub.text)}</span><span class="cm-m">${meta}</span>${cnt}</button>`;
+    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}${w ? ' mine' : ''}" data-commit="${c.sha}" data-ci="${it.i}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.${here}\n\nClick for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${esc(sub.text)}</span><span class="cm-m">${meta}</span>${commitDiff(c)}${cnt}</button>`;
   }
   function ghostRowHtml(vm, g, cls) {
     const gh = vm.item.ghost, on = !!state.lens && state.lens.kind === 'since' && state.lens.from === gh.sha;
@@ -3125,7 +3443,7 @@
     const rv = reviewInBranch();
     return `<button type="button" class="${cls}${isReviewLens() ? ' in' : ''}" data-act="lens-review" title="Show only what changed since your last review, at ${shortSha(rv.head)}">${laneThrough(vm.input, g, vm.input.findIndex((n) => n.id === rv.head))}<span>Your review</span><b>${whenOf(rv.at)}</b></button>`;
   }
-  const preset = (act, label, n, on, title) => `<button type="button" class="sb-row cm-pre" data-act="${act}" aria-pressed="${on}" title="${esc(title)}"><i class="rd"></i><span class="nm ui">${label}</span><span class="cnt">${n || ''}</span></button>`;
+  const preset = (act, label, n, on, title, diff) => `<button type="button" class="sb-row cm-pre" data-act="${act}" aria-pressed="${on}" title="${esc(title)}"><i class="rd"></i><span class="nm ui">${label}</span>${diff || ''}<span class="cnt">${n || ''}</span></button>`;
   // The open changes since an older head (its rows loaded), as a lens there would count them.
   function sinceOpen(from) {
     const rows = HX.since.get(from);
@@ -3141,19 +3459,19 @@
     });
     return n;
   }
-  // The sidebar's Commits tab: the History view, the lens's two presets, then the graph, which
-  // follows the chain open: its commits stand out, and hovering one dims the lines it didn't write.
+  // The sidebar's Commits tab: the History view and the lens's presets (pinned at the top), then the
+  // graph, which follows the chain open: its commits stand out, and hovering one dims the lines it
+  // didn't write.
   function commitsTabHtml() {
     const models = graphItems(), g = laneGeom(models, 12, 40, 8, 26);
     const rv = HX.live && HX.live.review, m = M();
     const all = withoutLens(() => stats(m.files.flatMap((f) => f.blocks)));
     const open = state.view.kind === 'chain' ? m.chains[state.view.id] : null;
     const chain = open && chainWriters(open).size ? { writers: chainWriters(open), own: new Set(m.byCommit ? familyCommits(m.families.find((f) => f.id === open.family)) : []) } : null;
-    let h = `<button type="button" class="sb-row map" data-act="history-open"${state.view.kind === 'history' ? ' aria-current="true"' : ''} title="Every commit, with what it touched, its checks and its reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt"></span></button>`;
-    h += '<div class="sb-group"><span>Changes from</span></div>';
-    h += preset('lens-all', 'All changes', all.open, !state.lens, 'Every change of the pull request');
-    if (rv && rv.here) h += preset('lens-review', 'Since your review', sinceOpen(rv.head), isReviewLens(), `What changed since the head of your last review, ${shortSha(rv.head)} (${whenOf(rv.at)})`);
-    h += `<div class="sb-group"><span>Commits</span><span${chain ? ' title="The commits that wrote lines of the chain open"' : ''}>${chain ? `${chain.writers.size} of ${HISTORY.commits.length} in this chain` : HISTORY.commits.length}</span></div><div class="cm-list${chain ? ' follow' : ''}" role="group" aria-label="The commits, newest first">`;
+    let pin = `<button type="button" class="sb-row map" data-act="history-open"${state.view.kind === 'history' ? ' aria-current="true"' : ''} title="Every commit, with what it touched, its checks and its reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt"></span></button>`;
+    pin += preset('lens-all', 'All changes', all.open, !state.lens, 'Every change of the pull request', filesDiff(m.files));
+    if (rv && rv.here) pin += preset('lens-review', 'Since your review', sinceOpen(rv.head), isReviewLens(), `What changed since the head of your last review, ${shortSha(rv.head)} (${whenOf(rv.at)})`);
+    let h = `<div class="sb-group"><span>Commits</span><span${chain ? ' title="The commits that wrote lines of the chain open"' : ''}>${chain ? `${chain.writers.size} of ${HISTORY.commits.length} in this chain` : HISTORY.commits.length}</span></div><div class="cm-list${chain ? ' follow' : ''}" role="group" aria-label="The commits, newest first">`;
     const rvb = reviewInBranch();
     models.forEach((vm) => {
       if (rvb && vm.item.id === rvb.head) h += flagRowHtml(vm, g, 'cm-flag');
@@ -3161,7 +3479,7 @@
     });
     const last = HISTORY.commits[HISTORY.commits.length - 1];
     if (last.outside[0]) h += `<div class="cm-start" title="The branch starts after ${esc(last.outside[0])}">Branched from <code>${shortSha(last.outside[0])}</code></div>`;
-    return h + '</div>';
+    return { pin, list: h + '</div>' };
   }
 
   // ---------- "Changes from": the head commit's popover in the top bar. The lens's presets, then
@@ -3425,6 +3743,12 @@
   }
 
   // ---------- sidebar
+  // The lines a row's changes add and remove, in place of its count while it's hovered. Drawn from
+  // its attributes, so the row's text stays its name and its count.
+  const sideDiff = (a, d) => (a > 0 || d > 0 ? `<span class="df"${a > 0 ? ` data-a="+${fmt(a)}"` : ''}${d > 0 ? ` data-d="−${fmt(d)}"` : ''} aria-hidden="true"></span>` : '');
+  const filesDiff = (files) => sideDiff(files.reduce((x, f) => x + Math.max(0, f.a || 0), 0), files.reduce((x, f) => x + Math.max(0, f.d || 0), 0));
+  // A commit's lines added and removed, from its files (a binary file's count none).
+  const commitDiff = (c) => c.df != null ? c.df : (c.df = sideDiff(...(c.files || []).reduce((x, [, , a, d]) => (a < 0 ? x : [x[0] + a, x[1] + d]), [0, 0])));
   // A row's mark: amber while it has changes to review, a check once they're all reviewed.
   const markHtml = (st) => (st.open ? '<i class="mk"></i>' : outOfLens(st) ? '<i class="mk out"></i>' : `<i class="mk ok">${ICON.check}</i>`);
   function renderSide() {
@@ -3440,8 +3764,14 @@
       + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where your marks are kept" aria-label="Marks" aria-haspopup="dialog" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
       // Four tabs fit the sidebar without their counts: they show when it's wider.
       + `<div class="sb-tabs${GH.on && hxOn() ? ' four' : ''}" role="tablist">${tab('chains', 'Chains', m.chains.length)}${tab('files', 'Files', m.files.length)}${GH.on ? tab('comments', 'Threads', openThreads) : ''}${hxOn() ? tab('commits', 'Commits', HISTORY.commits.length) : ''}</div></div>`;
+    // Rows that stay at the top with the tabs, over a line: the views beside the list.
+    let pin = '';
+    const top = h;
+    h = '';
     if (state.tab === 'commits' && hxOn()) {
-      h += commitsTabHtml();
+      const ct = commitsTabHtml();
+      pin = ct.pin;
+      h += ct.list;
     } else if (state.tab === 'comments') {
       h += commentsTabHtml(v);
     } else if (state.tab === 'chains' || state.tab === 'commits') {
@@ -3450,14 +3780,14 @@
         const st = stats(blocksOf(c.blocks));
         const on = v.kind === 'chain' && v.id === c.id;
         const n = splitName(c.name), d = Math.min(depth, 6);
-        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm${proseName(c) ? ' ui' : ''}">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span><span class="cnt">${st.open || ''}</span></button>`;
+        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm${proseName(c) ? ' ui' : ''}">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span>${sideDiff(c.adds, c.dels)}<span class="cnt">${st.open || ''}</span></button>`;
       };
       const linked = m.byCommit ? m.families : m.families.filter((f) => f.chains.length > 1);
       const lone = m.byCommit ? [] : m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);
-      h += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${m.byCommit ? 'The commits’ chains, and which builds on which' : `${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels`}"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
-      if (hxOn()) h += `<button type="button" class="sb-row map" data-act="history-open"${v.kind === 'history' ? ' aria-current="true"' : ''} title="The commits: each one, what it touched, its checks and reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt">${HISTORY.commits.length}</span></button>`;
+      pin += `<button type="button" class="sb-row map" data-map="${linked.length ? linked[0].id : ''}"${v.kind === 'map' ? ' aria-current="true"' : ''} title="${m.byCommit ? 'The commits’ chains, and which builds on which' : `${linked.length} famil${linked.length === 1 ? 'y' : 'ies'} of linked chains, in levels`}"><span class="tw">${ICON.map}</span><span class="nm ui">Chain map</span><span class="cnt"></span></button>`;
+      if (hxOn()) pin += `<button type="button" class="sb-row map" data-act="history-open"${v.kind === 'history' ? ' aria-current="true"' : ''} title="The commits: each one, what it touched, its checks and reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt">${HISTORY.commits.length}</span></button>`;
       const tt = testsTotals();
-      if (tt.outlined) h += `<button type="button" class="sb-row map" data-act="tests-open"${v.kind === 'tests' ? ' aria-current="true"' : ''} title="The sentences the tests add, reword, regroup or remove, on one page"><span class="tw">${ICON.tests}</span><span class="nm ui">Tests</span><span class="cnt">${tt.all || ''}</span></button>`;
+      if (tt.outlined) pin += `<button type="button" class="sb-row map" data-act="tests-open"${v.kind === 'tests' ? ' aria-current="true"' : ''} title="The sentences the tests add, reword, regroup or remove, on one page"><span class="tw">${ICON.tests}</span><span class="nm ui">Tests</span><span class="cnt">${tt.all || ''}</span></button>`;
       if (m.byCommit) {
         // A commit's chain is one row, in the order the commits were made; renames come last.
         h += m.families.filter((f) => !f.same).map((f) => row(f.chains[0], 0, 0)).join('');
@@ -3466,15 +3796,15 @@
       linked.forEach((f) => { if (m.byCommit) return; h += `<div class="sb-group"><span title="${esc(f.top.name)}">The ${esc(trunc(f.top.name, 34))} family</span></div>` + f.chains.map((c, k) => row(c, c.depth, k + 1 < f.chains.length ? f.chains[k + 1].depth : -1)).join(''); });
       if (lone.length) h += '<div class="sb-group"><span>Unlinked</span></div>' + lone.map((c) => row(c, 0, 0)).join('');
       const st = stats(m.standalone);
-      if (st.total) h += `<div class="sb-group"><span>Outside chains</span></div><button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''} title="Changes that don’t use, and aren’t used by, anything changed elsewhere: ${leftWords(st)}">${markHtml(st)}<span class="nm ui">Not in a chain</span><span class="cnt">${st.open || ''}</span></button>`;
+      if (st.total) h += `<div class="sb-group"><span>Outside chains</span></div><button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''} title="Changes that don’t use, and aren’t used by, anything changed elsewhere: ${leftWords(st)}">${markHtml(st)}<span class="nm ui">Not in a chain</span>${sideDiff(sumOf(m.standalone, 'adds'), sumOf(m.standalone, 'dels'))}<span class="cnt">${st.open || ''}</span></button>`;
     } else {
       const on = (f) => (v.kind === 'file' && v.path === f.p ? ' aria-current="true"' : '');
       h += treeHtml(fileTree(m.files), 0, {
         prefix: '',
-        count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open }; },
+        count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open, diff: filesDiff(files) }; },
         file: (f, depth, g) => {
           const st = stats(f.blocks);
-          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span><span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
+          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
         },
       });
       const migration = (f) => /(^|\/)migrations?\//i.test(f.p);
@@ -3488,12 +3818,13 @@
         h += `<div id="files-${key}"${open ? '' : ' hidden'}>`;
         if (open) h += treeHtml(fileTree(files), 0, {
           prefix: key + ':',
-          count: () => ({ text: '', done: false }),
-          file: (f, depth, g) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${key} (${esc(f.gen)})">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span><span class="cnt">+${fmt(f.a)}</span></button>`,
+          count: (files) => ({ text: '', done: false, diff: filesDiff(files) }),
+          file: (f, depth, g) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${key} (${esc(f.gen)})">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">+${fmt(f.a)}</span></button>`,
         });
         h += '</div>';
       }
     }
+    h = (pin ? top.replace(/<\/div>$/, `<div class="sb-pin">${pin}</div></div>`) : top) + h;
     // Most clicks change only the code: the sidebar stays as it is.
     if (h === sideHtml) return;
     const before = moving() ? sideRows() : null;
@@ -3510,7 +3841,7 @@
   const sideKey = (r) => { const d = r.dataset; return d.chain != null ? 'c' + d.chain : d.open != null ? 'f' + d.open : d.standalone ? 's' : d.thread ? 't' + d.thread : d.map != null ? 'map' : d.dir != null ? 'd' + d.dir : d.act || ''; };
   function sideRows() {
     const out = new Map();
-    side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, cnt: (r.querySelector('.cnt') || {}).textContent }));
+    side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, pin: !!r.closest('.sb-pin'), cnt: (r.querySelector('.cnt') || {}).textContent }));
     side.querySelectorAll('.cm-row[data-commit]').forEach((r) => out.set('k' + r.dataset.commit, { fade: getComputedStyle(r).opacity }));
     return out;
   }
@@ -3536,7 +3867,7 @@
       }
       const cnt = r.querySelector('.cnt');
       if (cnt && v.cnt !== cnt.textContent && /^\d*$/.test(v.cnt || '') && /^\d*$/.test(cnt.textContent)) cnt.animate([{ transform: 'translateY(-5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: EASE });
-      if (r.getAttribute('aria-current') === 'true' && from && !v.cur && !under(r) && Math.abs(r.offsetTop - from.top) < 600) {
+      if (r.getAttribute('aria-current') === 'true' && from && !v.cur && !under(r) && !from.pin && !v.pin && Math.abs(r.offsetTop - from.top) < 600) {
         const hl = document.createElement('div');
         hl.className = 'sb-hl';
         hl.style.cssText = `top:${r.offsetTop}px;left:${r.offsetLeft}px;width:${r.offsetWidth}px;height:${r.offsetHeight}px`;
@@ -3620,7 +3951,7 @@
         let name = d.name;
         while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
         const key = o.prefix + d.path, open = !state.closedDirs.has(key), c = o.count(filesIn(d));
-        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span><span class="cnt">${c.text}</span></button>` });
+        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span>${c.diff || ''}<span class="cnt">${c.text}</span></button>` });
         if (open) walk(d, dp + 1);
       });
       nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => rows.push({ depth: dp, html: (g) => o.file(f, dp, g) }));
@@ -3706,7 +4037,59 @@
     const dt = main.querySelector('.hs-detail');
     if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt), place: placeOf(dt.previousElementSibling) }; }
     main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
+    if (h && h.ol != null) snap.ol = olSnap(h);
     return snap;
+  }
+  // An outline's pieces, keyed so two drawings of it line up: its rows by call, a row's code by its
+  // row, a fold by what it folds, a file by its path, anything else by what's above it.
+  function olItems(box) {
+    const out = [];
+    let row = '', anchor = '', k = 0;
+    for (const el of box.children) {
+      let key;
+      if (el.matches('.ol-row[data-ol]')) key = 'r' + (row = el.dataset.ol);
+      else if (el.matches('.ol-code')) key = 'c' + row;
+      else if (el.matches('[data-act="ol-unfold"]')) key = 'f' + el.dataset.key;
+      else if (el.matches('.ol-sec[data-olf]')) key = 's' + el.dataset.olf;
+      else { out.push({ k: anchor + '|' + el.className + '|' + k++, el }); continue; }
+      out.push({ k: key, el });
+      anchor = key;
+      k = 0;
+    }
+    return out;
+  }
+  // What a click on an outline is about to open or fold: the pieces of the part it's in, and where
+  // they are.
+  function olSnap(h) {
+    const el = [...main.querySelectorAll(h.fold ? '[data-act="ol-unfold"]' : '.ol-row[data-ol]')].find((x) => (h.fold ? x.dataset.key : x.dataset.ol) === h.ol);
+    const box = el && el.parentElement;
+    if (!box || !(box === main || box.matches('.ol-sec[data-olf]'))) return null;
+    return { box: box === main ? null : box.dataset.olf, items: olItems(box).map((x) => ({ ...x, r: x.el.getBoundingClientRect(), mb: parseFloat(getComputedStyle(x.el).marginBottom) || 0 })) };
+  }
+  // The same part drawn again: what's gone folds back into what's above it, while what's new opens
+  // downward from it.
+  function olMotion(o) {
+    const box = o.box == null ? main : [...main.querySelectorAll('.ol-sec[data-olf]')].find((x) => x.dataset.olf === o.box);
+    if (!box) return;
+    const now = olItems(box), has = new Map(now.map((x) => [x.k, x.el])), had = new Set(o.items.map((x) => x.k));
+    const gone = [];
+    let run = [], prev = null;
+    const close = (next) => {
+      const a = prev && has.get(prev.k);
+      if (run.length && a) {
+        const b = next && has.get(next.k), last = run[run.length - 1];
+        const was = next ? next.r.top - prev.r.bottom : last.r.bottom + last.mb - prev.r.bottom;
+        const is = b ? b.getBoundingClientRect().top - a.getBoundingClientRect().bottom : parseFloat(getComputedStyle(a).marginBottom) || 0;
+        if (was - is > 3) gone.push({ a, h: was - is, els: run.map((x) => x.el) });
+      }
+      run = [];
+    };
+    for (const x of o.items) { if (has.has(x.k)) { close(x); prev = x; } else run.push(x); }
+    close(null);
+    gone.forEach((g) => closeGap(g.a, g.h, g.els).animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: EASE, fill: 'forwards' }));
+    let grow = [];
+    for (const x of now) { if (had.has(x.k)) { growRows(grow); grow = []; } else grow.push(x.el); }
+    growRows(grow);
   }
   // A gap that closes: the space something left, shrinking to nothing (with what was there, fading).
   function closeGap(after, h, content, delay) {
@@ -3718,7 +4101,8 @@
     if (content) {
       content.forEach((el) => ghost.appendChild(el));
       // What's in it is a picture: nothing in it is found or pressed.
-      ghost.querySelectorAll('[id], [data-block], [data-sec], [data-n], [data-c], [data-thread], [data-comment], [data-draft], [data-act]').forEach((el) => ['id', 'data-block', 'data-sec', 'data-n', 'data-c', 'data-thread', 'data-comment', 'data-draft', 'data-act'].forEach((a) => el.removeAttribute(a)));
+      const attrs = ['id', 'data-block', 'data-sec', 'data-n', 'data-c', 'data-thread', 'data-comment', 'data-draft', 'data-act', 'data-nav', 'data-mark', 'data-ol', 'data-key', 'data-olf', 'data-open', 'data-blocks'];
+      ghost.querySelectorAll(attrs.map((a) => `[${a}]`).join(', ')).forEach((el) => attrs.forEach((a) => el.removeAttribute(a)));
     }
     after.after(ghost);
     const done = () => { ghost.remove(); mini.update(); };
@@ -3810,9 +4194,10 @@
     if (!snap) { shownPeek = state.peek; return; }
     if (snap.view !== viewKey()) {
       // Another view fades in from a little below; the breadcrumb's last part slides in.
-      main.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 160, easing: EASE });
+      const dir = NAV.dir < 0 ? -1 : 1;
+      main.animate([{ opacity: 0, transform: `translateY(${8 * dir}px)` }, { opacity: 1, transform: 'none' }], { duration: 160, easing: EASE });
       const last = main.querySelector('.crumbs > :last-child');
-      if (last) last.animate([{ opacity: 0, transform: 'translateX(8px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
+      if (last) last.animate([{ opacity: 0, transform: `translateX(${8 * dir}px)` }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
       shownPeek = state.peek;
       return;
     }
@@ -3822,6 +4207,7 @@
       main.querySelectorAll('.tick.on[data-block]').forEach((t) => { if (ids.has(t.dataset.block)) popTick(t); });
     }
     if (snap.hint && snap.hint.more) moreMotion(snap.hint.more);
+    if (snap.ol) olMotion(snap.ol);
     peekMotion(snap);
     detailMotion(snap);
     // A thread that changed size (resolved, a reply box opened) eases into it.
@@ -3875,13 +4261,6 @@
   main.addEventListener('wheel', () => cancelAnimationFrame(glide), { passive: true });
   main.addEventListener('pointerdown', () => cancelAnimationFrame(glide));
 
-  // A chain's graph, shown and brought into view.
-  function showGraph() {
-    if (!UI.graph) { UI.graph = true; saveUI(); render(); }
-    const g = main.querySelector('.graph-box');
-    if (g) glideTo(g, headH(), 0, () => {});
-  }
-
   // The open commit's row and details on screen, scrolling no more than that takes.
   function revealDetail() {
     const panel = main.querySelector('.hs-detail');
@@ -3899,9 +4278,12 @@
     const keep = main.scrollTop;
     // A graph scrolled within its box stays scrolled as it's drawn again.
     const gs = main.querySelector('.graph-scroll'), graphAt = gs && { view: viewKey(), x: gs.scrollLeft, y: gs.scrollTop };
+    const gds = main.querySelector('.gd:not([hidden]) .gd-scroll'), gdAt = gds && { x: gds.scrollLeft, y: gds.scrollTop };
+    if (viewKey() !== GD.view) { GD.view = viewKey(); GD.folded = null; if (state.gdrop && state.gdrop.view !== GD.view) state.gdrop = null; }
     // A comment being typed keeps its focus, caret and scroll through the new page.
     const ae = document.activeElement;
     const typing = ae && ae.dataset && ae.dataset.draft != null && viewer.contains(ae) ? { key: ae.dataset.draft, s: ae.selectionStart, e: ae.selectionEnd, top: ae.scrollTop } : null;
+    navStep(keep);
     renderSide();
     renderReviewBar();
     const v = state.view;
@@ -3912,7 +4294,7 @@
       console.error(e);
     }
     const fvHead = main.querySelector('.fv-head');
-    if (fvHead) fvHead.insertAdjacentHTML('afterend', '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>');
+    if (fvHead) fvHead.insertAdjacentHTML('afterend', '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>' + (gdHas() ? '<div class="gd-w"><div class="gd" role="dialog" aria-label="The chain’s graph" hidden></div></div>' : ''));
     restorePeekScroll();
     const gs2 = graphAt && graphAt.view === viewKey() && main.querySelector('.graph-scroll');
     if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }
@@ -3927,13 +4309,20 @@
     } else if (opts.section != null) {
       const el = main.querySelector('#sec-' + opts.section);
       if (el) { placeRow(el, headH() + 8); el.classList.add('flash-sec'); }
-    } else if (opts.top) main.scrollTop = 0;
+    } else if (opts.scroll != null) main.scrollTop = opts.scroll;
+    else if (opts.top) main.scrollTop = 0;
     else main.scrollTop = keep;
     if (opts.reveal) revealDetail();
     olPin();
+    GD.order = state.view.kind === 'chain' && M().chains[state.view.id] ? gdOrder(M().chains[state.view.id]) : [];
+    roomToFold();
+    foldGraph();
+    spyHere();
+    if (state.gdrop) gdRestore(gdAt);
     const cur = side.querySelector('[aria-current="true"]');
-    if (cur && opts.top) {
-      if (cur.offsetTop < side.scrollTop || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - side.clientHeight / 3;
+    if (cur && opts.top && !cur.closest('.sb-top')) {
+      const topH = (side.querySelector('.sb-top') || {}).offsetHeight || 0;
+      if (cur.offsetTop < side.scrollTop + topH || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - topH - (side.clientHeight - topH) / 3;
     }
     if (GH.on) {
       main.appendChild(addBtn);
@@ -3961,7 +4350,6 @@
     commentsMotion();
     if (MENU.open) renderMenu();
     renderPill();
-    spyStrip();
     mini.update();
   }
   // The top bar: the pull request (its number quiet), its state, the commit reviewed and a way to
@@ -4209,22 +4597,13 @@
     const b = el.querySelector('.pill-n b'), now = b ? Number(b.textContent) : null;
     if (b && was != null && now !== was && moving()) b.animate([{ transform: `translateY(${now > was ? 6 : -6}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: EASE });
   }
-  // A chain's strip marks the member being read: the last one whose section starts above the
-  // reading line.
-  function spyStrip() {
-    const nodes = main.querySelectorAll('.fv-head .node[data-i]');
-    if (!nodes.length) return;
-    const ref = readY();
-    let at = null;
-    main.querySelectorAll('.sec[id^="sec-"]').forEach((sec) => { if (sec.getBoundingClientRect().top <= ref) at = sec; });
-    if (at == null) at = main.querySelector('.sec[id^="sec-"]');
-    const here = at ? (at.dataset.secs ? at.dataset.secs.split(' ') : [at.id.slice(4)]) : [];
-    nodes.forEach((n) => n.classList.toggle('here', here.includes(n.dataset.i)));
-  }
   let scrollRaf = 0;
   main.addEventListener('scroll', () => {
     if (scrollRaf) return;
-    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); spyStrip(); mini.scrolled(); olPin(); });
+    if (state.gdrop) gdClose();
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); spyHere(); foldGraph(); mini.scrolled(); olPin(); });
+    clearTimeout(NAV.saveT);
+    NAV.saveT = setTimeout(() => { const cur = NAV.stack[NAV.at]; if (cur) { cur.top = main.scrollTop; navSave(cur); } }, 400);
   }, { passive: true });
   // n and p: the next and previous chain with changes to review.
   function goChain(step) {
@@ -4249,8 +4628,8 @@
       const k = (...keys) => keys.map((x) => `<kbd>${x}</kbd>`).join('');
       keysEl.innerHTML = '<h2>Keys</h2><dl>'
         + [[k('j', 'k'), 'Next and previous change to review'], [k('Space'), 'Mark the change reviewed and go to the next one'], [k('Shift', 'Space'), 'Mark the hunk, or the member in a chain'],
-          [k('n', 'p'), 'Next and previous chain with changes to review'], [k(MOD, 'K'), 'Jump to a chain, file, symbol or thread'],
-          [k('c'), 'Comment on the line you’re on'], [k(MOD, 'B'), 'Show or hide the sidebar'], [k('Esc'), 'Close the peek, the palette, a menu or a commit’s details; then show every change again (the lens off)'], [k('?'), 'These keys']]
+          [k('n', 'p'), 'Next and previous chain with changes to review'], [k('g'), 'The chain’s graph, over the code, and back'], [k(MOD, 'K'), 'Jump to a chain, file, symbol or thread'],
+          [k('c'), 'Comment on the line you’re on'], [k(...BACK_KEY.split(' ')), 'Back to where you were'], [k(MOD, 'B'), 'Show or hide the sidebar'], [k('Esc'), 'Close the peek, the palette, a menu or a commit’s details; then show every change again (the lens off)'], [k('?'), 'These keys']]
           .map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('') + '</dl>';
       viewer.appendChild(keysEl);
     }
@@ -4791,11 +5170,22 @@
     if (d.scope) { state.search.scope = d.scope; return render({ top: true }); }
     if (d.graphOpen) { state.graphOpen.add(d.graphOpen); return render(); }
     if (d.node !== undefined && !d.act) {
-      // Filtering from the graph leaves the page where it is: the graph stays under the pointer.
       const node = Number(d.node);
-      const same = state.focus && state.focus.chain === state.view.id && state.focus.node === node;
-      state.focus = same ? null : { chain: state.view.id, node };
-      return render();
+      // Dropped over a file: that chain, at the member.
+      const from = t.closest('.gd') && state.gdrop ? state.gdrop.chain : null;
+      if (from != null && !(state.view.kind === 'chain' && state.view.id === from)) {
+        state.gdrop = null; state.view = { kind: 'chain', id: from }; state.peek = null; state.focus = null; toChains();
+        render({ top: true });
+        return goNode(node);
+      }
+      // Shift: only that member's code, leaving the page where it is (the graph stays under the pointer).
+      if (e.shiftKey) {
+        const same = state.focus && state.focus.chain === state.view.id && state.focus.node === node;
+        state.focus = same ? null : { chain: state.view.id, node };
+        return render();
+      }
+      gdClose();
+      return goNode(node);
     }
     if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
     if (t.classList.contains('ref') && (e.ctrlKey || e.metaKey)) {
@@ -4845,6 +5235,7 @@
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
     const act = d.act;
     if (act === 'jump') return palOpen();
+    if (act === 'back') return navBack();
     if (act === 'tests-open') { state.view = { kind: 'tests' }; state.peek = null; state.focus = null; return render({ top: true }); }
     if (act === 'tests-filter') { state.testsFilter = d.v; return render({ top: true }); }
     if (act === 'tests-mode') { UI.testsMode = d.v; saveUI(); return render(); }
@@ -4919,13 +5310,20 @@
     }
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
-    if (act === 'graph-show') return showGraph();
     if (act === 'graph') {
-      if (!UI.graph) return showGraph();
-      // Hidden, the graph leaves the code on screen where it is.
-      const at = lineOnScreen();
-      UI.graph = false; saveUI(); render();
-      return backTo(at);
+      // In the page at the top, the click folds it; anywhere else it drops it, kept, or folds it back.
+      clearTimeout(GD.enterT); GD.enterT = 0;
+      if (gdInPage()) return gdFoldNow();
+      if (state.gdrop && state.gdrop.kept) return gdClose();
+      return gdOpen(true);
+    }
+    if (act === 'gd-chain') {
+      // A file in several chains: the graph of another one.
+      if (!state.gdrop) return;
+      state.gdrop.chain = Number(d.chainId);
+      const el = main.querySelector('.gd'), tg = gdTarget();
+      if (el && tg) { el.innerHTML = gdHtml(tg); gdCenter(el, tg); }
+      return;
     }
     if (act === 'ext-peek') {
       const ext = { chain: Number(d.chainId), anchor: d.anchor, i: Number(d.i) };
@@ -4949,13 +5347,6 @@
       const i = to.graph.nodes.findIndex((n) => n.blocks.includes(d.block));
       state.view = { kind: 'chain', id }; state.peek = null; state.focus = null; toChains();
       return render(i >= 0 ? { section: i } : { top: true });
-    }
-    if (act === 'to-node') {
-      const i = Number(d.i);
-      if (state.focus && state.focus.chain === state.view.id) { state.focus = { chain: state.view.id, node: i }; return render({ section: i }); }
-      const el = main.querySelector('#sec-' + i) || [...main.querySelectorAll('[data-secs]')].find((x) => x.dataset.secs.split(' ').includes(String(i)));
-      if (el) glideTo(el, headH() + 8, 0, () => { el.classList.remove('flash-sec'); void el.offsetWidth; el.classList.add('flash-sec'); });
-      return;
     }
     if (act === 'minimap') { UI.minimap = !UI.minimap; saveUI(); return mini.update(); }
     if (act === 'side-toggle') return toggleSide();
@@ -5025,8 +5416,8 @@
     if (act === 'mark-standalone') { toggleBlocks(m.standalone); hint({ mark: m.standalone.map((b) => b.id) }); return render(); }
     if (act === 'mark-edits') { const ids = d.edits.split(' ').map(Number); setEdits(ids, !ids.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'toggle-member') { state.memberOpen.has(d.key) ? state.memberOpen.delete(d.key) : state.memberOpen.add(d.key); return render(); }
-    if (act === 'ol-open') { state.olOpen.has(d.ol) ? state.olOpen.delete(d.ol) : state.olOpen.add(d.ol); return render(); }
-    if (act === 'ol-unfold') { state.olUnfold.has(d.key) ? state.olUnfold.delete(d.key) : state.olUnfold.add(d.key); return render(); }
+    if (act === 'ol-open') { hint({ ol: d.ol }); state.olOpen.has(d.ol) ? state.olOpen.delete(d.ol) : state.olOpen.add(d.ol); return render(); }
+    if (act === 'ol-unfold') { hint({ ol: d.key, fold: true }); state.olUnfold.has(d.key) ? state.olUnfold.delete(d.key) : state.olUnfold.add(d.key); return render(); }
     if (act === 'ol-chain') {
       // The chain that wrote a call, at its row.
       state.view = { kind: 'chain', id: Number(d.chainId) }; state.peek = null; state.focus = null; toChains();
@@ -5058,10 +5449,12 @@
     const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
     if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); return PAL.open ? palClose() : palOpen(); }
     if (mod && (e.key === 'b' || e.key === 'B') && !typingIn(e.target)) { e.preventDefault(); return toggleSide(); }
+    if (e.altKey && e.key === 'ArrowLeft' && !NAV.hist && NAV.at > 0 && !typingIn(e.target)) { e.preventDefault(); return navBack(); }
     if (e.key === 'Escape') {
       if (keysEl && !keysEl.hidden) return toggleKeys(false);
       if (PAL.open) return palClose();
       if (MENU.open) return closeMenu();
+      if (state.gdrop) return gdClose();
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
       if (state.peek) { state.peek = null; return render(); }
       if (HX && HX.detail && state.view.kind === 'history') { HX.detail = null; return render(); }
@@ -5082,6 +5475,7 @@
     if (e.key === 'j' || e.key === 'k') gotoChange(e.key === 'j' ? 1 : -1, true);
     else if (e.key === ' ') { if (e.shiftKey) markScope(); else markAndNext(); }
     else if (e.key === 'n' || e.key === 'p') goChain(e.key === 'n' ? 1 : -1);
+    else if (e.key === 'g' && gdHas()) { if (state.gdrop) gdClose(); else gdOpen(true); }
     else if (e.key === 'c') commentHere();
     else if (e.key === '?') toggleKeys();
     else if (e.key === '/') palOpen();
@@ -5089,7 +5483,10 @@
     e.preventDefault();
   });
   // A click outside the open menu closes it.
-  document.addEventListener('click', (e) => { if (MENU.open && !e.target.closest('.menu, [data-menu]')) closeMenu(); }, true);
+  document.addEventListener('click', (e) => {
+    if (MENU.open && !e.target.closest('.menu, [data-menu]')) closeMenu();
+    if (state.gdrop && state.gdrop.kept && !gdSpot(e.target)) gdClose();
+  }, true);
   // So does a click outside a peek, unless it was a drag (selecting text) or asks about another
   // name (which opens its own peek). Whatever the click does draws the page; when it does
   // nothing, the page is drawn here.
@@ -5102,7 +5499,7 @@
     state.peek = null;
     setTimeout(() => { if (!state.peek && main.querySelector('.peek')) render(); }, 0);
   }, true);
-  window.addEventListener('resize', () => { if (MENU.open) renderMenu(); });
+  window.addEventListener('resize', () => { if (MENU.open) renderMenu(); roomToFold(); });
   viewer.addEventListener('keydown', (e) => {
     if (mentionKey(e)) return;
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.dataset && e.target.dataset.draft != null) {
@@ -5290,17 +5687,24 @@
     };
   })();
 
-  // ---------- the language server and untangle's metrics: a dot in the top bar, the numbers under
-  // it on hover (like px0's). Values change in place, so the popover stays open under the pointer.
+  // ---------- the language server and untangle's metrics: a dot in the top bar with the memory and
+  // CPU that untangle and its language server use together, each one's numbers under it on hover
+  // (like px0's). Values change in place, so the popover stays open under the pointer.
   const lspEl = $('#vw-lsp');
   const bytes = (n) => (n == null ? '—' : n < 1048576 ? Math.round(n / 1024) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB');
   const percent = (x) => (x == null ? '—' : x.toFixed(1) + '%');
+  // The two together, short enough to read at a glance: "1.4 GB · 3.2%".
+  const usage = (m) => {
+    const mem = (m.rss || 0) + (m.lsp.rss || 0), cpu = (m.cpu || 0) + (m.lsp.cpu || 0);
+    return `${mem < 1073741824 ? Math.round(mem / 1048576) + ' MB' : (mem / 1073741824).toFixed(1) + ' GB'} · ${cpu < 10 ? cpu.toFixed(1) : Math.round(cpu)}%`;
+  };
   let metricsMisses = 0, metricsTimer = null, lspState = 'off';
   function showMetrics(m) {
     const set = (k, v) => { const el = lspEl.querySelector(`[data-m="${k}"]`); if (el) el.textContent = v; };
-    const dot = $('#lsp-dot'), head = $('#lsp-state'), pid = $('#lsp-pid');
+    const dot = $('#lsp-dot'), head = $('#lsp-state'), pid = $('#lsp-pid'), use = $('#lsp-use');
     if (!m) {
       dot.className = 'dot failed';
+      use.textContent = '';
       head.textContent = 'untangle isn’t answering: run it again to keep reviewing';
       pid.hidden = true;
       lspEl.setAttribute('aria-label', head.textContent);
@@ -5313,7 +5717,8 @@
     // Its process on a line of its own.
     pid.textContent = lsp.state === 'ready' && lsp.pid ? `pid ${lsp.pid}` : '';
     pid.hidden = !pid.textContent;
-    lspEl.setAttribute('aria-label', head.textContent + (pid.textContent ? `, ${pid.textContent}` : ''));
+    use.textContent = usage(m);
+    lspEl.setAttribute('aria-label', `${head.textContent}${pid.textContent ? `, ${pid.textContent}` : ''}. Memory and CPU: ${use.textContent}`);
     set('rss', bytes(m.rss));
     set('cpu', percent(m.cpu));
     set('resources', String(m.resources));

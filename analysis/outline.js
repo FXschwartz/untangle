@@ -7,10 +7,20 @@
 // call, and a new title on it is a rewording. Tests are then compared as whole sentences: renaming
 // a Given rewords every test under it, and a test that reads the same in a new group is regrouped,
 // not new. Each call carries the change blocks in its range, in its own lines (a group's setup,
-// without its calls) and in its title, so the viewer can scope all of it to a chain.
+// without its calls) and in its title, so the viewer can scope all of it to a chain. A test counts
+// its expect calls, and a group says whether it sets anything up (setUp or setUpAll).
 
 const CLAUSE = /^\s*(given|when|then)\b/i;
 const TESTS = new Set(['test', 'testWidgets']);
+const SETUP = /^setUp(All)?\s*\(/;
+const EXPECT = new Set(['expect', 'expectLater']);
+
+// The expect calls in a test: expect and expectLater called by name (not a method of something).
+const expectsIn = (node) => node.descendantsOfType('identifier').filter((id) => {
+  if (!EXPECT.has(id.text)) return false;
+  const next = id.nextNamedSibling;
+  return !!next && next.type === 'selector' && next.namedChild(0)?.type === 'argument_part';
+}).length;
 
 // A call statement with a title: test, testWidgets and group, or a wrapper whose first argument is
 // a string (Serverpod's withServerpod, say), which counts as a group when it holds calls.
@@ -29,7 +39,8 @@ function callOf(node) {
   return { kind, title, s: node.startPosition.row + 1, e: node.endPosition.row + 1, te: arg.endPosition.row + 1 };
 }
 
-// The calls of a tree, nested. A wrapper that holds no calls is an ordinary call, not a group.
+// The calls of a tree, nested, a test with its expect calls and a group with whether it sets up.
+// A wrapper that holds no calls is an ordinary call, not a group.
 function callsOf(tree) {
   if (!tree) return [];
   const roots = [];
@@ -38,8 +49,9 @@ function callsOf(tree) {
     const c = callOf(node);
     if (c) {
       here = { ...c, kids: [], parent };
+      if (c.kind === 't') here.x = expectsIn(node);
       (parent ? parent.kids : roots).push(here);
-    }
+    } else if (parent && node.type === 'expression_statement' && SETUP.test(node.text.slice(0, 12))) parent.su = true;
     if (!c || c.kind !== 't') for (let i = 0; i < node.namedChildCount; i++) walk(node.namedChild(i), here);
   };
   walk(tree.rootNode, null);
@@ -149,6 +161,10 @@ export function testOutline(f) {
     if (n.parent) out.p = index.get(n.parent);
     if (isLabel(n)) out.l = 1;
     if (o) { out.os = o.s; out.oe = o.e; if (o.title !== n.title) out.ot = o.title; }
+    // Where the calls under it were, so its own old lines can be told from theirs.
+    if (o && o.kids.length) out.ok = o.kids.map((c) => [c.s, c.e]);
+    if (n.kind === 't') out.x = n.x;
+    else if (n.su) out.su = 1;
     if (n.kind === 't') {
       if (!o) out.st = 'new';
       else {

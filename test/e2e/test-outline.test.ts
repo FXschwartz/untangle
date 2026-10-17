@@ -36,11 +36,7 @@ ${thens}    });
 `;
 const discount = (tests: string) => `
   group('Given a cart with a discount of one,', () {
-    late List<int> prices;
-
-    setUp(() {
-      prices = [1, 2];
-    });
+    final prices = [1, 2];
 
     test('when the total is taken, then the discount comes off.', () {
       expect(discounted(prices, 1), 2);
@@ -78,6 +74,11 @@ async function openChain(page: Browser, name: string): Promise<void> {
   await page.click(`.sb-row[data-chain="${id}"]`);
   await page.until(`!!document.querySelector('#vw-main .ol-file')`);
 }
+
+/** An opened call's code as read: each row's sign, line number and text, a folded call as its title. */
+const codeRead = `[...document.querySelectorAll('#vw-main .ol-code > .ln')].map((row) => row.matches('.ol-ph')
+  ? row.querySelector('.no').textContent + ' [' + row.querySelector('.ol-ph-t').textContent + ']'
+  : ((row.querySelector('.sg')?.textContent || ' ') + ' ' + row.querySelector('.no').textContent + ' ' + row.querySelector('.tx').textContent).trimEnd()).join('\\n')`;
 
 function rowSelector(page: Browser, title: string): Promise<string> {
   return read(page, `(() => { const row = [...document.querySelectorAll('#vw-main .ol-row')].find((el) => el.querySelector('.ol-tt').textContent.trim() === ${JSON.stringify(title)}); return row ? '.ol-row[data-ol="' + row.dataset.ol + '"]' : ''; })()`);
@@ -173,6 +174,74 @@ describe('Given a served review by commit: a discount with its tests, more tests
     });
   });
 
+  describe('when the file opens on a then written after a blank line, ', () => {
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Cover more totals');
+      await page!.click(`${await rowSelector(page!, 'then it is positive.')} .ol-go`);
+      await page!.until(`!!document.querySelector('.code[data-p="test/cart_test.dart"] .ln[data-n="22"]') && !document.querySelector('#vw-main .ln.loading')`);
+      rows = await read(page!, `['21', '22'].map((n) => { const row = document.querySelector('.code[data-p="test/cart_test.dart"] .ln[data-n="' + n + '"]'); return n + (row.classList.contains('add') ? ' added' : ' unchanged') + (row.querySelector('.tick') ? ', marked' : ''); }).join(' | ')`);
+    });
+
+    it('then the blank line is added with the then, whose mark is on its first line of code.', () => {
+      assert.equal(rows, '21 added | 22 added, marked');
+    });
+  });
+
+  describe('when the renamed Given and then its when open in the Tests view, ', () => {
+    let given = '';
+    let when = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      const renamed = await read(page!, `(() => { const row = [...document.querySelectorAll('#vw-main .ol-row')].find((el) => el.querySelector('.ol-tt ins')?.textContent === 'holding'); return '.ol-row[data-ol="' + row.dataset.ol + '"]'; })()`);
+      await page!.click(renamed);
+      await page!.until(`!!document.querySelector('#vw-main .ol-code') && !document.querySelector('#vw-main .ol-code .ln.loading')`);
+      given = await read(page!, codeRead);
+      await page!.click(renamed);
+      const total = await rowSelector(page!, 'when the total is taken,');
+      await page!.click(total);
+      await page!.until(`!!document.querySelector('#vw-main .ol-code') && !document.querySelector('#vw-main .ol-code .ln.loading')`);
+      when = await read(page!, codeRead);
+      await page!.click(total);
+    });
+
+    it('then the Given\'s code shows the title line it removed beside the one it added, with its when folded.', () => {
+      assert.equal(given, [
+        "− 4   group('Given a cart with two items,', () {",
+        "+ 4   group('Given a cart holding two items,', () {",
+        '  5     late List<int> prices;',
+        '  6',
+        '  7     setUp(() {',
+        '  8       prices = [1, 2];',
+        '  9     });',
+        '  10',
+        '11 [when the total is taken,]',
+        '+ 26   });',
+      ].join('\n'));
+    });
+
+    it('then the when\'s code folds its thens, without the blank line between them.', () => {
+      assert.equal(when, [
+        "  11     group('when the total is taken,', () {",
+        '  12       late int sum;',
+        '  13',
+        '  14       setUp(() {',
+        '  15         sum = total(prices);',
+        '  16       });',
+        '  17',
+        '18 [then it adds the prices.]',
+        '22 [then it is positive.]',
+        '+ 25     });',
+      ].join('\n'));
+    });
+  });
+
   describe('when a new then is marked reviewed with its mark, ', () => {
     let rows = '';
     let pill = '';
@@ -263,6 +332,8 @@ describe('Given a served review by commit: a discount with its tests, more tests
 
   describe('when the Tests view is opened from the sidebar, ', () => {
     let page1 = '';
+    let notes = '';
+    let filters = '';
 
     before(async () => {
       await rest(page!);
@@ -270,6 +341,12 @@ describe('Given a served review by commit: a discount with its tests, more tests
       await page!.click('[data-act="tests-open"]');
       await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
       page1 = await read(page!, `document.querySelector('[data-act="tests-open"]').textContent + '\\n' + document.querySelector('.fv-head .facts').textContent + '\\n' + ${rowsRead}`);
+      filters = await read(page!, `[...document.querySelectorAll('[data-act="tests-filter"]')].map((button) => button.firstChild.textContent + ' ' + button.querySelector('.dt').textContent + ' ' + button.querySelector('i').textContent + (button.disabled ? ' (off)' : '')).join(', ')`);
+      notes = await read(page!, `[...document.querySelectorAll('#vw-main .ol-row')].map((row) => {
+        const title = row.querySelector('.ol-tt'), words = title.cloneNode(true);
+        words.querySelectorAll('del').forEach((el) => el.remove());
+        return [words.textContent.trim(), row.querySelector('.ol-nosu') ? 'no setUp' : '', row.querySelector('.ol-xp')?.textContent ?? '', row.querySelector('.ol-df')?.textContent ?? ''].filter(Boolean).join(' · ');
+      }).join('\\n')`);
     });
 
     it('then it lists every sentence the tests add or reword, with the commit that wrote each one.', () => {
@@ -284,6 +361,138 @@ describe('Given a served review by commit: a discount with its tests, more tests
         `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
         `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
         `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+      ].join('\n'));
+    });
+
+    it('then each filter counts the sentences it keeps, and one that keeps none is off.', () => {
+      assert.equal(filters, 'All · 4, New · 3, Reworded · 1, Regrouped · 0 (off), Removed · 0 (off)');
+    });
+
+    // The lines are the diff's: git pairs the file's closing brackets as it likes (the last test's
+    // with the old when's, so the two Givens' new lines run on under the first one).
+    it('then the Given without setUp has a dot, each test counts its expect calls, and each row knows the diff\'s lines in it.', () => {
+      assert.equal(notes, [
+        'Given a cart holding two items, · +7 −1',
+        'when the total is taken, · +5',
+        'then it adds the prices. · 1 expect',
+        'then it is positive. · 1 expect · +3',
+        'Given a cart with a discount of one, · no setUp · +9',
+        'when the total is taken, then the discount comes off. · 1 expect · +3',
+        'when nothing is bought, then nothing comes off. · 1 expect · +2',
+      ].join('\n'));
+    });
+  });
+
+  describe('when a test in the Tests view is hovered, ', () => {
+    let shown = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      const row = await rowSelector(page!, 'then it is positive.');
+      const other = await rowSelector(page!, 'when nothing is bought, then nothing comes off.');
+      await page!.hover(row);
+      shown = await read(page!, `['${row}', '${other}'].map((sel) => ['.ol-xp', '.ol-df'].map((part) => getComputedStyle(document.querySelector(sel + ' ' + part)).opacity).join(' ')).join(' | ')`);
+    });
+
+    it('then its expect calls and lines show beside its commit, and the other rows\' stay hidden.', () => {
+      assert.equal(shown, '1 1 | 0 0');
+    });
+  });
+
+  describe('when a then opens and closes with motion on, ', () => {
+    let opening = '';
+    let closing = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Cover more totals');
+      await page!.reducedMotion(false);
+      const row = await rowSelector(page!, 'then it is positive.');
+      await page!.click(row);
+      opening = await read(page!, `(() => { const grow = document.querySelector('#vw-main .grow'); return grow ? 'opens below ' + (grow.previousElementSibling?.matches('.ol-row.open') ? 'its row' : 'something else') + ' with ' + grow.querySelectorAll('.ol-code').length + ' code in it' : 'no opening'; })()`);
+      await page!.until(`!document.querySelector('#vw-main .grow')`);
+      await page!.click(row);
+      closing = await read(page!, `(() => { const ghost = document.querySelector('#vw-main .ghost'); return ghost ? 'folds into ' + (ghost.previousElementSibling?.matches('.ol-row:not(.open)') ? 'its row' : 'something else') + ' with ' + ghost.querySelectorAll('.ol-code').length + ' code in it' : 'no folding'; })()`);
+      await page!.until(`!document.querySelector('#vw-main .ghost')`);
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+    });
+
+    it('then its code opens downward from its row, and folds back into it.', () => {
+      assert.equal(`${opening}\n${closing}`, 'opens below its row with 1 code in it\nfolds into its row with 1 code in it');
+    });
+  });
+
+  describe('when a test opens in its file from the scrolled Tests view, and Back is pressed, ', () => {
+    let trip = '';
+
+    before(async () => {
+      await page!.setViewport(1400, 260);
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      await page!.eval(`document.querySelector('#vw-main').scrollTop = 90`);
+      const top = await read(page!, `String(document.querySelector('#vw-main').scrollTop)`);
+      await page!.eval(`document.querySelector('${await rowSelector(page!, 'when nothing is bought, then nothing comes off.')} .ol-go').click()`);
+      await page!.until(`(document.querySelector('.fv-head .crumbs')?.textContent || '').includes('cart_test.dart')`);
+      const back = await read(page!, `document.querySelector('.fv-back')?.title ?? 'no Back'`);
+      await page!.click('.fv-back');
+      await page!.until(`document.querySelector('.fv-head .crumbs')?.textContent === 'Tests'`);
+      const there = await read(page!, `'Tests at ' + (String(document.querySelector('#vw-main').scrollTop) === '${top}' ? 'its scroll' : document.querySelector('#vw-main').scrollTop)`);
+      await page!.eval('history.forward()');
+      await page!.until(`(document.querySelector('.fv-head .crumbs')?.textContent || '').includes('cart_test.dart')`);
+      await page!.eval('history.back()');
+      await page!.until(`document.querySelector('.fv-head .crumbs')?.textContent === 'Tests'`);
+      const again = await read(page!, `'Tests at ' + (String(document.querySelector('#vw-main').scrollTop) === '${top}' ? 'its scroll' : document.querySelector('#vw-main').scrollTop)`);
+      trip = [back, there, again].join('\n');
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the file offers Back to the Tests, which returns there scrolled as it was, and so does the browser\'s Back after its Forward.', () => {
+      assert.equal(trip, 'Back to Tests (Alt ←)\nTests at its scroll\nTests at its scroll');
+    });
+  });
+
+  describe('when the sidebar\'s tabs are read, ', () => {
+    let pinned = '';
+    let lines = '';
+
+    before(async () => {
+      await rest(page!);
+      const pins = `[...document.querySelectorAll('#vw-side .sb-pin .sb-row')].map((row) => row.querySelector('.nm').textContent + (row.querySelector('.cnt')?.textContent ? ' ' + row.querySelector('.cnt').textContent : '')).join(', ')`;
+      const diff = (sel: string, name: string) => `[...document.querySelectorAll('#vw-side ${sel}')].map((row) => ${name} + ' ' + [row.querySelector('.df')?.dataset.a, row.querySelector('.df')?.dataset.d].filter(Boolean).join(' ')).join(', ')`;
+      await page!.click('[data-tab="chains"]');
+      const chains = await read(page!, pins);
+      const chainLines = await read(page!, diff('.sb-row[data-chain]', `row.querySelector('.nm').textContent`));
+      await page!.click('[data-tab="commits"]');
+      const commits = await read(page!, pins);
+      const commitLines = await read(page!, diff('.cm-row[data-commit]', `row.querySelector('.cm-s').textContent`));
+      await page!.click('[data-tab="files"]');
+      const fileLines = await read(page!, diff('.sb-row.tr', `row.querySelector('.nm').textContent`));
+      pinned = `Chains: ${chains}\nCommits: ${commits}`;
+      lines = `${chainLines}\n${commitLines}\n${fileLines}`;
+    });
+
+    it('then the Chains tab pins its chain map, History and Tests above its chains, and the Commits tab History and every change above its commits.', () => {
+      assert.equal(pinned, 'Chains: Chain map, History 3, Tests 4\nCommits: History, All changes 6');
+    });
+
+    // A chain's lines are its own changes' (as its tooltip says, a blank line before a change
+    // included), a commit's all it changed.
+    it('then each chain, commit, folder and file keeps the lines it adds and removes for its hover.', () => {
+      assert.equal(lines, [
+        'Take a discount +9, Cover more totals +9, Name the scenario +1 −1',
+        'Name the scenario +1 −1, Cover more totals +8, Take a discount +10',
+        'lib +2, cart.dart +2, test +17 −1, cart_test.dart +17 −1',
       ].join('\n'));
     });
   });
@@ -343,9 +552,10 @@ describe('Given a served review by commit: a discount with its tests, more tests
       await rest(page!);
       await openChain(page!, 'Cover more totals');
       await page!.click(`${await rowSelector(page!, 'then it is positive.')} .ol-go`);
-      // The file's other lines load after it opens, and the line it opened at is placed again then.
+      // The file's other lines load after it opens, and the line it opened at is placed again then,
+      // and again over the three frames after (once the source is loaded, right away).
       await page!.until(`!!document.querySelector('.code[data-p="test/cart_test.dart"] [data-n="23"]') && !document.querySelector('#vw-main .ln.loading')`);
-      await page!.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await page!.eval(`new Promise((resolve) => { let frames = 0; const tick = () => (++frames >= 4 ? resolve() : requestAnimationFrame(tick)); requestAnimationFrame(tick); })`);
       await page!.eval(`(() => { const main = document.querySelector('#vw-main'); const row = main.querySelector('.code[data-p="test/cart_test.dart"] .ln[data-n="23"]'); main.scrollTop += row.getBoundingClientRect().top - main.getBoundingClientRect().top - main.querySelector('.fv-head').offsetHeight; })()`);
       await page!.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       await page!.until(`!!document.querySelector('.ol-pin.on')`);
@@ -362,6 +572,77 @@ describe('Given a served review by commit: a discount with its tests, more tests
         'when the total is taken,',
         'then it is positive.',
       ].join('\n'));
+    });
+  });
+
+  describe('when a chain scrolls past its graph and the graph drops and folds back, with motion on, ', () => {
+    let fold = '';
+    let motion = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Take a discount');
+      await page!.setViewport(1400, 360);
+      await page!.reducedMotion(false);
+      // Most of the way under the header, the graph shrinks toward its button; once it's gone, the
+      // button pulses. (The lines between hunks load as they show: the page settles first.)
+      const settle = `new Promise((resolve) => { const wait = () => (document.querySelector('#vw-main .ln.loading') ? setTimeout(wait, 50) : requestAnimationFrame(() => requestAnimationFrame(resolve))); wait(); })`;
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'), box = main.querySelector('.graph-box'); main.scrollTop += box.getBoundingClientRect().top - main.getBoundingClientRect().top - main.querySelector('.fv-head').offsetHeight + box.offsetHeight * 0.8; })()`);
+      await page!.eval(settle);
+      const half = await read(page!, `document.querySelector('.graph-box').style.transform.startsWith('scale(') ? 'shrinking' : 'whole'`);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); main.scrollTop = main.scrollHeight; })()`);
+      await page!.eval(settle);
+      fold = `${half} · ${await read(page!, `document.querySelector('.fv-head [data-act="graph"]').classList.contains('took') ? 'the button took it' : 'no pulse'`)}`;
+      // One animation drops it; folding plays that same animation back from where it is.
+      motion = await read(page!, `(async () => {
+        const btn = document.querySelector('.fv-head [data-act="graph"]'), gd = document.querySelector('.gd');
+        btn.click();
+        const down = gd.getAnimations()[0];
+        const opening = down ? 'forward ' + down.playbackRate : 'no animation';
+        // Folded on its way down: back from where it got to.
+        while (down && down.currentTime < 80) await new Promise((resolve) => requestAnimationFrame(resolve));
+        const at = down ? down.currentTime : 0;
+        btn.click();
+        const up = gd.getAnimations()[0];
+        const closing = up === down ? 'the same one, back ' + up.playbackRate + (up.currentTime <= at ? ' from where it was' : ' from elsewhere') : 'another animation';
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return opening + ' · ' + closing + ' · ' + (gd.hidden ? 'folded' : 'down') + ' with ' + gd.getAnimations().length + ' animations left';
+      })()`);
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the graph shrinks into its button as it scrolls away, and its drop folds back by the same motion reversed.', () => {
+      assert.equal(`${fold}\n${motion}`, 'shrinking · the button took it\nforward 1 · the same one, back -1 from where it was · folded with 0 animations left');
+    });
+  });
+
+  describe('when the graph button of a test file in three chains is clicked, and a member is picked, ', () => {
+    let dropped = '';
+    let went = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="files"]');
+      await page!.click('[data-open="test/cart_test.dart"]');
+      await page!.until(`(document.querySelector('.fv-head .crumbs')?.textContent || '').includes('cart_test.dart')`);
+      await page!.click('.fv-head [data-act="graph"]');
+      await page!.until(`!document.querySelector('.gd').hidden`);
+      dropped = await read(page!, `[...document.querySelectorAll('.gd-tabs button')].map((tab) => tab.textContent + (tab.getAttribute('aria-selected') === 'true' ? ' (shown)' : '')).join(' | ')`);
+      await page!.click('.gd-tabs button[aria-selected="false"]');
+      const name = await read(page!, `document.querySelector('.gd-tabs button[aria-selected="true"]').textContent`);
+      await page!.click('.gd g.g-node');
+      await page!.until(`!document.querySelector('.gd') || document.querySelector('.gd').hidden`);
+      went = `${name} · ${await read(page!, `document.querySelector('.fv-head .crumbs b').textContent`)}`;
+    });
+
+    // The file opens at its top, on the renamed Given: the chain that renamed it shows first.
+    it('then the graph drops with a tab for each of the file\'s chains, in the file\'s order, the one of the line being read shown, and a member opens its chain.', () => {
+      const [picked, opened] = went.split(' · ');
+      assert.equal(`${dropped}\n${picked === opened ? 'opened the picked chain' : `opened ${opened}, picked ${picked}`}`, 'Name the scenario (shown) | Cover more totals | Take a discount\nopened the picked chain');
     });
   });
 

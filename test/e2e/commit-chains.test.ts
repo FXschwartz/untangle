@@ -112,7 +112,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     });
 
     it('then a bar under its members shares its lines between its commit and the follow-up, oldest first, then counts them.', () => {
-      assert.equal(bar, `${reportSha.slice(0, 7)} Add a report: 83% of the lines (its own) | ${labelSha.slice(0, 7)} Label the sum: 17% of the lines (its own) · 2 commits · Commit details`);
+      assert.equal(bar, `${reportSha.slice(0, 7)} Add a report: 86% of the lines (its own) | ${labelSha.slice(0, 7)} Label the sum: 14% of the lines (its own) · 2 commits · Commit details`);
     });
   });
 
@@ -124,7 +124,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
       await openChain(page!, 'Add a report');
       await page!.click('[data-act="show-commits"]');
       await page!.until(`!!document.querySelector('.cm-list.follow')`);
-      rows = await read(page!, `[document.querySelectorAll('.sb-group')[1].lastElementChild.textContent, ...[...document.querySelectorAll('.cm-row')].map((r) => r.querySelector('.cm-s').textContent + (r.classList.contains('mine') ? ' · ' + r.querySelector('.cm-m b').textContent + (r.querySelector('.ring') ? ' · ringed' : '') : ' · faded'))].join('\\n')`);
+      rows = await read(page!, `[[...document.querySelectorAll('.sb-group')].find((group) => group.firstElementChild.textContent === 'Commits').lastElementChild.textContent, ...[...document.querySelectorAll('.cm-row')].map((r) => r.querySelector('.cm-s').textContent + (r.classList.contains('mine') ? ' · ' + r.querySelector('.cm-m b').textContent + (r.querySelector('.ring') ? ' · ringed' : '') : ' · faded'))].join('\\n')`);
     });
 
     it('then the chain\'s two commits stand out with their changes here, ringed as its own, and the others fade.', () => {
@@ -154,7 +154,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     });
 
     it('then only the line it wrote stays lit, and its part of the bar lights.', () => {
-      assert.equal(lit, `print('sum: \${price(total)}'); | ${labelSha.slice(0, 7)} Label the sum: 17% of the lines`);
+      assert.equal(lit, `print('sum: \${price(total)}'); | ${labelSha.slice(0, 7)} Label the sum: 14% of the lines`);
     });
   });
 
@@ -168,7 +168,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
       await page!.until(`!!document.querySelector('.cm-list.follow')`);
       await page!.key('n');
       await page!.until(`(document.querySelector('.crumbs b')?.textContent || '') === 'Double the price'`);
-      followed = await read(page!, `[document.querySelector('[data-tab="commits"]').getAttribute('aria-selected') === 'true' ? 'Commits shown' : 'Commits hidden', document.querySelectorAll('.sb-group')[1].lastElementChild.textContent, [...document.querySelectorAll('.cm-row.mine .cm-s')].map((s) => s.textContent).join(', ')].join(' | ')`);
+      followed = await read(page!, `[document.querySelector('[data-tab="commits"]').getAttribute('aria-selected') === 'true' ? 'Commits shown' : 'Commits hidden', [...document.querySelectorAll('.sb-group')].find((group) => group.firstElementChild.textContent === 'Commits').lastElementChild.textContent, [...document.querySelectorAll('.cm-row.mine .cm-s')].map((s) => s.textContent).join(', ')].join(' | ')`);
     });
 
     it('then the Commits tab stays and follows the chain that opens.', () => {

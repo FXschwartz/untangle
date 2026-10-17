@@ -1218,7 +1218,7 @@ describe('Given a new class nothing uses, whose methods call each other in two p
     it('then the class and its methods stay whole without becoming a singleton chain.', () => {
       assert.equal(chainsOf(review!), 'none');
       assert.deepEqual(baseOf(review!).units.map((unit) => [unit.name, unit.blocks]), [
-        ['Box', ['lib/a.dart#1', 'lib/a.dart#2', 'lib/a.dart#3', 'lib/a.dart#4', 'lib/a.dart#5']],
+        ['Box', ['lib/a.dart#0', 'lib/a.dart#1', 'lib/a.dart#2', 'lib/a.dart#3', 'lib/a.dart#4']],
       ]);
     });
   });
@@ -1242,8 +1242,8 @@ describe('Given a removed class whose methods called each other in two pairs, ',
 
     it('then the class and its methods are one chain, named after it with a minus.', () => {
       assert.equal(chainsOf(review!), [
-        'member − Box +0 -9 depth 0',
-        'lib/a.dart#1, lib/a.dart#2, lib/a.dart#3, lib/a.dart#4, lib/a.dart#5',
+        'member − Box +0 -10 depth 0',
+        'lib/a.dart#0, lib/a.dart#1, lib/a.dart#2, lib/a.dart#3, lib/a.dart#4',
         'L0 Box._w, L1 Box.width, L2 Box, L2 Box._h, L2 Box.height',
         'Box.width → Box._w [_w], Box.height → Box._h [_h]',
         'uses none, shares none, family 0',
@@ -1269,11 +1269,11 @@ describe('Given a test moved from one group to another in its file, ', { skip: s
 
     after(() => review?.remove());
 
+    // The blank line before the moved test goes with it: one line added, nothing to review.
     it('then the removed copy points at the moved test, which has nothing to review.', () => {
       assert.equal(blocksOf(review!), [
         'test/a_test.dart#0 main +0 -0 test adds, points at line 13 with 0 to review, standalone',
-        'test/a_test.dart#1 (top) +1 -0 standalone',
-        'test/a_test.dart#2 main +0 -0 test adds, standalone',
+        'test/a_test.dart#1 main +1 -0 test adds, standalone',
       ].join('\n'));
     });
   });

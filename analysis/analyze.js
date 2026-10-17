@@ -140,7 +140,8 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
   }
   // Where a change block splits. Pure additions split where a new-side unit starts, pure
   // deletions where an old-side unit starts. A mixed block keeps its removed lines with the
-  // added lines they were diffed against, and only splits the added lines after them.
+  // added lines they were diffed against, and only splits the added lines after them. Blank lines
+  // are never a change of their own: blank lines before the first unit go with it.
   function splitPoints(b, newStarts, oldStarts) {
     const cuts = [];
     if (!b.dels && newStarts) b.rows.forEach((r, i) => { if (i && newStarts.has(r.n)) cuts.push(i); });
@@ -150,7 +151,16 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       b.rows.forEach((r, i) => { if (r.type === '-' || (r.toks && r.toks.some((tk) => tk.peer))) last = i; });
       b.rows.forEach((r, i) => { if (i > last && r.type === '+' && newStarts.has(r.n)) cuts.push(i); });
     }
-    return cuts;
+    const blank = (from, to) => b.rows.slice(from, to).every((r) => !r.text.trim());
+    const out = [];
+    let start = 0;
+    for (const cut of cuts) {
+      if (blank(start, cut)) continue;
+      out.push(cut);
+      start = cut;
+    }
+    if (out.length && blank(out[out.length - 1], b.rows.length)) out.pop();
+    return out;
   }
   function nameOf(sig) {
     const byField = sig.childForFieldName && sig.childForFieldName('name');
@@ -1603,7 +1613,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         }) })),
         blocks: f.blocks.map((b) => ({ id: b.id, hunk: b.hunk, first: b.first, len: b.rows.length, adds: b.adds, dels: b.dels, member: b.member, test: b.test, grp: b.group || undefined, mk: b.memberKey, unit: b.unit?.id, documents: b.documents || undefined, edits: b.edits.map((e) => e.id),
           move: b.move ? { f: fileIndex.get(b.move.file), b: b.move.from.id, rows: b.move.rows.map(rowOut) } : undefined,
-          movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: b.movedTo.block.rows[0].n, changes: b.movedTo.block.edits.length } : undefined })),
+          movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: (b.movedTo.block.rows.find((r) => r.text.trim()) || b.movedTo.block.rows[0]).n, changes: b.movedTo.block.edits.length } : undefined })),
         // A test file's tests as sentences: its group and test calls, matched and compared.
         outline: f.lang === 'dart' && TEST_FILE.test(f.p) ? testOutline(f) || undefined : undefined,
       })),

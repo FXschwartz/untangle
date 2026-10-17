@@ -346,24 +346,27 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     });
   });
 
-  describe('when the graph is hidden and shown again, ', () => {
+  describe('when the chain scrolls past its graph and the graph\'s button is clicked, ', () => {
     let shown: string;
 
     before(async () => {
       await rest(page!);
       await openChain(page!, 'used');
-      await page!.until(`!!document.querySelector('[data-act="graph"]')`);
-      if (await read(page!, `document.querySelector('.graph-box') ? 'shown' : 'hidden'`) === 'shown') {
-        await page!.click('[data-act="graph"]');
-        await page!.until(`!document.querySelector('.graph-box')`);
-      }
-      await page!.click('[data-act="graph"]');
-      await page!.until(`!!document.querySelector('.graph-box')`);
-      shown = await read(page!, `document.querySelector('.graph-box') ? 'shown' : 'hidden'`);
+      await page!.setViewport(1400, 360);
+      await page!.until(`!!document.querySelector('.fv-head [data-act="graph"]')`);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); main.scrollTop = main.scrollHeight; })()`);
+      await page!.until(`document.querySelector('.fv-head [data-act="graph"]').getAttribute('aria-pressed') === 'false'`);
+      await page!.click('.fv-head [data-act="graph"]', { scroll: false });
+      await page!.until(`!document.querySelector('.gd').hidden`);
+      shown = await read(page!, `[document.querySelector('.graph-box') ? 'in the page' : 'gone', document.querySelector('.gd .graph') ? 'dropped' : 'not dropped'].join(' · ')`);
     });
 
-    it('then the graph is on the page again.', () => {
-      assert.equal(shown, 'shown');
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the graph, still in the page at the top, drops over the code from the header.', () => {
+      assert.equal(shown, 'in the page · dropped');
     });
   });
 

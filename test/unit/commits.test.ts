@@ -98,7 +98,7 @@ describe('Given a commit that adds a function and a later commit that only edits
         'by history',
         'feat Add a report',
         '  commits: feat: Add a report (start), fix: Label the sum (follow-up)',
-        '  chains: commit Add a report [lib/report.dart#1]',
+        '  chains: commit Add a report [lib/report.dart#0]',
         'renames: none',
       ].join('\n'));
     });
@@ -127,7 +127,7 @@ describe('Given a commit that adds a function and a later commit that tests it a
         'by history',
         'feat Add a report',
         '  commits: feat: Add a report (start)',
-        '  chains: commit Add a report [lib/report.dart#1]',
+        '  chains: commit Add a report [lib/report.dart#0]',
         '  changed later by: test: Cover the report (1)',
         'test Cover the report',
         '  commits: test: Cover the report (builds-on)',
