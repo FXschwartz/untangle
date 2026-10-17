@@ -2647,6 +2647,52 @@
     if (testFiles.length) h += `<div class="ol-sect">Tests${testFiles.length > 1 ? ` · ${testFiles.length} files` : ''}</div>` + testFiles.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('');
     return h;
   }
+  // ---------- pinned groups: over a test file's code or outline, the groups of the line at the top
+  // of the view whose own lines have scrolled away above it, so a test read in the middle of its
+  // file keeps its sentence on screen.
+  function olPin() {
+    const pin = main.querySelector('.ol-pin');
+    if (!pin) return;
+    const hh = headH();
+    main.style.setProperty('--hh', hh + 'px');
+    // The line right under the header, which the pin covers: what it pins doesn't move what it reads.
+    const box = main.getBoundingClientRect();
+    const top = box.top + hh;
+    const m = M();
+    const byPath = m.byPath || (m.byPath = new Map(m.files.map((f) => [f.p, f])));
+    let row = null;
+    for (const x of [box.left + 36, box.left + box.width / 3]) {
+      const el = [...document.elementsFromPoint(x, top + 3)].find((e) => !e.closest('.ol-pinw, .fv-head'));
+      row = el && el.closest && el.closest('.ol-row[data-ol], .ln, .sl');
+      if (row) break;
+    }
+    // Above the top: every element that stands for the call (its outline row, its call's line).
+    const gone = (f, g) => {
+      const els = [...main.querySelectorAll('.ol-row[data-ol]')].filter((x) => x.dataset.ol === olKey(f, g))
+        .concat([...main.querySelectorAll('.code[data-p]')].filter((c) => c.dataset.p === f.p).flatMap((c) => [...c.querySelectorAll(`[data-n="${g.s}"]`)]));
+      return els.every((x) => x.getBoundingClientRect().bottom <= top + 1);
+    };
+    let groups = [], f = null;
+    if (row && row.matches('.ol-row')) {
+      if (!row.matches('.sent')) {
+        const at = row.dataset.ol.lastIndexOf('#'), id = row.dataset.ol.slice(at + 1);
+        f = byPath.get(row.dataset.ol.slice(0, at));
+        const ol = olOf(f), n = ol && (id[0] === 'r' ? ol.removed[Number(id.slice(1))] : ol.nodes[Number(id)]);
+        if (n && n.parent) groups = olPath(n.parent).filter((g) => gone(f, g));
+      }
+    } else if (row) {
+      const code = row.closest('.code[data-p]');
+      f = code && byPath.get(code.dataset.p);
+      let r = row;
+      while (r && !r.dataset.n) r = r.previousElementSibling;
+      const ln = r ? Number(r.dataset.n) : 0, ol = olOf(f);
+      if (ol && ln) groups = ol.nodes.filter((n) => n.s < ln && ln <= n.e).filter((g) => gone(f, g));
+    }
+    const h = groups.map((g, i) => `<div class="ol-pin-l${g.l ? ' lbl' : ''}" style="--d:${i}">${g.l ? esc(g.t) : olWords(g.t)}</div>`).join('');
+    if (pin.innerHTML !== h) pin.innerHTML = h;
+    pin.classList.toggle('on', !!h);
+  }
+
   // ---------- the Tests view: every sentence the review's tests add, reword, regroup or remove, file
   // by file, each with the chain that wrote it, then the code edited under sentences that stay.
   function testsTotals() {
@@ -3865,6 +3911,8 @@
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
     }
+    const fvHead = main.querySelector('.fv-head');
+    if (fvHead) fvHead.insertAdjacentHTML('afterend', '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>');
     restorePeekScroll();
     const gs2 = graphAt && graphAt.view === viewKey() && main.querySelector('.graph-scroll');
     if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }
@@ -3882,6 +3930,7 @@
     } else if (opts.top) main.scrollTop = 0;
     else main.scrollTop = keep;
     if (opts.reveal) revealDetail();
+    olPin();
     const cur = side.querySelector('[aria-current="true"]');
     if (cur && opts.top) {
       if (cur.offsetTop < side.scrollTop || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - side.clientHeight / 3;
@@ -4175,7 +4224,7 @@
   let scrollRaf = 0;
   main.addEventListener('scroll', () => {
     if (scrollRaf) return;
-    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); spyStrip(); mini.scrolled(); });
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); spyStrip(); mini.scrolled(); olPin(); });
   }, { passive: true });
   // n and p: the next and previous chain with changes to review.
   function goChain(step) {

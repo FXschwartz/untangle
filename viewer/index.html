@@ -655,6 +655,13 @@ button.sb-group:hover { color: var(--text-2); }
 .ol-out { padding-bottom: 6px; }
 .ol-bar { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 0 22px 12px; }
 .ol-bar .sp { flex: 1; }
+/* The groups of the line at the top of the view, once their own lines have scrolled away. */
+.ol-pinw { position: sticky; top: var(--hh, 52px); left: 0; z-index: 4; height: 0; }
+.ol-pin { display: none; padding: 6px 22px 7px 34px; background: rgba(18, 18, 21, .97); box-shadow: 0 1px 0 var(--hair), 0 8px 16px -10px rgba(0, 0, 0, .8); }
+.ol-pin.on { display: grid; gap: 1px; }
+.ol-pin-l { padding-left: calc(var(--d) * 18px); font: 400 12.5px/1.45 var(--ui); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ol-pin-l .kw { font-weight: 600; }
+.ol-pin-l.lbl { font: 500 11.5px/1.45 var(--code); color: var(--text-3); }
 .inst-gap { height: 10px; }
 .sym-h { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 16px 22px 6px; font-size: 12.5px; color: var(--text-3); }
 .sym-h b { color: var(--text); }

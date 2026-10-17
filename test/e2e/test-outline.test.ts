@@ -334,4 +334,58 @@ describe('Given a served review by commit: a discount with its tests, more tests
       ].join('\n'));
     });
   });
+
+  describe('when a then opens in its file and the page scrolls to the line under its title, ', () => {
+    let pinned = '';
+
+    before(async () => {
+      await page!.setViewport(1400, 420);
+      await rest(page!);
+      await openChain(page!, 'Cover more totals');
+      await page!.click(`${await rowSelector(page!, 'then it is positive.')} .ol-go`);
+      // The file's other lines load after it opens, and the line it opened at is placed again then.
+      await page!.until(`!!document.querySelector('.code[data-p="test/cart_test.dart"] [data-n="23"]') && !document.querySelector('#vw-main .ln.loading')`);
+      await page!.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); const row = main.querySelector('.code[data-p="test/cart_test.dart"] .ln[data-n="23"]'); main.scrollTop += row.getBoundingClientRect().top - main.getBoundingClientRect().top - main.querySelector('.fv-head').offsetHeight; })()`);
+      await page!.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await page!.until(`!!document.querySelector('.ol-pin.on')`);
+      pinned = await read(page!, `[...document.querySelectorAll('.ol-pin .ol-pin-l')].map((el) => el.textContent).join('\\n')`);
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then its Given, its when and its own title stay pinned above the code.', () => {
+      assert.equal(pinned, [
+        'Given a cart holding two items,',
+        'when the total is taken,',
+        'then it is positive.',
+      ].join('\n'));
+    });
+  });
+
+  describe('when the Tests view scrolls past a Given to a test under it, ', () => {
+    let pinned = '';
+
+    before(async () => {
+      await page!.setViewport(1400, 260);
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); const row = [...main.querySelectorAll('.ol-row')].find((el) => el.querySelector('.ol-tt').textContent.trim() === 'when nothing is bought, then nothing comes off.'); main.scrollTop += row.getBoundingClientRect().top - main.getBoundingClientRect().top - main.querySelector('.fv-head').offsetHeight; })()`);
+      await page!.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await page!.until(`!!document.querySelector('.ol-pin.on')`);
+      pinned = await read(page!, `[...document.querySelectorAll('.ol-pin .ol-pin-l')].map((el) => el.textContent).join('\\n')`);
+    });
+
+    after(async () => {
+      await page!.setViewport(1400, 900);
+    });
+
+    it('then the Given stays pinned above the test.', () => {
+      assert.equal(pinned, 'Given a cart with a discount of one,');
+    });
+  });
 });
