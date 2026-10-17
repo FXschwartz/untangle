@@ -851,6 +851,14 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .pk-x { appearance: none; border: 0; background: none; color: var(--text-3); font: 500 12px/1 var(--ui); cursor: pointer; padding: 6px 4px; }
 .pk-x:hover { color: var(--text); }
 .pk-code { max-height: min(360px, 45vh); overflow: auto; overscroll-behavior: contain; padding: 2px 0 8px; font: 400 12px/1.6 var(--code); }
+/* While its code is on its way, a peek is as tall as it will be: it opens once and fills in place. */
+.pk-code.pk-tall, .pk-wait { height: min(360px, 45vh); }
+.pk-wait { display: flex; flex-direction: column; gap: 11px; padding: 12px 14px 0 70px; overflow: hidden; }
+.pk-sk { display: block; flex: none; height: 8px; width: 46%; border-radius: 4px; background: linear-gradient(90deg, var(--hover) 25%, var(--hair-2) 50%, var(--hover) 75%) 0 0 / 300% 100%; animation: pksk 1.4s linear infinite; }
+.pk-sk:nth-child(3n + 1) { width: 62%; }
+.pk-sk:nth-child(4n + 2) { width: 34%; margin-left: 24px; }
+.pk-sk:nth-child(5n) { width: 52%; margin-left: 24px; }
+@keyframes pksk { to { background-position: -150% 0; } }
 .pk-ln { display: flex; white-space: pre; }
 .pk-ln .no { width: 46px; flex: none; padding-right: 10px; text-align: right; color: var(--text-4); }
 /* Prose wraps within the available column, including long links, without adding line numbers. */

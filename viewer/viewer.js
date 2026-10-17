@@ -960,9 +960,11 @@
   function peekCodeHtml(t, fallback, usage) {
     const v = { side: t.side, path: t.p, ext: t.ext, commit: t.commit };
     const canLoad = CONFIG.served && (t.side || t.ext != null || t.commit);
-    const source = canLoad ? loadSource(v, true) : null;
+    const source = canLoad ? loadSource(v, 'peek') : null;
     const full = source && source.status === 'ok';
     const lines = full ? source.lines : t.code || [];
+    const waiting = source && source.status === 'loading';
+    if (waiting && !fallback && !lines.length) return PEEK_WAIT;
     const start = full ? 1 : t.s || 1;
     const key = `${srcKey(v)}:${t.l}:${full ? 'file' : 'snippet'}`;
     const colors = textColors(full ? source.text : lines.join('\n'), t.p);
@@ -975,7 +977,29 @@
       return `<div class="pk-ln${file.lang === 'md' ? ' md' : ''}${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
     }).join('');
     const note = source && source.status === 'error' ? `<div class="pk-foot">${esc(source.error)} · showing the saved snippet</div>` : '';
-    return `<div class="pk-code" tabindex="0" aria-label="Code in ${esc(t.p)}" data-peek-code="${esc(key)}">${body}</div>${note}`;
+    // While the whole file is on its way, the saved lines show in a viewport as tall as it will be.
+    return `<div class="pk-code${waiting ? ' pk-tall' : ''}" tabindex="0" aria-label="Code in ${esc(t.p)}" data-peek-code="${esc(key)}">${body}</div>${note}`;
+  }
+  // The code viewport while what it shows is on its way: as tall as the code will be, so a peek
+  // opens once, to its height, and fills in place.
+  const PEEK_WAIT = `<div class="pk-code pk-wait" aria-busy="true" aria-label="Looking it up">${'<i class="pk-sk"></i>'.repeat(14)}</div>`;
+  // The open peek, drawn again in place (an answer or a file arrived): only it changes, and its
+  // height eases to what it holds now.
+  function updatePeek() {
+    const el = main.querySelector('.peek');
+    if (!el || !state.peek) return render();
+    savePeekScroll();
+    const h0 = el.getBoundingClientRect().height;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = peekHtml(state.peek);
+    el.replaceChildren(...tmp.firstElementChild.childNodes);
+    restorePeekScroll();
+    shownPeek = state.peek;
+    // Still opening: it carries on to its height from where it got to.
+    el.getAnimations().forEach((a) => a.finish());
+    const h1 = el.getBoundingClientRect().height;
+    if (moving() && Math.abs(h1 - h0) > 3) el.animate([{ height: h0 + 'px' }, { height: h1 + 'px' }], { duration: 200, easing: EASE });
+    mini.update();
   }
   function cachedPeekTarget(p, t, side) {
     if (side) return { ...t, side };
@@ -985,7 +1009,7 @@
       askDefinition({ side: p.old ? 'base' : 'head', p: p.path, l: p.old ? p.o : p.n, c: p.col }).then((live) => {
         if (live.status !== 'ok') return;
         p.resolved = live.target;
-        if (state.peek === p) render();
+        if (state.peek === p) updatePeek();
       });
     }
     return t;
@@ -1013,7 +1037,7 @@
     const L = p.live;
     const back = p.back && p.back.length ? '<button type="button" class="btn xs" data-act="peek-back">Back</button>' : '';
     const close = '<button type="button" class="pk-x" data-act="close-peek">Close</button>';
-    if (L.status === 'loading') return `<div class="pk-h"><b>Definition</b><span class="pk-src">looking it up…</span><span class="sp"></span>${back}${close}</div>`;
+    if (L.status === 'loading') return `<div class="pk-h"><b>Definition</b><span class="pk-src">looking it up…</span><span class="sp"></span>${back}${close}</div>${PEEK_WAIT}`;
     if (L.status !== 'ok') return `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(L.error || 'The language server knows no definition for this name.')}</span><span class="sp"></span>${back}${close}</div>`;
     const t = L.target;
     const where = t.side === 'base' ? `old side · ${(CONFIG.base || '').slice(0, 7)}` : t.side === 'head' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : t.w === 'package' ? 'package' : 'outside the repo';
@@ -1498,10 +1522,10 @@
     const key = srcKey(v);
     if (sources.has(key)) {
       const s = sources.get(key);
-      if (wanted) s.wanted = true;
+      if (wanted && s.wanted !== true) s.wanted = wanted;
       return s;
     }
-    const s = { status: 'loading', wanted: !!wanted };
+    const s = { status: 'loading', wanted: wanted || false };
     sources.set(key, s);
     const q = new URLSearchParams(v.commit ? { sha: v.commit, p: v.path } : v.ext != null ? { ext: String(v.ext) } : { side: v.side, p: v.path });
     api((v.commit ? 'commit-file?' : 'file?') + q).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
@@ -1517,6 +1541,8 @@
       .then(() => {
         if (state.view.kind === 'source' && srcKey(state.view) === key) return render(state.view.line ? { line: state.view.line } : { top: true });
         if (!s.wanted) return;
+        // Only a peek waits for it: only the peek changes.
+        if (s.wanted === 'peek') return state.peek && main.querySelector('.peek') ? updatePeek() : undefined;
         if (pendingLine && pendingLine.view === state.view) { const line = pendingLine.line; pendingLine = null; return render({ line }); }
         const at = lineOnScreen();
         render();
@@ -1615,7 +1641,7 @@
           return;
         }
         state.peek = { ...anchorOf(cur), live, back: [...(cur.back || []), cur] };
-        render();
+        updatePeek();
       });
       return;
     }
@@ -1626,7 +1652,7 @@
     else peek = { path: q.p, n: q.l, col: q.c, live: { q, status: 'loading' } };
     state.peek = peek;
     render();
-    askDefinition(q).then((live) => { peek.live = live; if (state.peek === peek) render(); });
+    askDefinition(q).then((live) => { peek.live = live; if (state.peek === peek) updatePeek(); });
   }
 
   // ---------- GitHub: the pull request's conversation
@@ -4100,7 +4126,10 @@
       });
     }
     const pk = main.querySelector('.peek');
-    if (pk) { const r = pk.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.peek = { el: pk, place: placeOf(pk.previousElementSibling), h: r.height, gap: gapOf(pk), anchor: peekKey(shownPeek) }; }
+    if (pk) {
+      const r = pk.getBoundingClientRect(), code = pk.querySelector('.pk-code');
+      if (seen(r.top, r.bottom)) snap.peek = { el: pk, place: placeOf(pk.previousElementSibling), h: r.height, gap: gapOf(pk), anchor: peekKey(shownPeek), scroll: code ? [code.scrollLeft, code.scrollTop] : null };
+    }
     const dt = main.querySelector('.hs-detail');
     if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt), place: placeOf(dt.previousElementSibling) }; }
     main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
@@ -4255,7 +4284,13 @@
       el.animate([{ height: '0px', opacity: 0, transform: 'scale(.97) translateY(-4px)' }, { height: r.height + 'px', opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
     } else if (!state.peek && snap.peek) {
       const at = snap.peek.place();
-      if (at) { const g = closeGap(at, snap.peek.gap, [snap.peek.el]); g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' }); }
+      if (at) {
+        const g = closeGap(at, snap.peek.gap, [snap.peek.el]);
+        // Moved into the closing gap, its code would start over at its top: it stays where it was.
+        const code = g.querySelector('.pk-code');
+        if (code && snap.peek.scroll) [code.scrollLeft, code.scrollTop] = snap.peek.scroll;
+        g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' });
+      }
     }
     shownPeek = state.peek;
   }

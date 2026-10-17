@@ -157,7 +157,8 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
   other name, in a whole file, inside a peek or on a removed line, asks the language server;
   in a peek, clicking a name changes the peek in place to its definition (Back returns), and
   leaves it as it is when that's the definition it already shows. A click outside a peek closes
-  it.
+  it. While the language server is slow to answer, the peek opens once, as tall as its code will
+  be, and fills in place.
 - **More of the file.** The divider above each hunk (its first line and context, in grey)
   stands for the lines hidden above it: click it for 20 more (up from the hunk, or down from the
   one before), or all of them when 20 or fewer are left, as on GitHub. Its buttons, and "Mark

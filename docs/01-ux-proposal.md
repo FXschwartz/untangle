@@ -571,6 +571,11 @@ in the group's body.
   it. "Back to definition" returns. Usage snippets are highlighted like the code. A name
   clicked inside a peek changes it in place (it stays when the name leads to what it already
   shows), and a click outside closes it.
+  - While the language server looks a name up, or the file it's in loads, the peek is already as
+    tall as its code will be, with lines drawn in grey where the code will go: it opens once and
+    fills in place. An answer or a file that arrives redraws only the peek, easing its height when
+    it changed, never the page around it. Closing, it folds away with its code where it was
+    scrolled.
 - **Dark palette** with VS Code Dark+-style syntax colors. Function names are told apart
   from other identifiers.
 - **Unified by default, split on demand** from a view's ⋯ menu. Split pairs removed and added
@@ -931,6 +936,11 @@ through the page.
     tests, a group once everything under it is (until then it mutes and its mark shows a dash), and
     a file reviewed whole, which gets a mark of its own. Done: [Tests as
     sentences](#tests-as-sentences), rule 10.
+  - Then the peek, asked to open and close without stutter while the language server is slow.
+    Found: a live definition opened in up to three steps (a one-line "looking it up", the answer
+    with an empty or short code view, then the file), each one drawing the whole page again; and
+    closing, the code jumped back to the file's first line as it folded. Done: [Display](#display),
+    under Peek.
 
 ## References
 

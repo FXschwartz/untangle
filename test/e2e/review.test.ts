@@ -778,6 +778,61 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  describe('when a name in greet\'s peek is looked up live, with motion on, ', () => {
+    let swap = '';
+
+    before(async () => {
+      await peekGreet();
+      await page!.reducedMotion(false);
+      // What the answer changes: the peek in place, easing to its new height; the page stays.
+      await page!.eval(`(() => {
+        const peek = document.querySelector('.peek');
+        window.kept = { peek, head: document.querySelector('.fv-head'), h: peek.getBoundingClientRect().height };
+        window.eased = null;
+        new MutationObserver(() => {
+          if (window.eased) return;
+          const a = peek.getAnimations().find((x) => x.effect.getKeyframes().some((k) => k.height));
+          window.eased = a ? a.effect.getKeyframes().map((k) => k.height).join(' to ') : 'none';
+        }).observe(peek, { childList: true });
+      })()`);
+      await page!.clickIn('.peek .ref.live', 'print', 'print(');
+      await page!.until(`document.querySelector('[data-act="peek-back"]') && window.eased`);
+      swap = await read(page!, `(() => {
+        const peek = document.querySelector('.peek');
+        const [from, to] = window.eased.split(' to ').map(parseFloat);
+        return [peek === window.kept.peek ? 'the same peek' : 'a new peek', document.querySelector('.fv-head') === window.kept.head ? 'the same page' : 'the page drawn again', Math.round(from) === Math.round(window.kept.h) && to > from ? 'eases from its height to a taller one' : window.eased].join(', ');
+      })()`);
+      await page!.reducedMotion(true);
+    });
+
+    it('then the answer fills the same peek, which eases to its new height, and the page around it isn\'t drawn again.', () => {
+      assert.equal(swap, 'the same peek, the same page, eases from its height to a taller one');
+    });
+  });
+
+  describe('when a peek scrolled down its file closes, with motion on, ', () => {
+    let closing = '';
+
+    before(async () => {
+      await peekGreet();
+      await page!.clickIn('.peek .ref.live', 'print', 'print(');
+      await page!.until(`document.querySelector('[data-act="peek-back"]') && document.querySelector('.peek .pk-code:not(.pk-tall)')?.scrollTop > 0`);
+      await page!.reducedMotion(false);
+      const top = await read(page!, `String(document.querySelector('.peek .pk-code').scrollTop)`);
+      await page!.click('.peek [data-act="close-peek"]');
+      closing = await read(page!, `(() => {
+        const code = document.querySelector('.ghost .pk-code');
+        return code ? (String(code.scrollTop) === ${JSON.stringify(top)} ? 'its code where it was' : 'its code at ' + code.scrollTop + ', not ' + ${JSON.stringify(top)}) : 'no closing peek';
+      })()`);
+      await page!.until(`!document.querySelector('.ghost')`);
+      await page!.reducedMotion(true);
+    });
+
+    it('then it folds away with its code where it was, rather than back at the file\'s top.', () => {
+      assert.equal(closing, 'its code where it was');
+    });
+  });
+
   describe('when the page outside greet\'s peek is clicked, ', () => {
     let closed: string;
 
