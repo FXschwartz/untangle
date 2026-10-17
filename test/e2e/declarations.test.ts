@@ -171,7 +171,7 @@ void main() {
 
     before(async () => {
       await browser.click(`[data-chain="${suite}"]`);
-      titles = Number(await browser.eval(`[...document.querySelectorAll('.sec-h > b')].filter(el => el.textContent === 'The same title').length`));
+      titles = Number(await browser.eval(`[...document.querySelectorAll('.ol-row .ol-tt')].filter(el => el.textContent === 'The same title').length`));
     });
 
     it('then identical titles remain two separate scenarios.', () => {
@@ -179,20 +179,22 @@ void main() {
     });
   });
 
-  describe('when its first scenario is folded with neighboring code in view, ', () => {
+  describe('when its first scenario is opened on its code, ', () => {
     let pill: string;
-    let setup: number;
+    let outside: number;
 
     before(async () => {
       await browser.click(`[data-chain="${suite}"]`);
-      const key = await read(browser, `[...document.querySelectorAll('.sec-h > b')].find(el => el.textContent === 'The same title').closest('.sec').querySelector('[data-act="toggle-hunk"]').dataset.key`);
-      await browser.click(`[data-act="toggle-hunk"][data-key="${key}"]`);
+      const key = await read(browser, `[...document.querySelectorAll('.ol-row')].find(el => el.querySelector('.ol-tt').textContent === 'The same title').dataset.ol`);
+      await browser.click(`.ol-row[data-ol="${key}"]`);
+      await browser.until(`!!document.querySelector('.ol-code')`);
       pill = await read(browser, `document.querySelector('.pill-n').textContent`);
-      setup = Number(await browser.eval(`[...document.querySelectorAll('.sec-h > b')].filter(el => el.textContent === 'Setup and groups').length`));
+      outside = Number(await browser.eval(`[...document.querySelectorAll('.ol-fold')].filter(el => el.textContent.startsWith('Outside the tests')).length`));
+      await browser.click(`.ol-row[data-ol="${key}"]`);
     });
 
-    it('then the function, setup, and two scenarios each count once.', () => {
-      assert.equal(setup, 1);
+    it('then the function, the code outside the tests, and the two scenarios each count once.', () => {
+      assert.equal(outside, 1);
       assert.match(pill, /^\d of 4$/);
     });
   });

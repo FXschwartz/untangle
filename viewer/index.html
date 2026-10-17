@@ -581,6 +581,78 @@ button.sb-group:hover { color: var(--text-2); }
 .sec-file, .inst-file { position: sticky; left: 0; padding: 8px 22px 2px; font: 500 12px/1.4 var(--code); color: var(--text-3); }
 .sec-file .linkish, .inst-file .linkish { color: var(--text-2); text-decoration-color: transparent; }
 .sec-file .linkish:hover, .inst-file .linkish:hover { color: var(--text); text-decoration-color: var(--text-3); }
+/* Tests as sentences: a test file's group and test calls, nested as the code nests them, each its
+   title. A new call reads bright with a green plus, a rewording marks the words that changed, and
+   the groups that didn't change are dimmed, so a new then still reads as its whole sentence. */
+.ol-sect { position: sticky; left: 0; padding: 22px 22px 0; font: 600 11px/1.3 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.sec.ol-sec { padding-bottom: 6px; }
+.ol-file { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 16px 22px 6px; }
+.ol-file .nm { font: 600 13px/1.4 var(--code); color: var(--text); text-decoration-color: transparent; }
+.ol-file .nm:hover { text-decoration-color: var(--text-3); }
+.ol-file .dir { min-width: 0; font: 400 11.5px/1.4 var(--code); color: var(--text-4); overflow-wrap: anywhere; }
+.ol-file .sp { flex: 1; }
+.ol-file .n { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.ol-file.fold { margin: 0 10px; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
+.ol-file.fold:hover { background: var(--row-hover); }
+.ol-file.fold .nm { font-weight: 500; color: var(--text-2); }
+.ol-file.fold.open .nm { color: var(--text); }
+.ol-file .car, .ol-fold .car { display: inline-grid; place-items: center; width: 12px; color: var(--text-3); }
+.ol-file .car svg, .ol-fold .car svg { width: 12px; height: 12px; }
+.ol-row {
+  position: sticky; left: 0; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline;
+  margin: 0 10px; padding: 4px 8px 4px calc(12px + var(--d) * 20px); border-radius: 7px; cursor: pointer; outline: none;
+  background-image: repeating-linear-gradient(90deg, transparent 0 18px, var(--hair) 18px 19px, transparent 19px 20px);
+  background-size: calc(var(--d) * 20px) 100%; background-repeat: no-repeat;
+  transition: background-color var(--fast) var(--ease);
+}
+.ol-row:hover, .ol-row:focus-visible { background-color: var(--row-hover); }
+.ol-row:focus-visible { box-shadow: inset 0 0 0 1px var(--hair-2); }
+.ol-row.open { background-color: var(--raised); }
+.ol-mk { font: 700 12px/1.55 var(--code); text-align: center; color: var(--text-4); user-select: none; }
+.ol-row.new .ol-mk { color: var(--add-ink); }
+.ol-row.rew .ol-mk { color: var(--accent); }
+.ol-row.reg .ol-mk { color: var(--text-2); }
+.ol-row.del .ol-mk { color: var(--del-ink); }
+.ol-tt { min-width: 0; font: 400 13.5px/1.5 var(--ui); color: var(--text); text-wrap: pretty; overflow-wrap: anywhere; }
+.ol-tt .kw { font-weight: 600; color: var(--text-2); }
+.ol-row.ctx .ol-tt, .ol-row.ctx .ol-tt .kw { color: var(--text-3); }
+.ol-row.lbl .ol-tt { font: 500 12px/1.6 var(--code); color: var(--text-3); }
+.ol-row.done .ol-tt, .ol-row.done .ol-tt .kw { color: var(--text-3); }
+.ol-row.del .ol-tt { color: var(--text-3); text-decoration: line-through; text-decoration-color: rgba(255, 155, 149, .55); }
+.ol-row.del.sub { cursor: default; }
+.ol-row.del.sub:hover { background-color: transparent; }
+.ol-tt ins { text-decoration: none; background: var(--add-strong); color: var(--text); border-radius: 3px; padding: 0 2px; }
+.ol-tt del { color: var(--del-ink); text-decoration: line-through; opacity: .75; }
+.ol-row.sent { padding-top: 6px; padding-bottom: 6px; }
+.ol-row.sent .ol-tt .g, .ol-row.sent .ol-tt .g .kw { color: var(--text-3); }
+.ol-row.sent .ol-tt .g.gnew { color: var(--text-2); }
+.ol-lbl { position: sticky; left: 0; padding: 8px 22px 2px 46px; font: 500 11.5px/1.4 var(--code); color: var(--text-3); }
+.ol-meta { display: inline-flex; align-items: center; gap: 6px; align-self: center; }
+.ol-tag { font: 500 11px/1 var(--ui); color: var(--text-3); background: var(--raised); border-radius: 999px; padding: 4px 8px; white-space: nowrap; }
+.ol-row.open .ol-tag { background: var(--hover); }
+.ol-chip { appearance: none; border: 0; background: none; max-width: 24ch; padding: 3px 7px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--hair-2); color: var(--text-3); font: 500 11px/1 var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.ol-chip code { font: 500 11px/1 var(--code); color: var(--text-2); }
+.ol-chip:hover { color: var(--text-2); box-shadow: inset 0 0 0 1px var(--text-3); }
+.ol-go { appearance: none; border: 0; background: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 6px; color: var(--text-3); cursor: pointer; opacity: 0; transition: opacity var(--fast) var(--ease); }
+.ol-go svg { width: 14px; height: 14px; }
+.ol-row:hover .ol-go, .ol-row:focus-within .ol-go, .ol-row.open .ol-go { opacity: 1; }
+.ol-go:hover { background: var(--hair-2); color: var(--text); }
+.ol-go-sp { width: 22px; }
+.ol-tick-sp { width: 14px; }
+.ol-row:hover .tick:not(.on) { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.ol-row:hover .tick.on::after { border-color: var(--done); }
+.ol-row.flash { animation: olflash 1.2s var(--ease) 1; }
+@keyframes olflash { 0% { box-shadow: inset 3px 0 0 var(--accent); background-color: var(--accent-soft); } 100% { box-shadow: inset 3px 0 0 transparent; } }
+.ol-fold { position: sticky; left: 0; margin: 0 10px; padding: 3px 8px 3px calc(12px + var(--d) * 20px + 24px); border-radius: 7px; font-size: 12.5px; color: var(--text-3); cursor: pointer; }
+.ol-fold:hover { background: var(--row-hover); color: var(--text-2); }
+.ol-fold.cf { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding-left: 20px; color: var(--text-2); }
+.ol-fold.cf code { font: 500 11.5px/1 var(--code); color: var(--text-2); }
+.code.ol-code { position: sticky; left: 0; width: auto; min-width: 0; margin: 2px 12px 10px calc(22px + var(--d) * 20px + 22px); padding: 4px 0; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--hair); overflow-x: auto; }
+.ol-code > .ln, .ol-code > .sl { width: max-content; min-width: 100%; }
+.ln.ol-ph .tx { font: 400 12.5px/var(--row) var(--ui); color: var(--text-3); white-space: normal; }
+.ln.ol-ph .ol-ph-t .kw { font-weight: 600; }
+.ln.ol-ph .ol-ph-n { margin-left: 10px; font-size: 11px; color: var(--text-4); }
+.ol-out { padding-bottom: 6px; }
 .inst-gap { height: 10px; }
 .sym-h { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 16px 22px 6px; font-size: 12.5px; color: var(--text-3); }
 .sym-h b { color: var(--text); }

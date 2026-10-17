@@ -307,12 +307,18 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     before(async () => {
       await rest(page!);
       await openChain(page!, 'helper');
-      await page!.until(`!!document.querySelector('#vw-main .sec-h.sub')`);
-      list = await read(page!, headerParts('#vw-main .sec > .sec-h'));
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      list = await read(page!, `[...document.querySelectorAll('#vw-main .ol-file, #vw-main .ol-row, #vw-main .ol-fold')].map((el) => (el.matches('.ol-row') ? '  '.repeat(Number(el.style.getPropertyValue('--d')) + 1) + el.querySelector('.ol-tt').textContent.trim() + [...el.querySelectorAll('.ol-tag')].map((tag) => ' [' + tag.textContent.trim() + ']').join('') : el.matches('.ol-file') ? el.querySelector('.nm').textContent + ' · ' + el.querySelector('.n').textContent : el.textContent.trim())).join('\\n')`);
     });
 
-    it('then the tests are listed by group, then the helpers.', () => {
-      assert.equal(list, 'names | group · 1 test\none | 1 change | Mark test reviewed\nHelpers | 1 change');
+    it('then its test file reads as an outline: the test whose body changed, under its group, then the helper outside the tests.', () => {
+      assert.equal(list, [
+        'app_test.dart · no sentence changes',
+        'Code edited under 1 call whose sentence stays · +1 −1',
+        '  names',
+        '    one [body +1 −1]',
+        'Outside the tests: helper · +2 −2',
+      ].join('\n'));
     });
   });
 

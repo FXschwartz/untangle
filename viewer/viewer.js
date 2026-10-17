@@ -93,6 +93,9 @@
     cmarks: new Set(),
     rev: {},
     blockDiff: new Set(), moveOpen: new Set(), memberOpen: new Set(), collapsed: new Set(), expanded: new Set(), graphOpen: new Set(), groupAll: new Set(), noteOpen: new Set(),
+    // Test outlines: rows opened on their code ("<file>#<call>"), and folds opened (unchanged calls
+    // under a group, code under unchanged sentences, changes outside the tests).
+    olOpen: new Set(), olUnfold: new Set(),
     search: { q: '', scope: 'unreviewed' },
     // Files shown whole, lines shown around each section of a diff ({ above, below } by its key),
     // and folders closed in the Files tab.
@@ -2189,32 +2192,319 @@
     }
     return stats(m.standalone).open && state.view.kind !== 'standalone' ? { kind: 'standalone' } : null;
   }
-  // A chain made only of one test file's changes: its tests as a list, grouped by group(...).
-  function testListHtml(c, blocks) {
-    const byGroup = new Map();
-    const helpers = [];
-    blocks.forEach((b) => {
-      if (!/::(test:.*|main|\(top\))$/.test(b.mk || '')) { helpers.push(b); return; }
-      const g = b.grp || '(no group)';
-      if (!byGroup.has(g)) byGroup.set(g, new Map());
-      const t = b.test && b.test !== b.grp ? b.test : '(setup)';
-      const key = b.unit || (b.test ? b.mk : t);
-      if (!byGroup.get(g).has(key)) byGroup.get(g).set(key, { title: t, blocks: [] });
-      byGroup.get(g).get(key).blocks.push(b);
-    });
-    let h = '';
-    byGroup.forEach((tests, g) => {
-      h += `<section class="sec"><div class="sec-h"><b>${esc(g)}</b><span>group · ${tests.size} test${tests.size > 1 ? 's' : ''}</span></div>`;
-      tests.forEach(({ title: t, blocks: list }, key) => {
-        const ns = stats(list);
-        const unit = list[0].unit && list.every((block) => block.unit === list[0].unit) ? list[0].unit : null;
-        h += `<div class="sec-h sub"><span>${esc(t)}</span><span class="sp"></span><span class="hov"><span>${leftWords(ns)}</span><button type="button" class="btn xs" data-act="mark-blocks" data-blocks="${esc(list.map((b) => b.id).join(' '))}">${ns.open ? 'Mark test reviewed' : 'Mark test unreviewed'}</button></span></div>`
-          + subHunksHtml(list, { chain: c, unit, key: 'tl' + c.id + ':' + g + ':' + key });
-      });
-      h += '</section>';
-    });
-    if (helpers.length) h += `<section class="sec"><div class="sec-h"><b class="ui">Helpers</b><span>${helpers.length} change${helpers.length > 1 ? 's' : ''}</span></div>${subHunksHtml(helpers, { chain: c, key: 'tlh' + c.id })}</section>`;
+  // ---------- tests as sentences
+  // A test file's group and test calls (the analysis's outline), read as the sentences they assert:
+  // a test's sentence is the titles from its outermost group down to it. An outline shows what a
+  // scope changed (a chain's blocks, or the whole review) with every group that completes each
+  // sentence; the groups that didn't change are dimmed. A row opens its code in place: a test its
+  // body, a group its own lines with its calls folded to their titles. A test's mark covers its
+  // body; a group's, its setup and everything under it.
+  const OL_KW = /^(Given|given|When|when|Then|then)$/;
+  // A title's words, the clause words marked and, for a rewording, the words that changed.
+  function olWords(now, was) {
+    const tok = (s) => s.trim().split(/(\s+)/).filter((x) => x !== '');
+    const B = tok(now);
+    let ops = B.map((x) => ['=', x]);
+    if (was != null) {
+      const A = tok(was);
+      const L = Array.from({ length: A.length + 1 }, () => new Array(B.length + 1).fill(0));
+      for (let i = A.length - 1; i >= 0; i--) for (let j = B.length - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+      ops = [];
+      let i = 0, j = 0;
+      while (i < A.length && j < B.length) {
+        if (A[i] === B[j]) { ops.push(['=', B[j]]); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) ops.push(['-', A[i++]]); else ops.push(['+', B[j++]]);
+      }
+      while (i < A.length) ops.push(['-', A[i++]]);
+      while (j < B.length) ops.push(['+', B[j++]]);
+    }
+    let h = '', prev = '', run = null, buf = '';
+    // A run of changed words is marked as one, without the space that follows it.
+    const flush = () => { const m = /^([\s\S]*?)(\s*)$/.exec(buf); h += run === '+' ? `<ins>${m[1]}</ins>${m[2]}` : run === '-' ? `<del>${m[1]}</del>${m[2]}` : buf; buf = ''; };
+    for (const [op, x] of ops) {
+      const space = /^\s+$/.test(x);
+      const kw = !space && op !== '-' && OL_KW.test(x) && (prev === '' || /,$/.test(prev));
+      const want = space ? run : op === '=' ? null : op;
+      if (want !== run) { flush(); run = want; }
+      buf += kw ? `<b class="kw">${esc(x)}</b>` : esc(x);
+      if (!space && op !== '-') prev = x;
+    }
+    flush();
     return h;
+  }
+  // The outline, linked: each call with its parent, children and depth.
+  function olOf(f) {
+    if (!f || !f.outline) return null;
+    if (f.ol) return f.ol;
+    const nodes = f.outline.nodes.map((n, i) => ({ ...n, i, kids: [], parent: null, depth: 0 }));
+    nodes.forEach((n) => { if (n.p != null) { n.parent = nodes[n.p]; n.parent.kids.push(n); } });
+    nodes.forEach((n) => { for (let x = n.parent; x; x = x.parent) n.depth++; });
+    const removed = (f.outline.removed || []).map((r, j) => ({ ...r, j, parent: r.p != null ? nodes[r.p] : null, removed: true }));
+    return (f.ol = { nodes, top: nodes.filter((n) => !n.parent), removed });
+  }
+  const olPath = (n) => { const out = []; for (let x = n; x; x = x.parent) out.unshift(x); return out; };
+  const olKey = (f, n) => f.p + '#' + (n.removed ? 'r' + n.j : n.i);
+  const olStatus = (s) => (s === 'new' ? 'new' : s === 'reworded' || s === 'renamed' ? 'rew' : s === 'regrouped' ? 'reg' : '');
+  const OL_MARK = { new: '+', rew: '~', reg: '↳' };
+  // What a scope changed in a file's outline: each call's status there and its blocks, the calls to
+  // show (what it changed, and the groups above), the calls it removed, the calls whose code it
+  // edited under a sentence that stayed, and its blocks outside every call.
+  function olScope(f, chain) {
+    const ol = olOf(f);
+    const block = (k) => f.blocks[k];
+    const live = (b) => !!b && b.edits.length > 0 && (!chain || chain.blockSet.has(b.id));
+    const blocks = (ks) => (ks || []).map(block).filter(live);
+    const st = new Map();
+    for (const n of ol.nodes) {
+      const own = (n.own || []).filter(([k]) => live(block(k)));
+      const head = blocks(n.head).length > 0;
+      const via = n.k === 't' && olPath(n).slice(0, -1).some((g) => g.st === 'renamed' && blocks(g.head).length > 0);
+      let s = null;
+      if (n.k === 't') {
+        if (n.st === 'new' && (own.length || head)) s = 'new';
+        else if (n.st === 'reworded' && (head || via)) s = 'reworded';
+        else if (n.st === 'regrouped' && (own.length || head || via)) s = 'regrouped';
+        else if (own.length) s = 'edited';
+      } else if (n.l) s = own.length ? 'edited' : null;
+      else if (n.st === 'new' && (head || (!chain && own.length))) s = 'new';
+      else if (n.st === 'renamed' && head) s = 'renamed';
+      else if (own.length) s = 'edited';
+      const mine = [...new Set(own.map((o) => o[0]).concat(n.head || []))];
+      st.set(n, { s, adds: own.reduce((x, o) => x + o[1], 0), dels: own.reduce((x, o) => x + o[2], 0), setup: own.length > 0, own: blocks(mine), all: blocks(n.b) });
+    }
+    const show = new Set();
+    const up = (n) => { for (let x = n; x; x = x.parent) show.add(x); };
+    const primary = (n) => ['new', 'reworded', 'regrouped', 'renamed'].includes(st.get(n).s);
+    ol.nodes.forEach((n) => { if (primary(n)) up(n); });
+    // A group the scope wrote or renamed brings its tests along: it wrote part of their sentences.
+    ol.nodes.forEach((g) => { if (g.k !== 't' && primary(g)) ol.nodes.forEach((n) => { if (n.k === 't' && olPath(n).includes(g)) up(n); }); });
+    const rm = ol.removed.filter((r) => blocks(r.b).length > 0);
+    rm.forEach((r) => up(r.parent));
+    const edited = ol.nodes.filter((n) => !show.has(n) && st.get(n).s === 'edited');
+    const outside = blocks(f.outline.out);
+    return { f, ol, chain, st, show, rm, edited, outside, any: show.size > 0 || rm.length > 0 };
+  }
+  function olCounts(sc) {
+    const c = { new: 0, reworded: 0, regrouped: 0, removed: 0 };
+    sc.show.forEach((n) => { const s = sc.st.get(n).s; if (n.k === 't' && c[s] != null) c[s]++; });
+    sc.rm.forEach((r) => { c.removed += r.leaves.length; });
+    return c;
+  }
+  const olSaid = (c) => [c.new && `${c.new} new`, c.reworded && `${c.reworded} reworded`, c.regrouped && `${c.regrouped} regrouped`, c.removed && `${c.removed} removed`].filter(Boolean).join(' · ');
+  // The chain that wrote a call's title: a commit's before a rename's.
+  function olWriter(f, n) {
+    const m = M();
+    for (const k of n.head || []) {
+      const b = f.blocks[k];
+      const ids = (b && m.chainsOf.get(b.id)) || [];
+      const best = ids.map((id) => m.chains[id]).sort((x, y) => (x.kind === 'commit' ? 0 : 1) - (y.kind === 'commit' ? 0 : 1) || x.id - y.id)[0];
+      if (best) return best;
+    }
+    return null;
+  }
+  function chainSha(c) {
+    const m = M();
+    const fam = m.byCommit && c.kind === 'commit' ? m.families.find((x) => x.id === c.family) : null;
+    return fam && fam.commit ? fam.commit.sha : null;
+  }
+  const olChip = (c, key) => { const sha = chainSha(c); return `<button type="button" class="ol-chip" data-act="ol-chain" data-chain-id="${c.id}" data-ol="${esc(key)}" title="Written in ${esc(c.name)}: open it there">${sha ? `<code>${esc(shortSha(sha))}</code>` : esc(trunc(c.name, 28))}</button>`; };
+  // Whether a fold of an outline is open: code is open by default in a chain (it's the chain's code)
+  // and closed in the Tests view; a click flips it.
+  const olFold = (sc, key) => (sc.chain ? !state.olUnfold.has(key + '@' + sc.chain.id) : state.olUnfold.has(key));
+  const olFoldKey = (sc, key) => (sc.chain ? key + '@' + sc.chain.id : key);
+  const olTag = (html, title) => `<span class="ol-tag"${title ? ` title="${esc(title)}"` : ''}>${html}</span>`;
+  const olPm = (a, d) => `<span class="a">+${fmt(a)}</span>${d ? ` <span class="d">−${fmt(d)}</span>` : ''}`;
+
+  // Where a line of the file sits in its stream of rows (see streamOf), on the new or the old side.
+  function olPos(f, line, old) {
+    const st = streamOf(f);
+    for (const g of st.segs) {
+      if (g.gap) { const first = old ? g.o : g.n; if (line >= first && line < first + g.size) return g.at + line - first; continue; }
+      const meta = hunkMeta(f.hunks[g.hi]);
+      for (let ri = 0; ri < meta.length; ri++) {
+        const r = meta[ri];
+        if (old ? r.t !== '+' && r.o === line : r.t !== '-' && r.n === line) return g.at + ri;
+      }
+    }
+    return st.at + line - (old ? st.o : st.n);
+  }
+  // A call's own code: its rows (both sides), with the calls under it folded to their titles.
+  function olCodeHtml(sc, n) {
+    const f = sc.f;
+    const ctx = { key: 'ol|' + olKey(f, n), chain: sc.chain || undefined };
+    const span = (s, e, os, oe) => {
+      const a = [s != null ? olPos(f, s, false) : null, os != null ? olPos(f, os, true) : null].filter((x) => x != null);
+      const b = [e != null ? olPos(f, e, false) : null, oe != null ? olPos(f, oe, true) : null].filter((x) => x != null);
+      return a.length ? [Math.min(...a), Math.max(...b) + 1] : null;
+    };
+    let h = '';
+    if (n.removed || n.k === 't') {
+      const r = n.removed ? span(null, null, n.os, n.oe) : span(n.s, n.e, n.os, n.oe);
+      if (r) h = streamRowsHtml(f, r[0], r[1], ctx);
+    } else {
+      let from = n.s;
+      const kids = n.kids.slice().sort((x, y) => x.s - y.s);
+      for (const kid of kids) {
+        if (kid.s > from) { const r = span(from, kid.s - 1); if (r) h += streamRowsHtml(f, r[0], r[1], ctx); }
+        h += `<div class="ln ol-ph"><span class="g"></span><span class="no">${kid.s}</span><span class="sg"></span><span class="tx"><span class="ol-ph-t">${kid.l ? esc(kid.t) : olWords(kid.t)}</span><span class="ol-ph-n">${linesWord(kid.e - kid.s + 1)}</span></span></div>`;
+        from = kid.e + 1;
+      }
+      if (from <= n.e) { const r = span(from, n.e); if (r) h += streamRowsHtml(f, r[0], r[1], ctx); }
+    }
+    return `<div class="code ol-code" data-p="${esc(f.p)}" style="--d:${n.removed ? (n.parent ? n.parent.depth + 1 : 0) : n.depth}">${h}</div>`;
+  }
+  // One call's row. o.chips: name the chain that wrote what this row shows as changed (the Tests
+  // view); in a chain, groups another chain wrote name it.
+  function olRowHtml(sc, n, o) {
+    const f = sc.f, s = sc.st.get(n) || { s: null, own: [], all: [] };
+    const key = olKey(f, n);
+    const test = n.k === 't';
+    const cls = olStatus(s.s) || (test && s.s === 'edited' ? 'edit' : 'ctx');
+    const was = n.ot != null && (s.s === 'renamed' || s.s === 'reworded') ? n.ot : null;
+    const tags = [];
+    if (s.s === 'regrouped') tags.push(olTag('regrouped', `The same sentence, in a new group. It read: ${n.was || ''}`));
+    if (s.s === 'reworded') tags.push(olTag(was ? 'reworded' : 'reworded above', `It read: ${n.was || ''}`));
+    if (!test && s.setup && s.s !== 'new') tags.push(olTag(`setup ${olPm(s.adds, s.dels)}`, 'Its own lines changed: its setup, without its title and the calls under it'));
+    if (test && s.s === 'edited') tags.push(olTag(`body ${olPm(s.adds, s.dels)}`, 'Its body changed; its sentence didn’t'));
+    const shown = s.s === 'new' || s.s === 'renamed' || (s.s === 'reworded' && was);
+    const writer = (o.chips && shown) || (sc.chain && !shown) ? olWriter(f, n) : null;
+    const chip = writer && (!sc.chain || writer.id !== sc.chain.id) ? olChip(writer, key) : '';
+    const marks = s.s ? s.all : [];
+    const st = stats(marks), todo = stats(s.own).open > 0;
+    const open = state.olOpen.has(key);
+    const tick = marks.length && !outOfLens(st) ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? (test ? 'Mark this test reviewed' : 'Mark this group reviewed: its setup and everything under it') : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>';
+    const nav = s.own.length ? ` data-mark="${esc(s.own.map((b) => b.id).join(' '))}" data-block="${esc(s.own[0].id)}"${todo ? ' data-nav="1"' : ''}` : '';
+    return `<div class="ol-row ${cls}${n.l ? ' lbl' : ''}${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:${n.depth}" role="button" tabindex="0" aria-expanded="${open}">`
+      + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span>`
+      + `<span class="ol-tt">${n.l ? esc(n.t) : olWords(n.t, was)}</span>`
+      + `<span class="ol-meta">${tags.join('')}${chip}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.goToFile}</button>${tick}</span></div>`
+      + (open ? olCodeHtml(sc, n) : '');
+  }
+  function olRemovedHtml(sc, r) {
+    const f = sc.f, key = olKey(f, r);
+    const d = r.parent ? r.parent.depth + 1 : 0;
+    const marks = (r.b || []).map((k) => f.blocks[k]).filter((b) => b && b.edits.length && (!sc.chain || sc.chain.blockSet.has(b.id)));
+    const st = stats(marks), open = state.olOpen.has(key);
+    const prefix = r.parent ? olPath(r.parent).filter((x) => !x.l).map((x) => x.t.trim()).join(' ').length + 1 : 0;
+    let h = `<div class="ol-row del${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${marks.length ? ` data-mark="${esc(marks.map((b) => b.id).join(' '))}" data-block="${esc(marks[0].id)}"${st.open ? ' data-nav="1"' : ''}` : ''} style="--d:${d}" role="button" tabindex="0" aria-expanded="${open}">`
+      + `<span class="ol-mk" aria-hidden="true">−</span><span class="ol-tt">${r.l ? esc(r.t) : olWords(r.t)}</span>`
+      + `<span class="ol-meta">${olTag('removed')}<span class="ol-go-sp"></span>${marks.length ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark the removal reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>'}</span></div>`;
+    for (const leaf of r.leaves) {
+      const rest = leaf.slice(prefix + r.t.trim().length).trim();
+      if (rest) h += `<div class="ol-row del sub" style="--d:${d + 1}"><span class="ol-mk"></span><span class="ol-tt">${olWords(rest)}</span><span class="ol-meta"></span></div>`;
+    }
+    return h + (open ? olCodeHtml(sc, r) : '');
+  }
+  // A test as its whole sentence: the groups it takes after dimmed, a group's changed words only on
+  // the first test of the run it heads.
+  function olSentenceHtml(sc, n, prev, o) {
+    const f = sc.f, s = sc.st.get(n) || { s: null, own: [], all: [] };
+    const key = olKey(f, n), cls = olStatus(s.s) || (s.s === 'edited' ? 'edit' : 'ctx');
+    const groups = olPath(n).slice(0, -1).filter((g) => !g.l).map((g) => {
+      const gs = sc.st.get(g) || {};
+      const was = g.ot != null && gs.s === 'renamed' && !(prev && prev.includes(g)) ? g.ot : null;
+      return `<span class="g${gs.s === 'new' ? ' gnew' : ''}">${olWords(g.t, was)}</span>`;
+    }).join(' ');
+    const was = n.ot != null && s.s === 'reworded' ? n.ot : null;
+    const writer = o.chips && (s.s === 'new' || s.s === 'reworded') ? olWriter(f, n) : null;
+    const marks = s.s ? s.all : [];
+    const st = stats(marks), open = state.olOpen.has(key);
+    const tick = marks.length && !outOfLens(st) ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark this test reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>';
+    const nav = s.own.length ? ` data-mark="${esc(s.own.map((b) => b.id).join(' '))}" data-block="${esc(s.own[0].id)}"${stats(s.own).open ? ' data-nav="1"' : ''}` : '';
+    return `<div class="ol-row sent ${cls}${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:0" role="button" tabindex="0" aria-expanded="${open}">`
+      + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span><span class="ol-tt">${groups} <span class="own">${olWords(n.t, was)}</span></span>`
+      + `<span class="ol-meta">${s.s === 'regrouped' ? olTag('regrouped', `It read: ${n.was || ''}`) : ''}${writer ? olChip(writer, key) : ''}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.goToFile}</button>${tick}</span></div>`
+      + (open ? olCodeHtml(sc, n) : '');
+  }
+  // Which tests a filter keeps.
+  const olKeeps = (sc, n, filter) => filter === 'all' || (n.k === 't' && sc.st.get(n).s === filter);
+  // A file's outline for a scope. o: { secs: the chain's member numbers it stands for, chips,
+  // sentences, filter }.
+  function olFileHtml(sc, o = {}) {
+    const f = sc.f, filter = o.filter || 'all';
+    const c = olCounts(sc);
+    if (filter !== 'all' && !(filter === 'removed' ? sc.rm.length : [...sc.show].some((n) => olKeeps(sc, n, filter)))) return '';
+    const secs = o.secs && o.secs.length ? ` id="sec-${o.secs[0]}" data-secs="${o.secs.join(' ')}"` : '';
+    const dir = f.p.slice(0, f.p.length - fileName(f.p).length);
+    let h = `<section class="sec ol-sec"${secs}>`;
+    if (!sc.any && !sc.chain) {
+      // Nothing it asserts changed: one row, which opens on the calls whose code changed.
+      const key = f.p + '#edited', open = state.olUnfold.has(key);
+      const edits = sc.edited.flatMap((n) => sc.st.get(n).own).concat(sc.outside);
+      h += `<div class="ol-file fold${open ? ' open' : ''}" data-act="ol-unfold" data-key="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(fileName(f.p))}</span><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span></div>`;
+      if (open) h += olEditedRowsHtml(sc, o) + (sc.outside.length ? olOutsideHtml(sc) : '');
+      return h + '</section>';
+    }
+    h += `<div class="ol-file"><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${olSaid(c) || 'no sentence changes'}</span></div>`;
+    if (o.sentences) {
+      let label = null, prev = null;
+      for (const n of sc.ol.nodes) {
+        if (n.k !== 't' || !sc.show.has(n) || !olKeeps(sc, n, filter)) continue;
+        const lbl = olPath(n).find((x) => x.l);
+        if (lbl && lbl !== label) { h += `<div class="ol-lbl">${esc(lbl.t)}</div>`; label = lbl; }
+        h += olSentenceHtml(sc, n, prev, o);
+        prev = olPath(n);
+      }
+    } else {
+      const walk = (list, parent) => {
+        let hidden = [];
+        for (const n of list) {
+          const unfolded = parent && state.olUnfold.has(olKey(f, parent));
+          if (!sc.show.has(n) && !unfolded) { hidden.push(n); continue; }
+          if (filter !== 'all' && !sc.ol.nodes.some((x) => sc.show.has(x) && olKeeps(sc, x, filter) && olPath(x).includes(n))) continue;
+          h += olRowHtml(sc, n, o);
+          walk(n.kids, n);
+        }
+        if (filter === 'all' || filter === 'removed') sc.rm.filter((r) => r.parent === parent).forEach((r) => { h += olRemovedHtml(sc, r); });
+        if (parent && filter === 'all' && (hidden.length || state.olUnfold.has(olKey(f, parent))) && parent.kids.some((k) => !sc.show.has(k))) {
+          const unfolded = state.olUnfold.has(olKey(f, parent));
+          const all = parent.kids.filter((k) => !sc.show.has(k));
+          const words = new Set(all.map((k) => (/^\s*given\b/i.test(k.t) ? 'Given' : /^\s*when\b/i.test(k.t) ? 'when' : /^\s*then\b/i.test(k.t) ? 'then' : '')));
+          const kind = words.size === 1 && !words.has('') ? [...words][0] : 'call';
+          h += `<div class="ol-fold" data-act="ol-unfold" data-key="${esc(olKey(f, parent))}" style="--d:${parent.depth + 1}" role="button" tabindex="0" aria-expanded="${unfolded}">${unfolded ? `Fold the ${plural(all.length, 'unchanged ' + kind)}` : `+ ${plural(all.length, 'unchanged ' + kind)}`}</div>`;
+        }
+      };
+      walk(sc.ol.top, null);
+    }
+    if (filter === 'all' && sc.edited.length) {
+      const key = f.p + '#edited', open = olFold(sc, key);
+      const edits = sc.edited.flatMap((n) => sc.st.get(n).own);
+      h += `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Code edited under ${plural(sc.edited.length, 'call')} whose sentence${sc.edited.length === 1 ? '' : 's'} stay${sc.edited.length === 1 ? 's' : ''} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</div>`;
+      if (open) h += olEditedRowsHtml(sc, o);
+    }
+    if (filter === 'all' && sc.outside.length) h += olOutsideHtml(sc);
+    return h + '</section>';
+  }
+  // The calls whose code a scope edited under a sentence that stayed, with the groups above them.
+  function olEditedRowsHtml(sc, o) {
+    const keep = new Set();
+    sc.edited.forEach((n) => { for (let x = n; x; x = x.parent) keep.add(x); });
+    const sub = { ...sc, st: new Map([...sc.st].map(([n, s]) => [n, sc.edited.includes(n) ? s : { ...s, s: null }])) };
+    let h = '';
+    const walk = (list) => list.forEach((n) => { if (!keep.has(n)) return; h += olRowHtml(sub, n, o); walk(n.kids); });
+    walk(sc.ol.top);
+    return h;
+  }
+  // Changes outside every call: imports and helpers, as code.
+  function olOutsideHtml(sc) {
+    const f = sc.f, key = f.p + '#outside', open = olFold(sc, key);
+    const names = [...new Set(sc.outside.map((b) => (b.member || '').split('.')[0]).filter((x) => x && x !== 'main'))];
+    let h = `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Outside the tests${names.length ? `: <code>${esc(names.slice(0, 3).join(', '))}</code>${names.length > 3 ? ` and ${names.length - 3} more` : ''}` : ''} · ${plusMinus(sumOf(sc.outside, 'adds'), sumOf(sc.outside, 'dels'))}</div>`;
+    if (open) h += `<div class="ol-out">${subHunksHtml(sc.outside, { chain: sc.chain || undefined, key: 'olo|' + f.p })}</div>`;
+    return h;
+  }
+  // A chain's members that are a test file's changes, read as that file's outline: the files, and
+  // the members each one stands for. A same change keeps its places.
+  function chainTests(c) {
+    const outlined = (f) => !!olOf(f) && TEST_FILE.test(f.p);
+    const nodes = new Set(), secs = new Map();
+    c.graph.nodes.forEach((n) => {
+      if (n.group != null) return;
+      const bs = blocksOf(n.blocks);
+      if (!bs.length || !bs.every((b) => outlined(b.file))) return;
+      nodes.add(n);
+      new Set(bs.map((b) => b.file)).forEach((f) => { if (!secs.has(f)) secs.set(f, []); secs.get(f).push(n.idx); });
+    });
+    return { files: [...secs.keys()].sort((x, y) => x.idx - y.idx), secs, nodes };
   }
   // A chain's members in a row, by level: the root, then what uses it, and so on, each with what's
   // left to review in it. The graph above the code draws them.
@@ -2297,20 +2587,21 @@
     const kind = c.kind === 'declaration' ? 'new implementation' : c.kind === 'group' && !c.rootKind ? (m.byCommit ? 'rename' : 'same change') : c.kind === 'commit' ? 'commit' : kindWord[c.rootKind] || 'chain';
     // By commit: the commit this chain is.
     const fam = m.byCommit ? m.families.find((f) => f.id === c.family) : null;
-    const suite = c.kind !== 'declaration' || c.graph.nodes.every((node) => ['test', 'setup'].includes(m.unitById.get(node.unit)?.kind));
-    const oneTestFile = suite && new Set(all.map((b) => b.file)).size === 1 && TEST_FILE.test(all[0].file.p);
+    // Its test files read as outlines, after its code; a chain of tests alone is only them.
+    const tests = chainTests(c);
+    const testOnly = tests.files.length > 0 && c.graph.nodes.every((n) => tests.nodes.has(n));
     let h = headerHtml({
       crumbs: `<button type="button" data-map="${c.family}" title="Open the chain map">Map</button>${SEP}<b${proseName(c) ? ' class="ui"' : ''} title="${esc(c.name + ' · ' + kind)}">${esc(c.name)}</b>`,
       facts: `${kind !== 'changed member' ? cap(kind) + ' · ' : ''}${leftWords(s)} · ${c.files} file${c.files > 1 ? 's' : ''} · ${plusMinus(c.adds, c.dels)}`,
       nav: true,
-      tools: oneTestFile ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
+      tools: testOnly ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
       action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
       // The members stay under the header, so going from one to another needs no scrolling back;
       // by commit, so do the commits that wrote them.
-      pinned: (oneTestFile ? '' : stripHtml(c)) + (m.byCommit ? writersHtml(c, fam) : ''),
+      pinned: (testOnly ? testStripHtml(c, tests) : stripHtml(c)) + (m.byCommit ? writersHtml(c, fam) : ''),
       below: fam && fam.commit ? commitNoteHtml(fam) + (state.card === fam.commit.sha && hxOn() && HX.index.has(state.card) ? detailHtml(HX.index.get(state.card), '') : '') : '',
     });
-    if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + extNoteHtml(c) + testListHtml(c, all);
+    if (testOnly) return h + extNoteHtml(c) + tests.files.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('');
     if (UI.graph) {
       h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
         <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span>${(c.ext || []).length ? '<span>A dotted box is changed in another chain: click it to see its change.</span>' : ''}</div></div>`;
@@ -2322,7 +2613,7 @@
       h += `<div class="focus-bar">Showing only <b>${esc(l2)}</b> · ${count} change${count > 1 ? 's' : ''}<span class="sp"></span><button type="button" class="btn xs" data-act="clear-focus">Show all ${c.graph.nodes.length} members</button></div>`;
     }
     c.graph.nodes.forEach((n) => {
-      if (focused && n !== focused) return;
+      if ((focused && n !== focused) || tests.nodes.has(n)) return;
       const blocks = blocksOf(n.blocks);
       const ns = stats(blocks);
       const { l1, l2, owner } = nodeLabels(n);
@@ -2349,7 +2640,17 @@
       }
       h += '</section>';
     });
+    const testFiles = focused ? tests.files.filter((f) => tests.secs.get(f).includes(focused.idx)) : tests.files;
+    if (testFiles.length) h += `<div class="ol-sect">Tests${testFiles.length > 1 ? ` · ${testFiles.length} files` : ''}</div>` + testFiles.map((f) => olFileHtml(olScope(f, c), { secs: tests.secs.get(f) })).join('');
     return h;
+  }
+  // A chain of tests alone: its test files in a row, each with what it changes in what they assert.
+  function testStripHtml(c, tests) {
+    if (tests.files.length < 2) return '';
+    return `<div class="strip">${tests.files.map((f) => {
+      const sc = olScope(f, c), st = stats(blocksOf(c.blocks).filter((b) => b.file === f)), secs = tests.secs.get(f);
+      return `<button type="button" class="node${st.open ? '' : ' done'}" ${secs.length ? `data-act="to-node" data-i="${secs[0]}"` : 'disabled'} title="${esc(f.p + ' · ' + leftWords(st))}">${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span><span class="c">${esc(olSaid(olCounts(sc)) || 'code only')}</span></button>`;
+    }).join('')}</div>`;
   }
   function renderMap(famId) {
     const m = M();
@@ -3636,12 +3937,12 @@
   // ones to review, counted from the one they last went to while it's on screen, else from the
   // top of the screen, wrapping around at either end.
   let navAt = null;
-  const rowOf = (el) => el.closest('.ln, .sl, .hh');
+  const rowOf = (el) => el.closest('.ln, .sl, .hh, .ol-row');
   const markId = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
   // A chain shows other chains' changes in its context lines: j, k and the pill skip them.
   const changeMarks = (open) => {
     const seen = new Set();
-    return [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav]')].filter((el) => {
+    return [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav], .ol-row[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav], .ol-row[data-mark]')].filter((el) => {
       if (open && el.closest('.other')) return false;
       const block = M().blockById.get(el.dataset.block);
       const key = state.view.kind === 'group' ? block?.id : el.dataset.unit || block?.unit || block?.id;
@@ -3723,6 +4024,14 @@
     const el = currentMark();
     if (!el) return gotoChange(1, true);
     if (el.matches('.hh')) return goToMark(el);
+    if (el.matches('.ol-row')) {
+      // An outline's row: its own lines (a test's body, a group's setup).
+      const key = el.dataset.ol, blocks = blocksOf(el.dataset.mark.split(' ')).filter((b) => b && b.edits.length);
+      toggleBlocks(blocks);
+      hint({ mark: blocks.map((b) => b.id) });
+      render();
+      return goNextAfter(() => [...main.querySelectorAll('.ol-row[data-ol]')].find((x) => x.dataset.ol === key) || null);
+    }
     const id = el.dataset.block, b = M().blockById.get(id);
     if (!b) return false;
     const band = bandOf(el), key = band && band.dataset.sec;
@@ -3738,6 +4047,16 @@
     const el = currentMark();
     if (!el) return gotoChange(1, true);
     if (el.matches('.hh')) return goToMark(el);
+    if (el.matches('.ol-row')) {
+      // An outline's row: everything its mark covers (a group's setup and the calls under it).
+      const key = el.dataset.ol, tick = el.querySelector('.ol-tick[data-blocks]');
+      const blocks = blocksOf((tick ? tick.dataset.blocks : el.dataset.mark).split(' ')).filter((b) => b && b.edits.length && blockIn(b) && !doneL(b));
+      if (!blocks.length) return false;
+      setEdits(blocks.flatMap((b) => b.edits), true);
+      hint({ mark: blocks.map((b) => b.id) });
+      render();
+      return goNextAfter(() => [...main.querySelectorAll('.ol-row[data-ol]')].find((x) => x.dataset.ol === key) || null);
+    }
     const sec = state.view.kind === 'chain' ? el.closest('.sec[id]') : null;
     const band = bandOf(el);
     const btn = sec ? sec.querySelector('.sec-h [data-act="mark-blocks"]') : band && band.querySelector('[data-act="mark-blocks"]');
@@ -3774,7 +4093,7 @@
     const el = $('#vw-pill');
     if (!el) return;
     let h = '';
-    if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav]')) {
+    if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav], .ol-row[data-mark]')) {
       const marks = changeMarks(true);
       const total = marks.reduce((x, m) => x + openIn(m), 0);
       if (total) {
@@ -3803,9 +4122,10 @@
     if (!nodes.length) return;
     const ref = readY();
     let at = null;
-    main.querySelectorAll('.sec[id^="sec-"]').forEach((sec) => { if (sec.getBoundingClientRect().top <= ref) at = sec.id.slice(4); });
-    if (at == null) { const first = main.querySelector('.sec[id^="sec-"]'); at = first ? first.id.slice(4) : null; }
-    nodes.forEach((n) => n.classList.toggle('here', n.dataset.i === at));
+    main.querySelectorAll('.sec[id^="sec-"]').forEach((sec) => { if (sec.getBoundingClientRect().top <= ref) at = sec; });
+    if (at == null) at = main.querySelector('.sec[id^="sec-"]');
+    const here = at ? (at.dataset.secs ? at.dataset.secs.split(' ') : [at.id.slice(4)]) : [];
+    nodes.forEach((n) => n.classList.toggle('here', here.includes(n.dataset.i)));
   }
   let scrollRaf = 0;
   main.addEventListener('scroll', () => {
@@ -4536,7 +4856,7 @@
     if (act === 'to-node') {
       const i = Number(d.i);
       if (state.focus && state.focus.chain === state.view.id) { state.focus = { chain: state.view.id, node: i }; return render({ section: i }); }
-      const el = main.querySelector('#sec-' + i);
+      const el = main.querySelector('#sec-' + i) || [...main.querySelectorAll('[data-secs]')].find((x) => x.dataset.secs.split(' ').includes(String(i)));
       if (el) glideTo(el, headH() + 8, 0, () => { el.classList.remove('flash-sec'); void el.offsetWidth; el.classList.add('flash-sec'); });
       return;
     }
@@ -4608,6 +4928,16 @@
     if (act === 'mark-standalone') { toggleBlocks(m.standalone); hint({ mark: m.standalone.map((b) => b.id) }); return render(); }
     if (act === 'mark-edits') { const ids = d.edits.split(' ').map(Number); setEdits(ids, !ids.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'toggle-member') { state.memberOpen.has(d.key) ? state.memberOpen.delete(d.key) : state.memberOpen.add(d.key); return render(); }
+    if (act === 'ol-open') { state.olOpen.has(d.ol) ? state.olOpen.delete(d.ol) : state.olOpen.add(d.ol); return render(); }
+    if (act === 'ol-unfold') { state.olUnfold.has(d.key) ? state.olUnfold.delete(d.key) : state.olUnfold.add(d.key); return render(); }
+    if (act === 'ol-chain') {
+      // The chain that wrote a call, at its row.
+      state.view = { kind: 'chain', id: Number(d.chainId) }; state.peek = null; state.focus = null; toChains();
+      render({ top: true });
+      const row = [...main.querySelectorAll('.ol-row[data-ol]')].find((x) => x.dataset.ol === d.ol);
+      if (row) { placeRow(row, headH() + 60); flashRow(row); }
+      return;
+    }
     if (act === 'note-more') { const id = Number(d.family); state.noteOpen.has(id) ? state.noteOpen.delete(id) : state.noteOpen.add(id); return render(); }
     if (act === 'next-open') { const nx = nextUnreviewed(); if (nx) { state.view = nx; state.peek = null; state.focus = null; toChains(); return render({ top: true }); } return; }
     if (act === 'mark-group') { const g = m.groupById.get(Number(d.groupId)); setEdits(g.edits, !g.edits.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
@@ -4683,6 +5013,7 @@
       if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
       return;
     }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.ol-row[data-act], .ol-fold[data-act], .ol-file[data-act]')) { e.preventDefault(); e.target.click(); return; }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext-box"]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext-box"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   viewer.addEventListener('change', (e) => {

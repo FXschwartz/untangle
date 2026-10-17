@@ -131,11 +131,12 @@ export function testOutline(f) {
     return rows;
   };
   const ids = (rows) => [...new Set(rows.map((r) => r.block).filter((k) => k >= 0))].sort((x, y) => x - y);
-  // Changed lines that aren't blank, per block: [block, added, removed].
+  // Changed lines that say something (not blank, not only closing brackets, which the diff pairs
+  // with whichever brace it likes), per block: [block, added, removed].
   const counts = (adds, dels) => {
     const by = new Map();
     for (const [rows, at] of [[adds, 1], [dels, 2]]) for (const r of rows) {
-      if (r.block < 0 || !r.text.trim()) continue;
+      if (r.block < 0 || /^[\s})\];,]*$/.test(r.text)) continue;
       if (!by.has(r.block)) by.set(r.block, [r.block, 0, 0]);
       by.get(r.block)[at]++;
     }
@@ -157,9 +158,9 @@ export function testOutline(f) {
         if (!sameWords) out.was = before;
       }
     } else out.st = !o ? 'new' : o.title !== n.title ? 'renamed' : 'same';
-    // Its blocks: in its range, in its own lines (without its calls), in its title.
-    const kids = n.kind === 't' ? [] : n.kids.map((c) => [c.s, c.e]);
-    const oldKids = o && n.kind !== 't' ? o.kids.map((c) => [c.s, c.e]) : [];
+    // Its blocks: in its range, in its own lines (without its title and its calls), in its title.
+    const kids = (n.kind === 't' ? [] : n.kids.map((c) => [c.s, c.e])).concat([[n.s, n.te]]);
+    const oldKids = (o && n.kind !== 't' ? o.kids.map((c) => [c.s, c.e]) : []).concat(o ? [[o.s, o.te]] : []);
     const all = blocksIn(added, n.s, n.e).concat(o ? blocksIn(removed, o.s, o.e) : []);
     const ownAdds = blocksIn(added, n.s, n.e, kids), ownDels = o ? blocksIn(removed, o.s, o.e, oldKids) : [];
     const head = blocksIn(added, n.s, n.te).concat(o ? blocksIn(removed, o.s, o.te) : []);

@@ -56,12 +56,12 @@ describe('Given a test file whose Given and when groups gain a then, ', { skip: 
 
     after(() => review?.remove());
 
-    it('then the outline keeps the Given and the when as they were and marks the then new, with its lines as its own.', () => {
+    it('then the outline keeps the Given and the when as they were and marks the then new, with its body as its own lines.', () => {
       assert.equal(outlineOf(review!, 'test/inbox_test.dart'), [
         'group Given a signed-in user, · same',
         '  group when they open the inbox, · same',
         '    test then the unread count shows. · same',
-        '    test then the newest message is first. · new · own +3 −0',
+        '    test then the newest message is first. · new · own +1 −0',
       ].join('\n'));
     });
   });
@@ -92,7 +92,7 @@ describe('Given a renamed Given over a test that did not change, ', { skip: skip
 
     it('then the untouched test is reworded through its Given, with the sentence it read before.', () => {
       assert.equal(outlineOf(review!, 'test/session_test.dart'), [
-        'group Given a guest with an invitation, · renamed · was “Given a visitor,” · own +1 −1',
+        'group Given a guest with an invitation, · renamed · was “Given a visitor,”',
         '  test when they sign in, then a session starts. · reworded · read “Given a visitor, when they sign in, then a session starts.”',
       ].join('\n'));
     });
@@ -140,10 +140,10 @@ describe('Given a group whose title held the when, split into a Given and a when
 
     it('then its tests read the same sentences in new groups, so they are regrouped rather than new.', () => {
       assert.equal(outlineOf(review!, 'test/store_test.dart'), [
-        'group Given an empty store, · renamed · was “Given an empty store, when a row is inserted, ” · own +1 −1',
-        '  group when a row is inserted, · new · own +1 −0',
-        '    test then the row is stored. · regrouped · read “Given an empty store, when a row is inserted, then the row is stored.” · own +3 −3',
-        '    test then the count is one. · regrouped · read “Given an empty store, when a row is inserted, then the count is one.” · own +3 −2',
+        'group Given an empty store, · renamed · was “Given an empty store, when a row is inserted, ”',
+        '  group when a row is inserted, · new',
+        '    test then the row is stored. · regrouped · read “Given an empty store, when a row is inserted, then the row is stored.” · own +1 −1',
+        '    test then the count is one. · regrouped · read “Given an empty store, when a row is inserted, then the count is one.” · own +1 −1',
       ].join('\n'));
     });
   });
@@ -219,7 +219,7 @@ describe('Given a wrapper with a bracketed label around a Given whose test is re
       assert.equal(outlineOf(review!, 'test/server_clock_test.dart'), [
         'wrapper [Clocks] · label · same',
         '  group Given a server clock, · same',
-        '    test when it ticks, then it advances by one. · reworded · was “when it ticks, then it advances.” · read “Given a server clock, when it ticks, then it advances.” · own +1 −1',
+        '    test when it ticks, then it advances by one. · reworded · was “when it ticks, then it advances.” · read “Given a server clock, when it ticks, then it advances.”',
       ].join('\n'));
     });
   });
