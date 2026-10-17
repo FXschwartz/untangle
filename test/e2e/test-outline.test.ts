@@ -670,6 +670,37 @@ describe('Given a served review by commit: a discount with its tests, more tests
     });
   });
 
+  describe('when another test opens while a peek is open in a test\'s code, with motion on, ', () => {
+    let closing = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      await page!.click(await rowSelector(page!, 'then it is positive.'));
+      await page!.until(`!!document.querySelector('#vw-main .ol-code')`);
+      await page!.clickIn('#vw-main .ol-code .ref', 'sum', 'expect(sum > 0');
+      await page!.until(`!!document.querySelector('#vw-main .peek .pk-loc')`);
+      await page!.reducedMotion(false);
+      await page!.click(await rowSelector(page!, 'when nothing is bought, then nothing comes off.'));
+      // A moment later than anything the click set off at once.
+      await page!.eval(`new Promise((resolve) => setTimeout(resolve, 60))`);
+      closing = await read(page!, `[document.querySelector('#vw-main .ghost .peek') ? 'the peek folding away' : 'the peek gone at once', document.querySelectorAll('#vw-main .ol-code').length + ' tests open'].join(', ')`);
+      await page!.until(`!document.querySelector('#vw-main .ghost')`);
+      await page!.reducedMotion(true);
+    });
+
+    after(async () => {
+      for (const title of ['then it is positive.', 'when nothing is bought, then nothing comes off.']) await page!.click(await rowSelector(page!, title));
+      await page!.until(`!document.querySelector('#vw-main .ol-code')`);
+    });
+
+    it('then the peek folds away with motion, as it does when it closes alone, while the other test opens.', () => {
+      assert.equal(closing, 'the peek folding away, 2 tests open');
+    });
+  });
+
   describe('when Space reviews the Tests view from its top, ', () => {
     let given = '';
     let then = '';

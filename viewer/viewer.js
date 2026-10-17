@@ -976,6 +976,8 @@
   }
 
   // ---------- peek
+  // The open peek: not one folding away as it closes, a picture of it left in the page for a moment.
+  const PEEK = '.peek:not(.ghost .peek)';
   // The top panel shows the definition, or the changed usage picked in the list below it.
   // Clicking a usage once shows it here; clicking it again (or "Go to it") opens it.
   function usageContextHtml(hl) {
@@ -1020,7 +1022,7 @@
   // The open peek, drawn again in place (an answer or a file arrived): only it changes, and its
   // height eases to what it holds now.
   function updatePeek() {
-    const el = main.querySelector('.peek');
+    const el = main.querySelector(PEEK);
     if (!el || !state.peek) return render();
     savePeekScroll();
     const h0 = el.getBoundingClientRect().height;
@@ -1051,13 +1053,13 @@
   // Keep each definition/usage's position across redraws and Back. A new file starts at
   // the requested line, with a little context above; scrolling stays inside the window.
   function savePeekScroll() {
-    const code = main.querySelector('.peek .pk-code');
+    const code = main.querySelector(PEEK + ' .pk-code');
     if (!code || !state.peek) return;
     if (!state.peek.scrolls) state.peek.scrolls = new Map();
     state.peek.scrolls.set(code.dataset.peekCode, [code.scrollLeft, code.scrollTop]);
   }
   function restorePeekScroll() {
-    const code = main.querySelector('.peek .pk-code');
+    const code = main.querySelector(PEEK + ' .pk-code');
     if (!code || !state.peek) return;
     const at = state.peek.scrolls && state.peek.scrolls.get(code.dataset.peekCode);
     if (at) { code.scrollLeft = at[0]; code.scrollTop = at[1]; return; }
@@ -1577,7 +1579,7 @@
         if (state.view.kind === 'source' && srcKey(state.view) === key) return render(state.view.line ? { line: state.view.line } : { top: true });
         if (!s.wanted) return;
         // Only a peek waits for it: only the peek changes.
-        if (s.wanted === 'peek') return state.peek && main.querySelector('.peek') ? updatePeek() : undefined;
+        if (s.wanted === 'peek') return state.peek && main.querySelector(PEEK) ? updatePeek() : undefined;
         if (pendingLine && pendingLine.view === state.view) { const line = pendingLine.line; pendingLine = null; return render({ line }); }
         const at = lineOnScreen();
         render();
@@ -1671,7 +1673,7 @@
         if (state.peek !== cur) return;
         if (live.status !== 'ok') return toast(live.status === 'none' ? 'The language server knows no definition for this name.' : live.error);
         if (sameTarget(shownTarget(cur), live.target)) {
-          const hit = main.querySelector('.peek .pk-ln.hit');
+          const hit = main.querySelector(PEEK + ' .pk-ln.hit');
           if (hit) { hit.classList.remove('flash'); void hit.offsetWidth; hit.classList.add('flash'); }
           return;
         }
@@ -4160,7 +4162,7 @@
         if (seen(top, bottom)) snap.sections.push({ key: band.dataset.sec, h: bottom - top, rows });
       });
     }
-    const pk = main.querySelector('.peek');
+    const pk = main.querySelector(PEEK);
     if (pk) {
       const r = pk.getBoundingClientRect(), code = pk.querySelector('.pk-code');
       if (seen(r.top, r.bottom)) snap.peek = { el: pk, place: placeOf(pk.previousElementSibling), h: r.height, gap: gapOf(pk), anchor: peekKey(shownPeek), scroll: code ? [code.scrollLeft, code.scrollTop] : null };
@@ -4309,7 +4311,7 @@
   // that stays where it is with other content (an answer, another definition, Back) eases to its
   // new height.
   function peekMotion(snap) {
-    const el = main.querySelector('.peek');
+    const el = main.querySelector(PEEK);
     if (state.peek && el && snap.peek && snap.peek.anchor === peekKey(state.peek)) {
       const h = el.getBoundingClientRect().height;
       if (Math.abs(h - snap.peek.h) > 3) el.animate([{ height: snap.peek.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE });
@@ -5659,11 +5661,11 @@
   let downAt = null;
   document.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; }, { passive: true, capture: true });
   document.addEventListener('click', (e) => {
-    if (!state.peek || !main.querySelector('.peek') || !(e.target instanceof Element)) return;
+    if (!state.peek || !main.querySelector(PEEK) || !(e.target instanceof Element)) return;
     if (e.target.closest('.peek, .ref, [data-act="hd-open"], [data-act="move-peek"], .menu, .pal, .scrim, .keys, .mn-pop')) return;
     if (downAt && e.detail && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
     state.peek = null;
-    setTimeout(() => { if (!state.peek && main.querySelector('.peek')) render(); }, 0);
+    setTimeout(() => { if (!state.peek && main.querySelector(PEEK)) render(); }, 0);
   }, true);
   window.addEventListener('resize', () => { if (MENU.open) renderMenu(); roomToFold(); });
   viewer.addEventListener('keydown', (e) => {

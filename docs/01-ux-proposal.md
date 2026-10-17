@@ -945,6 +945,9 @@ through the page.
     under Peek.
   - Then a move's link, asked to show the other copy in place before going there. Done:
     [Display](#display), under Moved code.
+  - Found: a click outside a peek that also opened something, such as another test in the Tests
+    view, drew the page a second time right after, which cut the peek's fold short: it vanished.
+    The second drawing now ignores the peek on its way out.
 
 ## References
 
