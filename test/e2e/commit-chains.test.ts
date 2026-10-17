@@ -12,7 +12,7 @@ import { read, rest } from './page.ts';
 
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
-const report = (first: string) => `void keep() {}\n\nvoid report(int total) {\n  print('${first}: $total');\n  print('done');\n}\n`;
+const report = (first: string) => `import 'price.dart';\n\nvoid keep() {}\n\nvoid report(int total) {\n  print('${first}: \${price(total)}');\n  print('done');\n}\n`;
 
 async function openChain(page: Browser, name: string): Promise<void> {
   await page.click('[data-tab="chains"]');
@@ -102,20 +102,81 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     });
   });
 
-  describe('when the tests\' chain is opened and the function they call is followed, ', () => {
+  describe('when the report\'s chain is opened, which calls a function a later commit changes, ', () => {
+    let note = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      note = await read(page!, `[...document.querySelectorAll('.sec-note')].map((el) => el.textContent).find((text) => text.startsWith('Uses')) ?? ''`);
+    });
+
+    it('then a note under its member says the function changes later, and where.', () => {
+      assert.equal(note, 'Uses price, which changes later in Double the price.');
+    });
+  });
+
+  describe('when the tests\' chain shows the change of the function they call, then follows it, ', () => {
     let followed = '';
 
     before(async () => {
       await rest(page!);
       await openChain(page!, 'Cover the price');
       const note = await read(page!, `[...document.querySelectorAll('.sec-note')].map((el) => el.textContent).find((text) => text.startsWith('Uses')) ?? ''`);
-      await page!.click('.sec-note [data-act="ext"]');
+      await page!.click('.sec-note [data-act="ext-peek"]');
+      await page!.until(`!!document.querySelector('.peek .pk-code')`);
+      const peek = await read(page!, `[...document.querySelectorAll('.peek .pk-h > b, .peek .pk-h > .pk-src')].map((el) => el.textContent).join(' · ') + ' | ' + [...document.querySelectorAll('.peek .pk-ln.add .tx')].map((el) => el.textContent).join(' ⏎ ')`);
+      await page!.click('.peek [data-act="ext"]');
       await page!.until(`(document.querySelector('.crumbs b')?.textContent || '') === 'Double the price'`);
-      followed = `${note} → ${await read(page!, `document.querySelector('.crumbs b').textContent`)}`;
+      followed = [note, peek, `→ ${await read(page!, `document.querySelector('.crumbs b').textContent`)}`].join('\n');
     });
 
-    it('then a note names the function and the chain that changes it, and its link opens that chain.', () => {
-      assert.equal(followed, 'Uses price, changed in Double the price. → Double the price');
+    it('then the note names the function and its chain, its name shows the change in place, and the peek opens that chain.', () => {
+      assert.equal(followed, [
+        'Uses price, changed in Double the price.',
+        'price · changed in Double the price · not reviewed | int price(int amount) => amount * 3;',
+        '→ Double the price',
+      ].join('\n'));
+    });
+  });
+
+  describe('when the dotted box in the report\'s graph is clicked, ', () => {
+    let opened = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      await page!.until(`!!document.querySelector('g[data-act="ext-box"]')`);
+      await page!.click('g[data-act="ext-box"]');
+      await page!.until(`!!document.querySelector('.peek .pk-code')`);
+      opened = await read(page!, `(() => { const peek = document.querySelector('.peek'); return (peek.closest('section')?.querySelector('.sec-h b')?.textContent || '?') + ': ' + [...peek.querySelectorAll('.pk-h > b, .pk-h > .pk-src')].map((el) => el.textContent).join(' · '); })()`);
+    });
+
+    it('then the change of the function it calls opens under the member that calls it.', () => {
+      assert.equal(opened, 'report: price · changes later in Double the price · not reviewed');
+    });
+  });
+
+  describe('when the change shown under the tests\' note is closed, with motion on, ', () => {
+    let during = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.reducedMotion(false);
+      await openChain(page!, 'Cover the price');
+      await page!.click('.sec-note [data-act="ext-peek"]');
+      await page!.until(`!!document.querySelector('.peek .pk-code') && document.getAnimations().length === 0`);
+      await page!.click('.peek [data-act="close-peek"]');
+      during = await read(page!, `(() => { const ghost = document.querySelector('.ghost'); if (!ghost) return 'no stand-in'; return 'a stand-in after ' + (ghost.previousElementSibling?.matches('.sec-note') ? 'the note' : 'something else') + ' with ' + ghost.querySelectorAll('.pk-h').length + ' peek in it'; })()`);
+      await page!.until(`!document.querySelector('.ghost')`);
+    });
+
+    after(async () => {
+      await page?.reducedMotion(true);
+    });
+
+    it('then a fading stand-in of the peek folds under the note.', () => {
+      assert.equal(during, 'a stand-in after the note with 1 peek in it');
     });
   });
 

@@ -146,4 +146,47 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
       assert.equal(afterClose, 'no peek, line 83 followed by line 84');
     });
   });
+
+  describe('when a peek under a removed line is closed, ', () => {
+    let during: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile('lib/end.dart');
+      await page!.clickIn('.code[data-p="lib/end.dart"] .ln.del .ref', 'print', "print('a');");
+      await page!.until(`!!document.querySelector('.peek [data-act="close-peek"]') && document.getAnimations().length === 0`);
+      await page!.click('.peek [data-act="close-peek"]');
+      during = await read(page!, `(() => { const ghost = document.querySelector('.ghost'); if (!ghost) return 'no stand-in'; return 'a stand-in after ' + (ghost.previousElementSibling?.matches('.ln.del') ? 'the removed line' : 'something else') + ' with ' + ghost.querySelectorAll('.pk-h').length + ' peek in it, ' + document.getAnimations().filter((a) => a.effect?.target === ghost).length + ' animations'; })()`);
+      await page!.until(`!document.querySelector('.ghost')`);
+    });
+
+    it('then a fading stand-in of the peek folds under that line too.', () => {
+      assert.equal(during, 'a stand-in after the removed line with 1 peek in it, 2 animations');
+    });
+  });
+
+  describe('when a commit\'s details are opened, then closed, ', () => {
+    let motion: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await page!.click('[data-act="history-open"]');
+      await page!.until(`!!document.querySelector('.hs-main[data-detail]')`);
+      await page!.click('.hs-main[data-detail]');
+      const opening = await read(page!, `(() => { const details = document.querySelector('.hs-detail'); if (!details) return 'no details'; return document.getAnimations().some((a) => a.effect?.target === details) ? 'the details grow' : 'the details appear still'; })()`);
+      await page!.until(`!!document.querySelector('.hs-detail') && document.getAnimations().length === 0`);
+      await page!.click('.hs-row.open .hs-main');
+      const closing = await read(page!, `(() => { const ghost = document.querySelector('.ghost'); if (!ghost) return 'no stand-in'; return 'a stand-in after ' + (ghost.previousElementSibling?.matches('.hs-row') ? 'its row' : 'something else') + ' with ' + ghost.querySelectorAll('.hd-in').length + ' details in it'; })()`);
+      await page!.until(`!document.querySelector('.ghost') && !document.querySelector('.hs-detail')`);
+      motion = `${opening}\n${closing}`;
+    });
+
+    it('then they grow from the commit\'s row and fold back into it.', () => {
+      assert.equal(motion, 'the details grow\na stand-in after its row with 1 details in it');
+    });
+  });
 });

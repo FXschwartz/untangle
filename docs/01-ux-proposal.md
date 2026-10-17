@@ -307,10 +307,15 @@ commit is the one boundary its author declared; the review collapses its back-an
    added in three places say, read in their commit's chain.
 6. **Links.** A change that uses a function, method, field or type another chain changes
    links to it, and the changes stay where the rules above put them. The chain's graph shows
-   the declaration in a dotted box, and a note under the member that uses it names the chain
-   to read it in (a commit's before a rename's). Both open that chain at the declaration:
-   the `userId → spaceId` rename of offline_sync #168 links `spaceIdFor`, added by the first
-   commit.
+   the declaration in a dotted box. A note under the member that uses it names the chain that
+   changes it (a commit's before a rename's): "changed in" one read before, "changes later in"
+   one read after. The name, or the box, shows the declaration's change in place, read only,
+   with a way to open its chain. The `userId → spaceId` rename of offline_sync #168 links
+   `spaceIdFor`, added by the first commit.
+   - The linked change is not shown first or last in the chain. In commit order, most links
+     point to a chain already read (110 of offline_sync #168's 119, 75 of #5866's 83), so it
+     would repeat it; a test commit can use twenty or more. It matters for the links to later
+     chains, about half of them in a messy history, which the note names as such.
 7. **Display.** A chain is named after the commit that started it and opens with its
    message, its follow-ups, the commits that changed its lines later, and what it builds on
    or changes. The sidebar lists the chains in commit order, then the renames. The chain map
@@ -393,9 +398,10 @@ commit is the one boundary its author declared; the review collapses its back-an
   Esc; `?` lists them).
 - **Motion:** what changes moves from where it was to where it goes, in 120 to 280 ms, easing
   out. A reviewed hunk's check fills, its diff settles and it folds into its divider while the
-  code below glides up; lines shown from a divider open downward from it; a peek grows from its
-  line; going to a change scrolls to it and pulses it; another view fades in. With "reduce
-  motion", all of it is instant.
+  code below glides up; lines shown from a divider open downward from it; a peek, or a commit's
+  details, grows from where it was asked and folds back there when it closes; going to a change
+  scrolls to it and pulses it; landing further down the page jumps, then glides over the last
+  120 px; another view fades in. With "reduce motion", all of it is instant.
 - **Panels:** the sidebar resizes from its edge and hides (Ctrl B); a minimap at the right of the
   code shows the view small, with what's left to review in amber and threads in blue.
 - **The Files tab is a folder tree,** folders first, with a folder that holds only one folder
@@ -732,6 +738,8 @@ through the page.
     made joins the nearest change of its file.
   - Asked: keep linking a change to the functions it uses that other commits change, without
     moving them. Done: dotted nodes and notes that open the other chain.
+  - Asked: show the linked change in place rather than first or last in the chain, and say
+    whether its chain comes before or after. Done: the change in a peek.
   - Validation: [02-test-runs.md](02-test-runs.md#2026-10-16-one-chain-per-commit).
 
 ## References

@@ -1007,6 +1007,7 @@
   }
   function peekHtml(p) {
     if (p.history) return '<div class="peek" role="region" aria-label="Peek">' + historyPeekHtml(p) + '</div>';
+    if (p.ext) return '<div class="peek" role="region" aria-label="Peek">' + extPeekHtml(p) + '</div>';
     if (p.live) return '<div class="peek" role="region" aria-label="Peek">' + livePeekHtml(p) + '</div>';
     let h = '<div class="peek" role="region" aria-label="Peek">';
     const hasDef = p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti);
@@ -1186,25 +1187,52 @@
         const { l1, l2, owner } = nodeLabels(n);
         return { key: n.key, layer: n.layer, l1, l2, cnt: outOfLens(s) ? '' : s.open ? s.open + '/' + s.total : '✓ ' + s.total, ok: !s.open && !outOfLens(s), out: outOfLens(s), root: n.key === c.graph.root, grp: n.group !== null && n.group !== undefined,
           attr: `data-node="${n.idx}"`, tip: (owner ? owner + '.' : '') + l2 + ' · ' + n.file };
-      }).concat(ext.map(({ key, x }) => ({ key, layer: last, l1: 'in ' + m.chains[x.chain].name, l2: memberParts(x.name).name, cnt: '↗', ext: true,
-        attr: extAttrs(x), tip: `${x.name} · changed in ${m.chains[x.chain].name}` }))),
+      }).concat(ext.map(({ key, x }, i) => ({ key, layer: last, l1: 'in ' + m.chains[x.chain].name, l2: memberParts(x.name).name, cnt: '↗', ext: true,
+        attr: `data-act="ext-box" data-i="${i}"`, tip: `${x.name} · ${extWhere(c, x)} ${m.chains[x.chain].name}` }))),
     });
   }
-  // Opens another chain at the change of a declaration this one uses.
-  const extAttrs = (x) => `data-act="ext" data-to="${x.chain}" data-block="${esc(x.block)}"`;
+  // Whether the chain that changes a declaration this one uses is read before it or after.
+  const extWhere = (c, x) => { const order = chainOrder(); return order.indexOf(x.chain) > order.indexOf(c.id) ? 'changes later in' : 'changed in'; };
   // A member's uses of declarations other chains change (without a member, the chain's), by the
-  // chain each is changed in.
+  // chain each is changed in. A name opens its change here; the chain's name, that chain.
   function extNoteHtml(c, n) {
     const m = M();
+    const anchor = n ? n.key : 'chain';
     const byChain = new Map();
-    (c.ext || []).filter((x) => !n || x.from.includes(n.key)).forEach((x) => { if (!byChain.has(x.chain)) byChain.set(x.chain, []); byChain.get(x.chain).push(x); });
+    (c.ext || []).forEach((x, i) => { if (n && !x.from.includes(n.key)) return; if (!byChain.has(x.chain)) byChain.set(x.chain, []); byChain.get(x.chain).push({ x, i }); });
     if (!byChain.size) return '';
+    const open = state.peek && state.peek.ext && state.peek.ext.chain === c.id && state.peek.ext.anchor === anchor ? state.peek.ext.i : null;
     const parts = [...byChain].map(([id, list]) => {
-      const names = list.slice(0, 3).map((x) => `<button type="button" class="linkish" ${extAttrs(x)} title="${esc(x.name)}"><code>${esc(memberParts(x.name).name)}</code></button>`);
+      const names = list.slice(0, 3).map(({ x, i }) => `<button type="button" class="linkish" data-act="ext-peek" data-chain-id="${c.id}" data-anchor="${esc(anchor)}" data-i="${i}" aria-expanded="${open === i}" title="Show the change of ${esc(x.name)}"><code>${esc(memberParts(x.name).name)}</code></button>`);
       const more = list.length > 3 ? ` and ${list.length - 3} more` : '';
-      return `${names.join(', ')}${more}, changed in <button type="button" class="linkish" data-chain="${id}">${esc(trunc(m.chains[id].name, 64))}</button>`;
+      const where = extWhere(c, list[0].x);
+      const verb = where === 'changed in' ? 'changed in' : list.length > 1 ? 'which change later in' : 'which changes later in';
+      return `${names.join(', ')}${more}, ${verb} <button type="button" class="linkish" data-chain="${id}">${esc(trunc(m.chains[id].name, 64))}</button>`;
     });
-    return `<p class="sec-note">Uses ${parts.join('; ')}.</p>`;
+    return `<p class="sec-note">Uses ${parts.join('; ')}.</p>` + (open != null ? peekHtml(state.peek) : '');
+  }
+  // The change of a declaration another chain changes, from where this chain uses it: read only,
+  // with the way to its chain.
+  function extPeekHtml(p) {
+    const m = M(), c = m.chains[p.ext.chain];
+    const x = c && (c.ext || [])[p.ext.i];
+    const b = x && m.blockById.get(x.block);
+    const close = '<button type="button" class="pk-x" data-act="close-peek">Close</button>';
+    if (!b) return `<div class="pk-h"><b>Change</b><span class="sp"></span>${close}</div>`;
+    const f = b.file, h = f.hunks[b.hunk];
+    const s0 = Math.max(0, b.first - 3), e0 = Math.min(h.rows.length, b.first + b.len + 3);
+    // As in the diff: the tokens that changed stand out only where lines were both removed and added.
+    const emphasis = b.adds > 0 && b.dels > 0;
+    let rows = '';
+    for (let i = s0; i < e0; i++) {
+      const [type, text, ranges] = h.rows[i];
+      const meta = h.meta[i];
+      const hit = type !== '-' && meta.n === x.line;
+      rows += `<div class="pk-ln${type === '+' ? ' add' : type === '-' ? ' del' : ''}${f.lang === 'md' ? ' md' : ''}${hit ? ' hit' : ''}"><span class="no">${meta.o ?? ''}</span><span class="no">${meta.n ?? ''}</span><span class="sg">${type === '-' ? '−' : type === '+' ? '+' : ''}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: emphasis && type !== ' ', colors: rowColors(h.rows, f.p, i) })}</span></div>`;
+    }
+    return `<div class="pk-h"><b>${esc(memberParts(x.name).name)}</b><span class="pk-loc">${esc(f.p)}:${x.line}</span><span class="pk-src">${extWhere(c, x)} ${esc(trunc(m.chains[x.chain].name, 48))}</span><span class="pk-src">${done(b) ? 'reviewed' : 'not reviewed'}</span><span class="sp"></span>`
+      + `<button type="button" class="btn xs primary" data-act="ext" data-to="${x.chain}" data-block="${esc(x.block)}">Open its chain</button>${close}</div>`
+      + `<div class="pk-code" tabindex="0" aria-label="The change of ${esc(x.name)}" data-peek-code="ext:${esc(x.block)}">${rows}</div>`;
   }
   function mapSvg(fam) {
     const ids = new Set(fam.chains.map((c) => c.id));
@@ -2215,7 +2243,7 @@
     if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + extNoteHtml(c) + testListHtml(c, all);
     if (UI.graph) {
       h += `<div class="graph-box"><div class="graph-scroll">${graphSvg(c)}</div>
-        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span>${(c.ext || []).length ? '<span>A dotted box is changed in another chain: click it to go there.</span>' : ''}</div></div>`;
+        <div class="graph-legend"><span><i class="lg-open"></i>has changes to review</span><span><i class="lg-ok"></i>reviewed</span><span>Arrows point from a change to what it uses. Click a member to show only its code, and what its arrows use.</span>${(c.ext || []).length ? '<span>A dotted box is changed in another chain: click it to see its change.</span>' : ''}</div></div>`;
     }
     const focused = state.focus && state.focus.chain === c.id ? c.graph.nodes[state.focus.node] : null;
     if (focused) {
@@ -3102,8 +3130,10 @@
 
   // ---------- motion: what changes moves from where it was to where it goes, fast enough not to
   // wait for (120 to 280 ms, easing out). A reviewed hunk folds into its divider while the code
-  // below glides up; lines shown from a divider open downward from it; a peek grows from its line;
-  // going to a change scrolls there and pulses it. With "reduce motion" set, all of it is instant.
+  // below glides up; lines shown from a divider open downward from it; a peek, or a commit's
+  // details, grows from where it was asked and folds back there when it closes; going to a change
+  // scrolls there and pulses it, and landing further down glides over the last stretch. With
+  // "reduce motion" set, all of it is instant.
   const REDUCE = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
   const moving = () => !REDUCE.matches && typeof Element.prototype.animate === 'function';
   // The lines a refresh's new commits changed, while they glow. The renders that follow the reload
@@ -3142,6 +3172,20 @@
     const code = old.closest('.code[data-p]'), p = code ? code.dataset.p : null;
     return [...main.querySelectorAll(`[data-n="${n}"]`)].find((r) => { const c = r.closest('.code[data-p]'); return !p || (c && c.dataset.p === p); }) || null;
   }
+  // Where an element sat, to find it again in the page drawn anew: the same row (file and line),
+  // else the same place under the nearest part of the page with an id or a commit's details.
+  function placeOf(el) {
+    if (!el) return () => null;
+    if (el.dataset && el.dataset.n) return () => sameRow(el);
+    const path = [];
+    let at = el;
+    while (at && at !== main && !at.id && !(at.dataset && at.dataset.detailOf)) { path.unshift([...at.parentElement.children].indexOf(at)); at = at.parentElement; }
+    if (!at) return () => null;
+    const root = at === main ? null : at.id ? '#' + CSS.escape(at.id) : `[data-detail-of="${CSS.escape(at.dataset.detailOf)}"]`;
+    return () => { let x = root ? main.querySelector(root) : main; for (const i of path) x = x && x.children[i]; return x || null; };
+  }
+  // An element's height with its vertical margins: the gap it leaves when it goes.
+  const gapOf = (el) => { const cs = getComputedStyle(el); return el.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom); };
   // Before a render: where what may move is.
   function motionBefore() {
     const h = motionNext;
@@ -3149,7 +3193,7 @@
     if (!moving()) return null;
     const box = main.getBoundingClientRect();
     const seen = (top, bottom) => bottom > box.top && top < box.bottom;
-    const snap = { hint: h, view: viewKey(), peek: null, threads: new Map(), sections: [] };
+    const snap = { hint: h, view: viewKey(), peek: null, detail: null, threads: new Map(), sections: [] };
     if (h && h.mark) {
       main.querySelectorAll('.hh[data-sec]').forEach((band) => {
         const rows = regionOf(band), top = band.getBoundingClientRect().bottom, bottom = regionBottom(band, rows);
@@ -3157,7 +3201,9 @@
       });
     }
     const pk = main.querySelector('.peek');
-    if (pk) { const r = pk.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.peek = { el: pk, before: pk.previousElementSibling, h: r.height, anchor: peekKey(shownPeek) }; }
+    if (pk) { const r = pk.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.peek = { el: pk, place: placeOf(pk.previousElementSibling), h: r.height, gap: gapOf(pk), anchor: peekKey(shownPeek) }; }
+    const dt = main.querySelector('.hs-detail');
+    if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt) }; }
     main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
     return snap;
   }
@@ -3223,7 +3269,7 @@
   let shownPeek = null, clickX = null;
   document.addEventListener('pointerdown', (e) => { clickX = e.clientX; }, true);
   // Where a peek is: under which line.
-  const peekKey = (p) => (p ? JSON.stringify([p.path, p.n, !!p.old, p.o, p.src ? p.src.key + ':' + p.src.line : null]) : '');
+  const peekKey = (p) => (p ? JSON.stringify([p.path, p.n, !!p.old, p.o, p.src ? p.src.key + ':' + p.src.line : null, p.ext ? [p.ext.chain, p.ext.anchor, p.ext.i] : null]) : '');
   // A peek grows from the name it was asked from, and folds back into its line when it closes. One
   // that stays where it is with other content (an answer, another definition, Back) eases to its
   // new height.
@@ -3236,11 +3282,26 @@
       const r = el.getBoundingClientRect();
       if (clickX != null) el.style.transformOrigin = `${Math.max(0, Math.min(r.width, clickX - r.left))}px 0`;
       el.animate([{ height: '0px', opacity: 0, transform: 'scale(.97) translateY(-4px)' }, { height: r.height + 'px', opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
-    } else if (!state.peek && snap.peek && snap.peek.before) {
-      const row = sameRow(snap.peek.before);
-      if (row) { const g = closeGap(row, snap.peek.h + 16, [snap.peek.el]); g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' }); }
+    } else if (!state.peek && snap.peek) {
+      const at = snap.peek.place();
+      if (at) { const g = closeGap(at, snap.peek.gap, [snap.peek.el]); g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' }); }
     }
     shownPeek = state.peek;
+  }
+  // A commit's details open downward from its row, and fold back into it when they close.
+  function detailMotion(snap) {
+    const el = main.querySelector('.hs-detail');
+    const was = snap.detail && snap.detail.sha, now = el && el.dataset.detailOf;
+    if (now && now !== was) {
+      const h = el.getBoundingClientRect().height;
+      el.style.overflow = 'hidden';
+      const open = () => { el.style.overflow = ''; };
+      el.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 200, easing: EASE }).finished.then(open, open);
+    }
+    if (was && was !== now) {
+      const row = main.querySelector(`.hs-main[data-detail="${CSS.escape(was)}"]`)?.closest('.hs-row');
+      if (row) { const g = closeGap(row, snap.detail.gap, [snap.detail.el]); g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' }); }
+    }
   }
   // After a render: the same things, moved.
   function motionAfter(snap) {
@@ -3260,6 +3321,7 @@
     }
     if (snap.hint && snap.hint.more) moreMotion(snap.hint.more);
     peekMotion(snap);
+    detailMotion(snap);
     // A thread that changed size (resolved, a reply box opened) eases into it.
     snap.threads.forEach((h0, id) => {
       const el = [...main.querySelectorAll('.th[data-thread]')].find((t) => t.dataset.thread === id);
@@ -3297,6 +3359,16 @@
       else { placeRow(el, y); done(); }
     };
     glide = requestAnimationFrame(step);
+  }
+  // Lands an element at y below the pane's top after a short glide over the last stretch: enough
+  // to show the page went that way, without scrolling all the way there.
+  const LAND = 120;
+  function landAt(el, y) {
+    if (!el) return;
+    if (!moving()) { placeRow(el, y); return; }
+    const d = el.getBoundingClientRect().top - main.getBoundingClientRect().top - y;
+    if (Math.abs(d) > LAND) main.scrollTop += d - Math.sign(d) * LAND;
+    glideTo(el, y, 0, () => {});
   }
   main.addEventListener('wheel', () => cancelAnimationFrame(glide), { passive: true });
   main.addEventListener('pointerdown', () => cancelAnimationFrame(glide));
@@ -4307,6 +4379,22 @@
       UI.graph = false; saveUI(); render();
       return backTo(at);
     }
+    if (act === 'ext-peek') {
+      const ext = { chain: Number(d.chainId), anchor: d.anchor, i: Number(d.i) };
+      const was = state.peek && state.peek.ext;
+      state.peek = was && was.chain === ext.chain && was.anchor === ext.anchor && was.i === ext.i ? null : { ext };
+      return render();
+    }
+    if (act === 'ext-box') {
+      const c = M().chains[state.view.id], i = Number(d.i), x = c && (c.ext || [])[i];
+      if (!x) return;
+      const at = c.graph.nodes.findIndex((n) => n.key === x.from[0]);
+      state.focus = null;
+      state.peek = { ext: { chain: c.id, anchor: at >= 0 ? x.from[0] : 'chain', i } };
+      render();
+      if (at >= 0) landAt(main.querySelector('#sec-' + at), headH() + 8);
+      return;
+    }
     if (act === 'ext') {
       const id = Number(d.to), to = M().chains[id];
       if (!to) return;
@@ -4463,7 +4551,7 @@
       if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
       return;
     }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext"]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext-box"]')) { e.preventDefault(); e.target.closest('g[data-node],g[data-graph-open],g[data-chain],g[data-act="ext-box"]').dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   viewer.addEventListener('change', (e) => {
     if (e.target.name === 'rv-event') GH.event = e.target.value;

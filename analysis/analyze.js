@@ -1565,7 +1565,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     // in (a commit's before a rename's) and the members here that use it.
     const extOut = (c) => c.ext.map(({ d, from }) => {
       const owners = chains.filter((o) => o.blocks.has(d.block)).sort((x, y) => (x.kind === 'commit' ? 0 : 1) - (y.kind === 'commit' ? 0 : 1) || x.id - y.id);
-      return owners.length ? { name: label(d), file: d.file, block: d.block.id, chain: owners[0].id, from: [...from].sort() } : null;
+      return owners.length ? { name: label(d), file: d.file, line: d.line, block: d.block.id, chain: owners[0].id, from: [...from].sort() } : null;
     }).filter(Boolean).sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
     // What a same-change token resolves to on the new side: [key, label]. The group view lists
     // its places under each declaration.
