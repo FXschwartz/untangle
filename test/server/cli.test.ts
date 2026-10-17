@@ -28,7 +28,7 @@ const usageText = [
   '  -base-path string',
   '    \tbase URL path prefix to serve endpoints and assets from (e.g. /rev-123/)',
   '  -chains string',
-  '    \twhat chains follow: "history", the commits that started each change, or "structure", the code alone (default "structure")',
+  '    \twhat chains follow: "history", the commits that started each change, or "structure", the code alone (default "history")',
   '  -editor string',
   '    \topen locations with this command, or this URL, where {file}, {line} and {col} are replaced (e.g. "code -g {file}:{line}:{col}"); VS Code\'s vscode:// link when omitted',
   '  -export string',

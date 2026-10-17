@@ -26,13 +26,13 @@ function shown(options: Options): string {
 describe('Given no arguments, ', () => {
   it(
     'when the flags are read, '
-    + 'then the defaults review the current directory on port 7778 and open it.',
+    + 'then the defaults review the current directory on port 7778, chains following the commits, and open it.',
     () => {
       assert.equal(shown(parseArgs([])), [
         'target .',
         'base none',
         'basePath /',
-        'chains structure',
+        'chains history',
         'editor none',
         'export none',
         'host 127.0.0.1',
@@ -54,7 +54,7 @@ describe('Given flags for a quiet review written to a file, ', () => {
   const argv = [
     '-base', 'main',
     '-base-path', 'rev',
-    '-chains', 'history',
+    '-chains', 'structure',
     '-editor', 'code -g {file}:{line}:{col}',
     '-export', 'out.html',
     '-host', '127.0.0.1',
@@ -74,7 +74,7 @@ describe('Given flags for a quiet review written to a file, ', () => {
         'target feature',
         'base main',
         'basePath /rev/',
-        'chains history',
+        'chains structure',
         'editor code -g {file}:{line}:{col}',
         'export out.html',
         'host 127.0.0.1',

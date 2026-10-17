@@ -74,7 +74,7 @@ export interface Checkouts {
  * The review and its checkouts. Bulk extraction exits before grouping; live navigation
  * starts its own language server after the review is ready.
  */
-export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string; chains?: ChainsBy }, progress: Progress): Promise<{ data: ReviewData; checkouts: Checkouts | null }> {
+export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string; chains: ChainsBy }, progress: Progress): Promise<{ data: ReviewData; checkouts: Checkouts | null }> {
   const dir = reviewDir(target.repoKey, target.baseSha, target.headSha);
   fs.mkdirSync(dir, { recursive: true });
   const byCommit = opts.chains === 'history';

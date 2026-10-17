@@ -115,13 +115,21 @@ function leading(base: string | null | undefined): string[] {
   return base ? ['-base', base] : [];
 }
 
+/**
+ * The fixtures were drawn for chains that follow the code: a review follows it unless the test
+ * passes -chains itself, or chains: null for untangle's own default (the commits).
+ */
+function chainsFlag(chains: 'history' | 'structure' | null | undefined, args: string[] | undefined): string[] {
+  return chains === null || args?.includes('-chains') ? [] : ['-chains', chains ?? 'structure'];
+}
+
 /** Serves the directory with `-port 0 -no-open` and resolves with the printed URL. */
-export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; quiet?: boolean; open?: boolean; port?: number | null; env?: NodeJS.ProcessEnv }): Promise<UntangleRun> {
+export async function startUntangle(dir: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; chains?: 'history' | 'structure' | null; quiet?: boolean; open?: boolean; port?: number | null; env?: NodeJS.ProcessEnv }): Promise<UntangleRun> {
   const { gh, release } = ownedGh(opts.gh);
   const quiet = opts.quiet === false ? [] : ['-quiet'];
   const open = opts.open ? [] : ['-no-open'];
   const port = opts.port === null ? [] : ['-port', String(opts.port ?? 0)];
-  const child = spawnUntangle([...leading(opts.base), ...open, ...port, ...quiet, ...(opts.args ?? []), dir], opts.cacheDir, gh, opts.env);
+  const child = spawnUntangle([...leading(opts.base), ...open, ...port, ...quiet, ...chainsFlag(opts.chains, opts.args), ...(opts.args ?? []), dir], opts.cacheDir, gh, opts.env);
   const text = collect(child);
   const output = () => `${text.out()}\n${text.err()}`;
   try {
@@ -142,9 +150,9 @@ export async function startUntangle(dir: string, opts: { base?: string | null; c
 }
 
 /** Writes the review with `-export` and resolves when untangle exits. */
-export async function exportUntangle(dir: string, htmlFile: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[] }): Promise<void> {
+export async function exportUntangle(dir: string, htmlFile: string, opts: { base?: string | null; cacheDir: string; gh?: GhStub; args?: string[]; chains?: 'history' | 'structure' | null }): Promise<void> {
   const { gh, release } = ownedGh(opts.gh);
-  const child = spawnUntangle([...leading(opts.base), '-no-open', '-export', htmlFile, '-quiet', ...(opts.args ?? []), dir], opts.cacheDir, gh);
+  const child = spawnUntangle([...leading(opts.base), '-no-open', '-export', htmlFile, '-quiet', ...chainsFlag(opts.chains, opts.args), ...(opts.args ?? []), dir], opts.cacheDir, gh);
   const text = collect(child);
   const timer = setTimeout(() => signal(child, 'SIGKILL'), 180_000);
   try {
