@@ -89,6 +89,18 @@ describe('Given an unchanged declaration moved next to separate import edits, ',
     });
   });
 
+  /** A move's peek as read: its header, then its lines, the moved ones marked. */
+  const peekRead = `[[...document.querySelector('.peek .pk-h').children].map((part) => part.textContent).filter(Boolean).join(' | '), ...[...document.querySelectorAll('.peek .pk-code .pk-ln')].map((row) => (row.classList.contains('mvr') ? '> ' : '  ') + row.querySelector('.no').textContent + ' ' + row.querySelector('.tx').textContent)].join('\\n')`;
+
+  async function openFile(name: string, marker: string) {
+    await client.call('state', { method: 'PUT', body: { rev: { base: [] }, layout: 'unified' } });
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('[data-tab="files"]')`);
+    await page.click('[data-tab="files"]');
+    await page.click(`#vw-side [data-open="${name}"]`);
+    await page.until(`!!document.querySelector('${marker}')`);
+  }
+
   describe('when the move is read in split layout, ', () => {
     let result: Awaited<ReturnType<typeof readMove>>;
 
@@ -104,6 +116,79 @@ describe('Given an unchanged declaration moved next to separate import edits, ',
       assert.ok(result.folded.className.includes('mv'), JSON.stringify(result));
       assert.equal(result.added.body, 'enum Page { days, months, years }');
       assert.ok(result.added.label.includes('Line 3'));
+    });
+  });
+
+  describe('when the link of the moved-away note is clicked, ', () => {
+    let shown = '';
+
+    before(async () => {
+      await openFile('lib/old.dart', '.mv-away');
+      await page.click('.mv-away [data-act="move-peek"]');
+      await page.until(`!!document.querySelector('.peek .pk-code:not(.pk-tall) .pk-ln')`);
+      shown = await page.eval(`[document.querySelector('.fv-head .crumbs').textContent, document.querySelector('.mv-away').nextElementSibling.matches('.peek') ? 'under the note' : 'elsewhere', ${peekRead}].join('\\n')`) as string;
+    });
+
+    it('then the lines it moved to show under the note, marked, with Go to it, while the page stays on its file.', () => {
+      assert.equal(shown, [
+        'Files/lib/old.dart',
+        'under the note',
+        'Moved to | lib/new.dart:3 | unchanged | Go to it | Close',
+        "  1 import 'dart:math';",
+        '  2 ',
+        '> 3 enum Page { days, months, years }',
+      ].join('\n'));
+    });
+  });
+
+  describe('when Go to it is clicked in that peek, ', () => {
+    let opened = '';
+
+    before(async () => {
+      await page.click('.peek .btn[data-open]');
+      await page.until(`(document.querySelector('.fv-head .crumbs')?.textContent || '').includes('new.dart')`);
+      opened = await page.eval(`document.querySelector('.fv-head .crumbs').textContent + (document.querySelector('.peek') ? ' with a peek' : '')`) as string;
+    });
+
+    it('then the file it moved to opens.', () => {
+      assert.equal(opened, 'Files/lib/new.dart');
+    });
+  });
+
+  describe('when the link of the moved-from note is clicked, ', () => {
+    let shown = '';
+
+    before(async () => {
+      await openFile('lib/new.dart', '.mv-head');
+      await page.click('.mv-head [data-act="move-peek"]');
+      await page.until(`!!document.querySelector('.peek .pk-code:not(.pk-tall) .pk-ln')`);
+      shown = await page.eval(`[document.querySelector('.mv-head').nextElementSibling.matches('.peek') ? 'under the note' : 'elsewhere', ${peekRead}].join('\\n')`) as string;
+    });
+
+    it('then the lines it came from show under the note, at the old side, marked.', () => {
+      assert.equal(shown, [
+        'under the note',
+        `Moved from | lib/old.dart:3 | old side · ${repo.rev('main').slice(0, 7)} | Go to it | Close`,
+        "  1 import 'dart:async';",
+        '  2 ',
+        '> 3 enum Page { days, months, years }',
+        '> 4 ',
+        '  5 void stay() {}',
+      ].join('\n'));
+    });
+  });
+
+  describe('when that link is clicked again, ', () => {
+    let closed = '';
+
+    before(async () => {
+      await page.click('.mv-head [data-act="move-peek"]');
+      await page.until(`!document.querySelector('.peek')`);
+      closed = await page.eval(`document.querySelector('.peek') ? 'open' : 'closed'`) as string;
+    });
+
+    it('then the peek closes.', () => {
+      assert.equal(closed, 'closed');
     });
   });
 });

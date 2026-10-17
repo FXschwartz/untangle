@@ -159,6 +159,9 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
   leaves it as it is when that's the definition it already shows. A click outside a peek closes
   it. While the language server is slow to answer, the peek opens once, as tall as its code will
   be, and fills in place.
+- **Moved code** reads as one change: the new copy shows the diff of the two bodies, and the old
+  one is a single line. Either one's file:line shows the other copy in a peek first, with "Go to
+  it" to go there.
 - **More of the file.** The divider above each hunk (its first line and context, in grey)
   stands for the lines hidden above it: click it for 20 more (up from the hunk, or down from the
   one before), or all of them when 20 or fewer are left, as on GitHub. Its buttons, and "Mark

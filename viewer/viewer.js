@@ -560,10 +560,14 @@
     const ns = meta.map((r) => old ? r.o : r.n).filter((n) => n != null);
     return `${old ? 'Old l' : 'L'}ine${ns.length > 1 ? 's' : ''} ${ns[0]}${ns.length > 1 ? '–' + ns[ns.length - 1] : ''}`;
   }
+  // A move's note links to its other copy: a click shows that copy here, under the note, and "Go
+  // to it" there goes to it.
+  const moveLink = (b, label) => `<button type="button" class="linkish" data-act="move-peek" data-block="${esc(b.id)}" aria-expanded="${!!(state.peek && state.peek.moveOf === b.id)}" title="Show it here">${label}</button>`;
+  const movePeekAfter = (b) => (state.peek && state.peek.moveOf === b.id ? peekHtml(state.peek) : '');
   function movedAwayHtml(b) {
     const to = M().files[b.movedTo.f];
     const what = b.movedTo.changes ? `with ${b.movedTo.changes} change${b.movedTo.changes > 1 ? 's' : ''}` : 'unchanged';
-    return `<div class="ln mv-away"><span class="g"></span><span class="no"></span><span class="sg">↦</span><span class="tx">${b.len} line${b.len > 1 ? 's' : ''} moved to <button type="button" class="linkish" data-open="${esc(to.p)}" data-line="${b.movedTo.n}">${esc(fileName(to.p))}:${b.movedTo.n}</button>, ${what} · ${moveLines(b, true)}</span></div>`;
+    return `<div class="ln mv-away"><span class="g"></span><span class="no"></span><span class="sg">↦</span><span class="tx">${b.len} line${b.len > 1 ? 's' : ''} moved to ${moveLink(b, `${esc(fileName(to.p))}:${b.movedTo.n}`)}, ${what} · ${moveLines(b, true)}</span></div>` + movePeekAfter(b);
   }
   function movedHeadHtml(f, b) {
     const from = M().files[b.move.f];
@@ -572,10 +576,39 @@
     const d = done(b);
     const open = state.moveOpen.has(b.id);
     const groups = new Set(b.edits.map((id) => M().edits[id].group).filter((g) => g != null));
-    let h = `<div class="ln mv-head${d && b.edits.length ? ' rvd' : ''}"><span class="g">${b.edits.length ? tickHtml(b) : ''}</span><span class="no"></span><span class="sg">↤</span><span class="tx">Moved from <button type="button" class="linkish" data-open="${esc(from.p)}" data-line="${fromLine}">${esc(fileName(from.p))}:${fromLine}</button> · ${moveLines(b, false)} · ${b.edits.length ? `${b.edits.length} change${b.edits.length > 1 ? 's' : ''}` : 'no changes'}</span><span class="bdgs">`
+    let h = `<div class="ln mv-head${d && b.edits.length ? ' rvd' : ''}"><span class="g">${b.edits.length ? tickHtml(b) : ''}</span><span class="no"></span><span class="sg">↤</span><span class="tx">Moved from ${moveLink(b, `${esc(fileName(from.p))}:${fromLine}`)} · ${moveLines(b, false)} · ${b.edits.length ? `${b.edits.length} change${b.edits.length > 1 ? 's' : ''}` : 'no changes'}</span><span class="bdgs">`
       + [...groups].map((g) => { const gr = M().groupById.get(g); return `<button type="button" class="note" data-group="${g}">same change ×${gr.count}</button>`; }).join('')
       + `<button type="button" class="note" data-act="toggle-move" data-block="${esc(b.id)}">${open ? 'fold the moved lines' : 'show the moved lines'}</button></span></div>`;
-    return h;
+    return h + movePeekAfter(b);
+  }
+  // Where a move's other copy is: the lines it moved to, at the head, or the ones it came from, at
+  // the base; the moved lines marked, and the lines around them from the diff until the file loads.
+  function moveTarget(b) {
+    const away = !!b.movedTo;
+    const other = away ? M().blockById.get(b.movedTo.b) : M().blockById.get(b.move.b);
+    const file = M().files[away ? b.movedTo.f : b.move.f];
+    const lines = other ? other.file.hunks[other.hunk].meta.slice(other.first, other.first + other.len).map((r) => (away ? r.n : r.o)).filter((x) => x != null) : [];
+    const l = away ? b.movedTo.n : lines[0];
+    return { away, p: file.p, side: away ? 'head' : 'base', l, mark: lines.length ? [lines[0], lines[lines.length - 1]] : null, around: other ? moveAroundHtml(other, !away) : '' };
+  }
+  function moveAroundHtml(blk, old) {
+    const h = blk.file.hunks[blk.hunk];
+    let out = '';
+    for (let i = Math.max(0, blk.first - 3); i < Math.min(h.rows.length, blk.first + blk.len + 3); i++) {
+      const r = h.meta[i];
+      if (old ? r.t === '+' : r.t === '-') continue;
+      const ln = old ? r.o : r.n;
+      out += `<div class="pk-ln${i >= blk.first && i < blk.first + blk.len ? ' mvr' : ''}" data-n="${ln}"><span class="no">${ln}</span><span class="tx">${codeHtml(blk.file, h.rows[i][1], null, { colors: rowColors(h.rows, blk.file.p, i) })}</span></div>`;
+    }
+    return out;
+  }
+  function movePeekHtml(p) {
+    const b = M().blockById.get(p.moveOf);
+    const t = moveTarget(b);
+    const where = t.away ? (b.movedTo.changes ? `with ${plural(b.movedTo.changes, 'change')}` : 'unchanged') : `old side · ${(CONFIG.base || M().raw.left || '').slice(0, 7)}`;
+    return `<div class="pk-h"><b>${t.away ? 'Moved to' : 'Moved from'}</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${esc(where)}</span><span class="sp"></span>`
+      + `<button type="button" class="btn xs primary" data-open="${esc(t.p)}" data-line="${t.l}">Go to it</button><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
+      + peekCodeHtml({ p: t.p, side: t.side, l: t.l, mark: t.mark }, t.around);
   }
   // The added copy compares the two bodies: unchanged lines are purple; edits stay red/green.
   function movedHtml(f, b, ctx) {
@@ -974,7 +1007,8 @@
       const row = usage && M().head.get(t.p + ':' + ln);
       const added = row && row.r.t === '+';
       const live = canLoad && !t.commit ? { side: t.side, p: t.side ? t.p : null, ext: t.ext, line: ln } : null;
-      return `<div class="pk-ln${file.lang === 'md' ? ' md' : ''}${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
+      const moved = t.mark && ln >= t.mark[0] && ln <= t.mark[1];
+      return `<div class="pk-ln${file.lang === 'md' ? ' md' : ''}${ln === t.l ? ' hit' : ''}${added ? ' add' : ''}${moved ? ' mvr' : ''}" data-n="${ln}"><span class="no">${ln}</span>${usage ? `<span class="sg">${added ? '+' : ''}</span>` : ''}<span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live })}</span></div>`;
     }).join('');
     const note = source && source.status === 'error' ? `<div class="pk-foot">${esc(source.error)} · showing the saved snippet</div>` : '';
     // While the whole file is on its way, the saved lines show in a viewport as tall as it will be.
@@ -1076,6 +1110,7 @@
     if (p.history) return '<div class="peek" role="region" aria-label="Peek">' + historyPeekHtml(p) + '</div>';
     if (p.ext) return '<div class="peek" role="region" aria-label="Peek">' + extPeekHtml(p) + '</div>';
     if (p.live) return '<div class="peek" role="region" aria-label="Peek">' + livePeekHtml(p) + '</div>';
+    if (p.moveOf) return '<div class="peek" role="region" aria-label="Peek">' + movePeekHtml(p) + '</div>';
     let h = '<div class="peek" role="region" aria-label="Peek">';
     const hasDef = p.ti !== undefined && p.ti !== null && !Number.isNaN(p.ti);
     const list = p.usageKey ? REFS[state.compare][p.usageKey] || [] : [];
@@ -1590,7 +1625,7 @@
   }
   // A name clicked anywhere without an answer computed ahead: ask the server. The peek opens
   // under the line; clicked inside a peek, the peek moves to the new definition (Back returns).
-  const anchorOf = (p) => ({ path: p.path, n: p.n, old: p.old, o: p.o, col: p.col, src: p.src });
+  const anchorOf = (p) => ({ path: p.path, n: p.n, old: p.old, o: p.o, col: p.col, src: p.src, moveOf: p.moveOf });
   // Where a name is defined, asked of the language server: { q, status: 'ok', target }, or
   // status 'none' or 'error'.
   function askDefinition(q) {
@@ -4269,7 +4304,7 @@
   let shownPeek = null, clickX = null;
   document.addEventListener('pointerdown', (e) => { clickX = e.clientX; }, true);
   // Where a peek is: under which line.
-  const peekKey = (p) => (p ? JSON.stringify([p.path, p.n, !!p.old, p.o, p.src ? p.src.key + ':' + p.src.line : null, p.ext ? [p.ext.chain, p.ext.anchor, p.ext.i] : null]) : '');
+  const peekKey = (p) => (p ? JSON.stringify([p.path, p.n, !!p.old, p.o, p.src ? p.src.key + ':' + p.src.line : null, p.ext ? [p.ext.chain, p.ext.anchor, p.ext.i] : null, p.moveOf || null]) : '');
   // A peek grows from the name it was asked from, and folds back into its line when it closes. One
   // that stays where it is with other content (an answer, another definition, Back) eases to its
   // new height.
@@ -5515,6 +5550,7 @@
     if (act === 'clear-focus') { state.focus = null; return render(); }
     if (act === 'toggle-block') { const b = m.blockById.get(d.block); toggleBlocks([b]); hint({ mark: [d.block] }); return render(); }
     if (act === 'toggle-move') { state.moveOpen.has(d.block) ? state.moveOpen.delete(d.block) : state.moveOpen.add(d.block); return render(); }
+    if (act === 'move-peek') { state.peek = state.peek && state.peek.moveOf === d.block ? null : { moveOf: d.block }; return render(); }
     if (act === 'toggle-diff') { state.blockDiff.has(d.block) ? state.blockDiff.delete(d.block) : state.blockDiff.add(d.block); hint({ mark: [] }); return render(); }
     if (act === 'toggle-hunk') {
       const btn = t.getAttribute('aria-expanded') === 'true';
@@ -5618,13 +5654,13 @@
     if (state.gdrop && state.gdrop.kept && !gdSpot(e.target)) gdClose();
   }, true);
   // So does a click outside a peek, unless it was a drag (selecting text) or asks about another
-  // name (which opens its own peek). Whatever the click does draws the page; when it does
-  // nothing, the page is drawn here.
+  // name or a move's other copy (which open their own peek, or close this one). Whatever the click
+  // does draws the page; when it does nothing, the page is drawn here.
   let downAt = null;
   document.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; }, { passive: true, capture: true });
   document.addEventListener('click', (e) => {
     if (!state.peek || !main.querySelector('.peek') || !(e.target instanceof Element)) return;
-    if (e.target.closest('.peek, .ref, [data-act="hd-open"], .menu, .pal, .scrim, .keys, .mn-pop')) return;
+    if (e.target.closest('.peek, .ref, [data-act="hd-open"], [data-act="move-peek"], .menu, .pal, .scrim, .keys, .mn-pop')) return;
     if (downAt && e.detail && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
     state.peek = null;
     setTimeout(() => { if (!state.peek && main.querySelector('.peek')) render(); }, 0);

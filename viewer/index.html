@@ -872,6 +872,9 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 /* A name asked about from inside a peek, while the language server answers. */
 .ref.asking { cursor: progress; text-decoration: underline dotted; text-underline-offset: 3px; }
 .pk-ln.add { background: var(--add); }
+/* A move's lines, in the peek of its other copy: tinted as moved lines are. */
+.pk-ln.mvr { background: var(--mv); }
+.pk-ln.mvr.hit { background: linear-gradient(rgba(255, 255, 255, .05), rgba(255, 255, 255, .05)), var(--mv); }
 .pk-ln.add.hit { background: linear-gradient(rgba(255, 255, 255, .05), rgba(255, 255, 255, .05)), var(--add); }
 .pk-ln.del { background: var(--del); }
 .pk-ln.del.hit { background: linear-gradient(rgba(255, 255, 255, .05), rgba(255, 255, 255, .05)), var(--del); }

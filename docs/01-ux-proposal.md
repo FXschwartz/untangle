@@ -565,7 +565,9 @@ in the group's body.
   resolves to ("6 places · 6 declarations"), with marking per declaration.
 - **Moved code:** the added copy shows "Moved from file:line" and the diff of the two
   bodies. Unchanged moved lines are tinted and long runs of them fold. The removed copy is
-  one line, "N lines moved to file:line".
+  one line, "N lines moved to file:line". Either file:line shows the other copy in a peek under
+  the note first (where it went, or where it came from at the old side), its moved lines
+  tinted, with "Go to it" to go there.
 - **Peek:** the definition on top, the changed usages below. Clicking a usage shows its
   code in the peek, with the usage line marked; clicking it again, or "Go to it", opens
   it. "Back to definition" returns. Usage snippets are highlighted like the code. A name
@@ -941,6 +943,8 @@ through the page.
     with an empty or short code view, then the file), each one drawing the whole page again; and
     closing, the code jumped back to the file's first line as it folded. Done: [Display](#display),
     under Peek.
+  - Then a move's link, asked to show the other copy in place before going there. Done:
+    [Display](#display), under Moved code.
 
 ## References
 
