@@ -669,4 +669,136 @@ describe('Given a served review by commit: a discount with its tests, more tests
       assert.equal(pinned, 'Given a cart with a discount of one,');
     });
   });
+
+  describe('when Space reviews the Tests view from its top, ', () => {
+    let given = '';
+    let then = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      // Space reviews from the page, not from a button left focused.
+      await page!.eval(`document.querySelector('#vw-main').scrollTop = 0; document.activeElement?.blur()`);
+      await page!.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await page!.key(' ');
+      await page!.until(`!!document.querySelector('#vw-main .ol-row.done')`);
+      given = await read(page!, `${rowsRead} + '\\n' + [...document.querySelectorAll('#vw-main .ol-tick.part')].length + ' marks part on'`);
+      await page!.key(' ');
+      await page!.until(`!!document.querySelector('#vw-main .ol-fold.ok')`);
+      then = await read(page!, `${rowsRead} + '\\nnext: ' + (document.querySelector('#vw-main .ol-row.flash .ol-tt')?.textContent.trim() ?? 'none')`);
+    });
+
+    it('then the Given\'s own lines are reviewed first: it mutes, and its mark and the file\'s show part done, while it stays, since its tests aren\'t.', () => {
+      assert.equal(given, [
+        'cart_test.dart · 3 new · 1 reworded',
+        `  ~ Given a cart [-with-]{+holding+} two items, [${nameSha.slice(0, 7)}] (reviewed)`,
+        '    · when the total is taken,',
+        '      ~ then it adds the prices. [reworded above]',
+        `      + then it is positive. [${moreSha.slice(0, 7)}]`,
+        `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
+        `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+        '2 marks part on',
+      ].join('\n'));
+    });
+
+    it('then reviewing its last test folds the whole Given away, into a line of reviewed tests, and the next Given is next.', () => {
+      assert.equal(then, [
+        'cart_test.dart · 3 new · 1 reworded',
+        '  2 tests reviewed',
+        `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
+        `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+        'next: Given a cart with a discount of one,',
+      ].join('\n'));
+    });
+  });
+
+  describe('when the reviewed tests\' line is clicked, ', () => {
+    let shown = '';
+
+    before(async () => {
+      await page!.click('#vw-main .ol-fold.ok');
+      await page!.until(`(document.querySelector('#vw-main .ol-fold.ok')?.getAttribute('aria-expanded')) === 'true'`);
+      shown = await read(page!, rowsRead);
+    });
+
+    it('then they show again, muted, under a line that folds them back.', () => {
+      assert.equal(shown, [
+        'cart_test.dart · 3 new · 1 reworded',
+        '  Fold the 2 reviewed tests',
+        `  ~ Given a cart [-with-]{+holding+} two items, [${nameSha.slice(0, 7)}] (reviewed)`,
+        '    · when the total is taken,',
+        '      ~ then it adds the prices. [reworded above]',
+        `      + then it is positive. [${moreSha.slice(0, 7)}] (reviewed)`,
+        `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
+        `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+      ].join('\n'));
+    });
+  });
+
+  describe('when the file\'s mark is clicked, with motion on, ', () => {
+    let moving = '';
+    let folded = '';
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await page!.click('#vw-main .ol-file .ol-tick');
+      moving = await read(page!, `[document.querySelectorAll('#vw-main .ghost .ol-row').length + ' rows settling', document.querySelectorAll('#vw-main .ghost .tick.on').length + ' marks on in them'].join(', ')`);
+      await page!.until(`!document.querySelector('#vw-main .ghost')`);
+      await page!.reducedMotion(true);
+      folded = await read(page!, `${rowsRead} + '\\n' + document.querySelector('#vw-main .ol-file .car').getAttribute('aria-expanded')`);
+    });
+
+    it('then its rows settle as reviewed and fold into its line.', () => {
+      assert.equal(moving, '7 rows settling, 5 marks on in them');
+    });
+
+    it('then the file folds to that line, which says what it reviewed.', () => {
+      assert.equal(folded, 'cart_test.dart · 4 tests reviewed\nfalse');
+    });
+  });
+
+  describe('when the folded file is unfolded, and then its mark is clicked again, ', () => {
+    let open = '';
+    let undone = '';
+
+    before(async () => {
+      await page!.click('#vw-main .ol-file .car');
+      await page!.until(`document.querySelector('#vw-main .ol-file .car').getAttribute('aria-expanded') === 'true'`);
+      open = await read(page!, rowsRead);
+      await page!.click('#vw-main .ol-file .ol-tick');
+      await page!.until(`!document.querySelector('#vw-main .ol-row.done')`);
+      undone = await read(page!, rowsRead);
+    });
+
+    it('then it shows every row, all reviewed, none folded.', () => {
+      assert.equal(open, [
+        'cart_test.dart · 3 new · 1 reworded',
+        `  ~ Given a cart [-with-]{+holding+} two items, [${nameSha.slice(0, 7)}] (reviewed)`,
+        '    · when the total is taken,',
+        '      ~ then it adds the prices. [reworded above]',
+        `      + then it is positive. [${moreSha.slice(0, 7)}] (reviewed)`,
+        `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}] (reviewed)`,
+        `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}] (reviewed)`,
+        `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}] (reviewed)`,
+      ].join('\n'));
+    });
+
+    it('then nothing in it is reviewed any more, and nothing folds.', () => {
+      assert.equal(undone, [
+        'cart_test.dart · 3 new · 1 reworded',
+        `  ~ Given a cart [-with-]{+holding+} two items, [${nameSha.slice(0, 7)}]`,
+        '    · when the total is taken,',
+        '      ~ then it adds the prices. [reworded above]',
+        `      + then it is positive. [${moreSha.slice(0, 7)}]`,
+        `  + Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        `    + when the total is taken, then the discount comes off. [${discountSha.slice(0, 7)}]`,
+        `    + when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+      ].join('\n'));
+    });
+  });
 });

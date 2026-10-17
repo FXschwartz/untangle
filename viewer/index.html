@@ -698,6 +698,18 @@ button.sb-group:hover { color: var(--text-2); }
 @keyframes olflash { 0% { box-shadow: inset 3px 0 0 var(--accent); background-color: var(--accent-soft); } 100% { box-shadow: inset 3px 0 0 transparent; } }
 .ol-fold { position: sticky; left: 0; margin: 0 10px; padding: 3px 8px 3px calc(12px + var(--d) * 20px + 24px); border-radius: 7px; font-size: 12.5px; color: var(--text-3); cursor: pointer; }
 .ol-fold:hover { background: var(--row-hover); color: var(--text-2); }
+/* Reviewed rows folded to a line: its check sits where the rows' marks do. */
+.ol-fold.ok .ok-ic, .ol-file .ok-ic { display: inline-grid; place-items: center; color: var(--done); }
+.ol-fold.ok .ok-ic { width: 14px; margin: 0 10px 0 -24px; vertical-align: -1px; }
+.ol-file .ok-ic { margin-right: 5px; vertical-align: -1px; }
+.ol-fold.ok svg, .ol-file .ok-ic svg { width: 12px; height: 12px; }
+.ol-file.ck { padding-right: 18px; }
+.ol-file.ck .car { appearance: none; align-self: center; height: 18px; margin: 0 -4px 0 -18px; padding: 0; border: 0; border-radius: 4px; background: none; cursor: pointer; }
+.ol-file.ck .car:hover { background: var(--hover); color: var(--text); }
+.ol-file .tick, .ol-file .ol-tick-sp { align-self: center; }
+.ol-file.done .nm { color: var(--text-3); }
+.ghost .ol-tt, .ghost .ol-tt .kw { transition: color var(--med) var(--ease); }
+.ghost.settle .ol-tt, .ghost.settle .ol-tt .kw { color: var(--text-3); }
 .ol-fold.cf { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding-left: 20px; color: var(--text-2); }
 .ol-fold.cf code { font: 500 11.5px/1 var(--code); color: var(--text-2); }
 .code.ol-code { position: sticky; left: 0; width: auto; min-width: 0; margin: 2px 12px 10px calc(22px + var(--d) * 20px + 22px); padding: 4px 0; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--hair); overflow-x: auto; }
@@ -778,6 +790,8 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .ln:hover .tick, .sl:hover .tick, .tick:focus-visible { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .tick:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .tick:hover::after { border-color: var(--accent); }
+/* Part of what it covers reviewed: a dash. */
+.tick.part::after { left: 3.5px; top: 5.6px; width: 7px; height: 0; border-width: 0 0 1.6px 0; border-color: rgba(88, 197, 151, .7); transform: none; }
 .tick.on { box-shadow: none; }
 .tick.on::after { border-color: rgba(88, 197, 151, .5); }
 .ln:hover .tick.on::after, .sl:hover .tick.on::after { border-color: var(--done); }

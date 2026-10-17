@@ -33,7 +33,9 @@ dimmed, a rewording with its changed words marked. A Given or when without `setU
 (+X −Y).
 A row opens its code in place; ↗ opens the file with the test's groups pinned above the code. The
 Tests view, under History, lists every sentence the pull request adds, rewords, regroups or
-removes, each with the commit that wrote it. The rules are in
+removes, each with the commit that wrote it. There, what's reviewed folds away as reviewed hunks
+do: tests into a line of reviewed tests, a group once everything under it is, and a file reviewed
+whole (its own mark reviews it all). The rules are in
 [Tests as sentences](docs/01-ux-proposal.md#tests-as-sentences).
 
 ```

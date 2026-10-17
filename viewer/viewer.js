@@ -2511,18 +2511,28 @@
     const marks = s.s ? s.all : [];
     const st = stats(marks), todo = stats(s.own).open > 0;
     const open = state.olOpen.has(key);
-    const tick = marks.length && !outOfLens(st) ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? (test ? 'Mark this test reviewed' : 'Mark this group reviewed: its setup and everything under it') : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>';
+    // A group partly reviewed: its mark shows a dash, and its title mutes once its own lines are.
+    const part = !test && st.open > 0 && st.open < st.total;
+    const tick = marks.length && !outOfLens(st) ? olTickHtml(marks, st, test ? 'Mark this test reviewed' : part ? `Mark the rest of this group reviewed (${st.open} of ${st.total} to review)` : 'Mark this group reviewed: its setup and everything under it') : '<span class="ol-tick-sp"></span>';
     const nav = s.own.length ? ` data-mark="${esc(s.own.map((b) => b.id).join(' '))}" data-block="${esc(s.own[0].id)}"${todo ? ' data-nav="1"' : ''}` : '';
-    return `<div class="ol-row ${cls}${n.l ? ' lbl' : ''}${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:${n.depth}" role="button" tabindex="0" aria-expanded="${open}">`
+    const muted = marks.length && (!st.open || (!test && s.own.length && !todo));
+    return `<div class="ol-row ${cls}${n.l ? ' lbl' : ''}${open ? ' open' : ''}${muted ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:${n.depth}" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span>`
       + `<span class="ol-tt">${n.l ? esc(n.t) : olWords(n.t, was)}${olNoSetup(n)}</span>`
       + `<span class="ol-meta">${tags.join('')}${olExpects(n)}${body ? '' : olDiff(sc, n)}${chip}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${tick}</span></div>`
       + (open ? olCodeHtml(sc, n) : '');
   }
+  // A review mark for what a row covers: on when all of it is reviewed, a dash when some of it is.
+  function olTickHtml(marks, st, title) {
+    const part = st.open > 0 && st.open < st.total;
+    return `<button type="button" class="tick ol-tick${st.open ? (part ? ' part' : '') : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${esc(st.open ? title : 'Mark unreviewed')}" aria-pressed="${st.open ? (part ? 'mixed' : 'false') : 'true'}"></button>`;
+  }
+  // What a removed call's mark covers.
+  const olGoneMarks = (sc, r) => (r.b || []).map((k) => sc.f.blocks[k]).filter((b) => b && b.edits.length && (!sc.chain || sc.chain.blockSet.has(b.id)));
   function olRemovedHtml(sc, r) {
     const f = sc.f, key = olKey(f, r);
     const d = r.parent ? r.parent.depth + 1 : 0;
-    const marks = (r.b || []).map((k) => f.blocks[k]).filter((b) => b && b.edits.length && (!sc.chain || sc.chain.blockSet.has(b.id)));
+    const marks = olGoneMarks(sc, r);
     const st = stats(marks), open = state.olOpen.has(key);
     const prefix = r.parent ? olPath(r.parent).filter((x) => !x.l).map((x) => x.t.trim()).join(' ').length + 1 : 0;
     let h = `<div class="ol-row del${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${marks.length ? ` data-mark="${esc(marks.map((b) => b.id).join(' '))}" data-block="${esc(marks[0].id)}"${st.open ? ' data-nav="1"' : ''}` : ''} style="--d:${d}" role="button" tabindex="0" aria-expanded="${open}">`
@@ -2559,6 +2569,27 @@
   }
   // Which tests a filter keeps.
   const olKeeps = (sc, n, filter) => filter === 'all' || (n.k === 't' && sc.st.get(n).s === filter);
+  // Reviewed, so the Tests view folds it away: everything a row's mark covers (a test, a group with
+  // everything under it, a removal), when it covers something.
+  function olSettled(sc, n) {
+    const marks = n.removed ? olGoneMarks(sc, n) : (sc.st.get(n) || { all: [] }).all;
+    const st = stats(marks);
+    return st.total > 0 && !st.open;
+  }
+  const olTestsIn = (sc, n) => (n.removed ? 0 : n.k === 't' ? 1 : n.kids.reduce((x, k) => x + (sc.show.has(k) ? olTestsIn(sc, k) : 0), 0));
+  const olReviewedWhat = (tests, gone, folded) => (folded
+    ? [tests && plural(tests, 'test'), gone && plural(gone, 'removal')].filter(Boolean).join(' and ') + ' reviewed'
+    : 'Fold the ' + [tests && plural(tests, 'reviewed test'), gone && plural(gone, tests ? 'removal' : 'reviewed removal')].filter(Boolean).join(' and '));
+  // A run of reviewed rows, folded to one line that shows them again (as a reviewed hunk folds into
+  // its divider). It lists the calls it holds, so what's found by one of them finds the line.
+  const olRunKey = (sc, run) => 'ok|' + olKey(sc.f, run[0]);
+  function olRunHtml(sc, run) {
+    const key = olRunKey(sc, run), open = state.olUnfold.has(key);
+    const x = run[0], d = x.removed ? (x.parent ? x.parent.depth + 1 : 0) : x.depth;
+    const under = (n) => (n.removed ? [olKey(sc.f, n)] : [olKey(sc.f, n), ...n.kids.flatMap(under)]);
+    const what = olReviewedWhat(run.reduce((t, n) => t + olTestsIn(sc, n), 0), run.reduce((t, n) => t + (n.removed ? n.leaves.length : 0), 0), !open);
+    return `<div class="ol-fold ok${open ? ' open' : ''}" data-act="ol-unfold" data-key="${esc(key)}" data-in="${esc(run.flatMap(under).join(' '))}" style="--d:${d}" role="button" tabindex="0" aria-expanded="${open}">${open ? '' : `<span class="ok-ic" aria-hidden="true">${ICON.check}</span>`}${what}</div>`;
+  }
   // A file's outline for a scope. o: { secs: the chain's member numbers it stands for, chips,
   // sentences, filter }.
   function olFileHtml(sc, o = {}) {
@@ -2576,27 +2607,63 @@
       if (open) h += olEditedRowsHtml(sc, o) + (sc.outside.length ? olOutsideHtml(sc) : '');
       return h + '</section>';
     }
-    h += `<div class="ol-file"><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${olSaid(c) || 'no sentence changes'}</span></div>`;
+    // In the Tests view, a file reviewed whole folds to this line, as a reviewed hunk does, and its
+    // mark reviews it whole; what's reviewed in a file still open folds as it's marked.
+    let settle = false;
+    if (o.settle) {
+      const fkey = 'olf|' + f.p, marks = (f.blocks || []).filter((b) => b.edits.length);
+      const st = stats(marks), all = st.total > 0 && !st.open;
+      const folded = state.collapsed.has(fkey) || (all && !state.expanded.has(fkey));
+      const said = folded && all ? `<span class="ok-ic" aria-hidden="true">${ICON.check}</span>${olReviewedWhat(c.new + c.reworded + c.regrouped, c.removed, true)}` : (olSaid(c) || 'no sentence changes') + (folded && st.open ? ` · ${st.open} to review` : '');
+      h += `<div class="ol-file ck${all ? ' done' : ''}"><button type="button" class="car" data-act="ol-file" data-key="${esc(fkey)}" aria-expanded="${!folded}" title="${folded ? 'Unfold' : 'Fold'}">${folded ? ICON.chevronRight : ICON.chevronDown}</button><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${said}</span>${st.total && !outOfLens(st) ? olTickHtml(marks, st, 'Mark this file reviewed: every change in it') : '<span class="ol-tick-sp"></span>'}</div>`;
+      if (folded) return h + '</section>';
+      settle = st.open > 0;
+    } else h += `<div class="ol-file"><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${olSaid(c) || 'no sentence changes'}</span></div>`;
     if (o.sentences) {
-      let label = null, prev = null;
+      let label = null, prev = null, run = [];
+      const sentence = (n) => { h += olSentenceHtml(sc, n, prev, o); prev = olPath(n); };
+      const flush = () => {
+        if (!run.length) return;
+        h += olRunHtml(sc, run);
+        if (state.olUnfold.has(olRunKey(sc, run))) run.forEach(sentence);
+        run = [];
+      };
       for (const n of sc.ol.nodes) {
         if (n.k !== 't' || !sc.show.has(n) || !olKeeps(sc, n, filter)) continue;
         const lbl = olPath(n).find((x) => x.l);
-        if (lbl && lbl !== label) { h += `<div class="ol-lbl">${esc(lbl.t)}</div>`; label = lbl; }
-        h += olSentenceHtml(sc, n, prev, o);
-        prev = olPath(n);
+        if (lbl && lbl !== label) { flush(); h += `<div class="ol-lbl">${esc(lbl.t)}</div>`; label = lbl; }
+        if (settle && olSettled(sc, n)) { run.push(n); continue; }
+        flush();
+        sentence(n);
       }
+      flush();
     } else {
-      const walk = (list, parent) => {
+      // A parent's calls, with its removed ones after them; reviewed ones in a row fold to a line.
+      const walk = (list, parent, runs) => {
         let hidden = [];
+        const items = [];
         for (const n of list) {
           const unfolded = parent && state.olUnfold.has(olKey(f, parent));
           if (!sc.show.has(n) && !unfolded) { hidden.push(n); continue; }
           if (filter !== 'all' && !sc.ol.nodes.some((x) => sc.show.has(x) && olKeeps(sc, x, filter) && olPath(x).includes(n))) continue;
-          h += olRowHtml(sc, n, o);
-          walk(n.kids, n);
+          items.push(n);
         }
-        if (filter === 'all' || filter === 'removed') sc.rm.filter((r) => r.parent === parent).forEach((r) => { h += olRemovedHtml(sc, r); });
+        if (filter === 'all' || filter === 'removed') sc.rm.filter((r) => r.parent === parent).forEach((r) => items.push(r));
+        // A run shown again shows all of itself: nothing in it folds.
+        const emit = (x, folding) => { if (x.removed) h += olRemovedHtml(sc, x); else { h += olRowHtml(sc, x, o); walk(x.kids, x, folding); } };
+        let run = [];
+        const flush = () => {
+          if (!run.length) return;
+          h += olRunHtml(sc, run);
+          if (state.olUnfold.has(olRunKey(sc, run))) run.forEach((x) => emit(x, false));
+          run = [];
+        };
+        for (const x of items) {
+          if (runs && olSettled(sc, x)) { run.push(x); continue; }
+          flush();
+          emit(x, runs);
+        }
+        flush();
         if (parent && filter === 'all' && (hidden.length || state.olUnfold.has(olKey(f, parent))) && parent.kids.some((k) => !sc.show.has(k))) {
           const unfolded = state.olUnfold.has(olKey(f, parent));
           const all = parent.kids.filter((k) => !sc.show.has(k));
@@ -2605,7 +2672,7 @@
           h += `<div class="ol-fold" data-act="ol-unfold" data-key="${esc(olKey(f, parent))}" style="--d:${parent.depth + 1}" role="button" tabindex="0" aria-expanded="${unfolded}">${unfolded ? `Fold the ${plural(all.length, 'unchanged ' + kind)}` : `+ ${plural(all.length, 'unchanged ' + kind)}`}</div>`;
         }
       };
-      walk(sc.ol.top, null);
+      walk(sc.ol.top, null, settle);
     }
     if (filter === 'all' && sc.edited.length) {
       const key = f.p + '#edited', open = olFold(sc, key);
@@ -3048,7 +3115,7 @@
       pinned: `<div class="ol-bar"><span class="mini-seg" role="group" aria-label="Which sentences">${b('tests-filter', 'all', filter, 'All', 'Every sentence the tests add, reword, regroup or remove', t.all)}${b('tests-filter', 'new', filter, 'New', 'The new sentences', t.new)}${b('tests-filter', 'reworded', filter, 'Reworded', 'The sentences whose words changed', t.reworded)}${b('tests-filter', 'regrouped', filter, 'Regrouped', 'The same sentences, in new groups', t.regrouped)}${b('tests-filter', 'removed', filter, 'Removed', 'The sentences that are gone', t.removed)}</span><span class="sp"></span><span class="mini-seg" role="group" aria-label="Read as">${b('tests-mode', 'nested', mode, 'Nested', 'Each title once, nested as the groups nest')}${b('tests-mode', 'sentences', mode, 'Sentences', 'Each test as its whole sentence')}</span></div>`,
     });
     if (!scopes.length) return h + '<div class="empty">No test file changed in this comparison.</div>';
-    const body = said.map((sc) => olFileHtml(sc, { chips: true, sentences: mode === 'sentences', filter })).join('');
+    const body = said.map((sc) => olFileHtml(sc, { chips: true, sentences: mode === 'sentences', filter, settle: true })).join('');
     h += body || `<div class="empty">No ${filter} sentences in this comparison.</div>`;
     if (filter === 'all' && code.length) {
       const open = state.olUnfold.has('tests:code');
@@ -4038,6 +4105,7 @@
     if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt), place: placeOf(dt.previousElementSibling) }; }
     main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
     if (h && h.ol != null) snap.ol = olSnap(h);
+    else if (h && h.olf != null) snap.ol = olSnapFile(h.olf, !!h.mark);
     return snap;
   }
   // An outline's pieces, keyed so two drawings of it line up: its rows by call, a row's code by its
@@ -4048,6 +4116,7 @@
     for (const el of box.children) {
       let key;
       if (el.matches('.ol-row[data-ol]')) key = 'r' + (row = el.dataset.ol);
+      else if (el.matches('.ol-file')) key = 'h';
       else if (el.matches('.ol-code')) key = 'c' + row;
       else if (el.matches('[data-act="ol-unfold"]')) key = 'f' + el.dataset.key;
       else if (el.matches('.ol-sec[data-olf]')) key = 's' + el.dataset.olf;
@@ -4064,14 +4133,22 @@
     const el = [...main.querySelectorAll(h.fold ? '[data-act="ol-unfold"]' : '.ol-row[data-ol]')].find((x) => (h.fold ? x.dataset.key : x.dataset.ol) === h.ol);
     const box = el && el.parentElement;
     if (!box || !(box === main || box.matches('.ol-sec[data-olf]'))) return null;
-    return { box: box === main ? null : box.dataset.olf, items: olItems(box).map((x) => ({ ...x, r: x.el.getBoundingClientRect(), mb: parseFloat(getComputedStyle(x.el).marginBottom) || 0 })) };
+    return olMeasure(box, false);
   }
+  // A test file's outline, as marking it (settle: what's marked folds away) or folding it changes it.
+  function olSnapFile(path, settle) {
+    const box = [...main.querySelectorAll('.ol-sec[data-olf]')].find((x) => x.dataset.olf === path);
+    return box ? olMeasure(box, settle) : null;
+  }
+  const olMeasure = (box, settle) => ({ box: box === main ? null : box.dataset.olf, settle, items: olItems(box).map((x) => ({ ...x, r: x.el.getBoundingClientRect(), mb: parseFloat(getComputedStyle(x.el).marginBottom) || 0 })) });
   // The same part drawn again: what's gone folds back into what's above it, while what's new opens
-  // downward from it.
+  // downward from it. What took the place of what's gone (a line of reviewed rows) opens as that
+  // closes under it; marked rows first settle as reviewed.
   function olMotion(o) {
     const box = o.box == null ? main : [...main.querySelectorAll('.ol-sec[data-olf]')].find((x) => x.dataset.olf === o.box);
     if (!box) return;
     const now = olItems(box), has = new Map(now.map((x) => [x.k, x.el])), had = new Set(o.items.map((x) => x.k));
+    const fresh = new Set(now.filter((x) => !had.has(x.k)).map((x) => x.el));
     const gone = [];
     let run = [], prev = null;
     const close = (next) => {
@@ -4079,17 +4156,26 @@
       if (run.length && a) {
         const b = next && has.get(next.k), last = run[run.length - 1];
         const was = next ? next.r.top - prev.r.bottom : last.r.bottom + last.mb - prev.r.bottom;
-        const is = b ? b.getBoundingClientRect().top - a.getBoundingClientRect().bottom : parseFloat(getComputedStyle(a).marginBottom) || 0;
-        if (was - is > 3) gone.push({ a, h: was - is, els: run.map((x) => x.el) });
+        // What's new in the same place opens from nothing: it doesn't count yet.
+        let at = a, added = 0;
+        for (let el = a.nextElementSibling; el && el !== b; el = el.nextElementSibling) if (fresh.has(el)) { added += gapOf(el); at = el; }
+        const is = (b ? b.getBoundingClientRect().top - a.getBoundingClientRect().bottom : parseFloat(getComputedStyle(a).marginBottom) || 0) - added;
+        if (was - is > 3) gone.push({ a: at, h: was - is, els: run.map((x) => x.el) });
       }
       run = [];
     };
     for (const x of o.items) { if (has.has(x.k)) { close(x); prev = x; } else run.push(x); }
     close(null);
-    gone.forEach((g) => closeGap(g.a, g.h, g.els).animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: EASE, fill: 'forwards' }));
+    const wait = o.settle ? 160 : 0;
+    gone.forEach((g) => {
+      const ghost = closeGap(g.a, g.h, g.els, wait);
+      if (!o.settle) { ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: EASE, fill: 'forwards' }); return; }
+      ghost.querySelectorAll('.tick:not(.on)').forEach((t) => { t.classList.remove('part'); t.classList.add('on'); popTick(t); });
+      requestAnimationFrame(() => ghost.classList.add('settle'));
+    });
     let grow = [];
-    for (const x of now) { if (had.has(x.k)) { growRows(grow); grow = []; } else grow.push(x.el); }
-    growRows(grow);
+    for (const x of now) { if (had.has(x.k)) { growRows(grow, 0, wait); grow = []; } else grow.push(x.el); }
+    growRows(grow, 0, wait);
   }
   // A gap that closes: the space something left, shrinking to nothing (with what was there, fading).
   function closeGap(after, h, content, delay) {
@@ -4110,7 +4196,7 @@
     return ghost;
   }
   // Rows that just appeared open downward from what's above them, and fade in as they do.
-  function growRows(rows, fromH) {
+  function growRows(rows, fromH, delay) {
     if (!rows.length) return;
     const wrap = document.createElement('div');
     wrap.className = 'grow';
@@ -4119,8 +4205,8 @@
     const h = wrap.getBoundingClientRect().height;
     if (h - (fromH || 0) < 3) { wrap.replaceWith(...wrap.childNodes); return; }
     const unwrap = () => { if (wrap.isConnected) wrap.replaceWith(...wrap.childNodes); mini.update(); };
-    wrap.animate([{ height: (fromH || 0) + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE }).finished.then(unwrap, unwrap);
-    if (!fromH) wrap.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 80, easing: EASE, fill: 'backwards' });
+    wrap.animate([{ height: (fromH || 0) + 'px' }, { height: h + 'px' }], { duration: 280, delay: delay || 0, easing: EASE, fill: 'backwards' }).finished.then(unwrap, unwrap);
+    if (!fromH) wrap.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 80 + (delay || 0), easing: EASE, fill: 'backwards' });
   }
   const popTick = (t) => t.animate([{ backgroundColor: '#58C597', transform: 'scale(1.2)' }, { backgroundColor: 'rgba(88, 197, 151, 0)', transform: 'scale(1)' }], { duration: 420, easing: EASE });
   // A section after its changes were marked: folded (its old rows settle as reviewed, then fold into
@@ -4500,6 +4586,10 @@
     return band;
   }
   const findBand = (key) => () => [...main.querySelectorAll('.hh[data-sec]')].find((x) => x.dataset.sec === key) || null;
+  // An outline's row, or the line of reviewed rows it folded into.
+  const olRowOrFold = (key) => [...main.querySelectorAll('.ol-row[data-ol]')].find((x) => x.dataset.ol === key) || [...main.querySelectorAll('.ol-fold[data-in]')].find((x) => x.dataset.in.split(' ').includes(key)) || null;
+  // Marking from inside a test file's outline: what it folds there moves too.
+  const markHint = (ids, el) => { const sec = el && el.closest && el.closest('.ol-sec[data-olf]'); return sec ? { mark: ids, olf: sec.dataset.olf } : { mark: ids }; };
   // Space: marks the change you're on reviewed and goes to the next one to review. With none on
   // screen, it only goes to the next one.
   function markAndNext() {
@@ -4510,9 +4600,9 @@
       // An outline's row: its own lines (a test's body, a group's setup).
       const key = el.dataset.ol, blocks = blocksOf(el.dataset.mark.split(' ')).filter((b) => b && b.edits.length);
       toggleBlocks(blocks);
-      hint({ mark: blocks.map((b) => b.id) });
+      hint(markHint(blocks.map((b) => b.id), el));
       render();
-      return goNextAfter(() => [...main.querySelectorAll('.ol-row[data-ol]')].find((x) => x.dataset.ol === key) || null);
+      return goNextAfter(() => olRowOrFold(key));
     }
     const id = el.dataset.block, b = M().blockById.get(id);
     if (!b) return false;
@@ -4535,9 +4625,9 @@
       const blocks = blocksOf((tick ? tick.dataset.blocks : el.dataset.mark).split(' ')).filter((b) => b && b.edits.length && blockIn(b) && !doneL(b));
       if (!blocks.length) return false;
       setEdits(blocks.flatMap((b) => b.edits), true);
-      hint({ mark: blocks.map((b) => b.id) });
+      hint(markHint(blocks.map((b) => b.id), el));
       render();
-      return goNextAfter(() => [...main.querySelectorAll('.ol-row[data-ol]')].find((x) => x.dataset.ol === key) || null);
+      return goNextAfter(() => olRowOrFold(key));
     }
     const sec = state.view.kind === 'chain' ? el.closest('.sec[id]') : null;
     const band = bandOf(el);
@@ -5411,13 +5501,18 @@
       return;
     }
     if (act === 'mark-file') { const bs = m.files[Number(d.file)].blocks.filter((b) => b.edits.length); toggleBlocks(bs); hint({ mark: bs.map((b) => b.id) }); return render(); }
-    if (act === 'mark-blocks') { toggleBlocks(blocksOf(d.blocks.split(' '))); hint({ mark: d.blocks.split(' ') }); return render(); }
+    if (act === 'mark-blocks') { toggleBlocks(blocksOf(d.blocks.split(' '))); hint(markHint(d.blocks.split(' '), t)); return render(); }
     if (act === 'mark-chain') { toggleBlocks(blocksOf(m.chains[Number(d.chainId)].blocks)); hint({ mark: m.chains[Number(d.chainId)].blocks }); return render(); }
     if (act === 'mark-standalone') { toggleBlocks(m.standalone); hint({ mark: m.standalone.map((b) => b.id) }); return render(); }
     if (act === 'mark-edits') { const ids = d.edits.split(' ').map(Number); setEdits(ids, !ids.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'toggle-member') { state.memberOpen.has(d.key) ? state.memberOpen.delete(d.key) : state.memberOpen.add(d.key); return render(); }
     if (act === 'ol-open') { hint({ ol: d.ol }); state.olOpen.has(d.ol) ? state.olOpen.delete(d.ol) : state.olOpen.add(d.ol); return render(); }
     if (act === 'ol-unfold') { hint({ ol: d.key, fold: true }); state.olUnfold.has(d.key) ? state.olUnfold.delete(d.key) : state.olUnfold.add(d.key); return render(); }
+    if (act === 'ol-file') {
+      if (t.getAttribute('aria-expanded') === 'true') { state.collapsed.add(d.key); state.expanded.delete(d.key); } else { state.collapsed.delete(d.key); state.expanded.add(d.key); }
+      hint({ olf: t.closest('.ol-sec[data-olf]').dataset.olf });
+      return render();
+    }
     if (act === 'ol-chain') {
       // The chain that wrote a call, at its row.
       state.view = { kind: 'chain', id: Number(d.chainId) }; state.peek = null; state.focus = null; toChains();

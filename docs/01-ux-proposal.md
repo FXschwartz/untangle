@@ -395,6 +395,13 @@ and reviewing a test starts there: the code is there to confirm it.
    test's expect calls (`expect` and `expectLater` called by name, not in comments), muted, and
    the diff's lines in the call (+X −Y; in a chain, the chain's). Their room is kept, so nothing
    moves under the pointer. ↗ is drawn with strokes that stay whole at any zoom.
+10. **What's reviewed folds away,** in the Tests view, as reviewed hunks do. A test marked
+    reviewed settles, then folds into a line, "✓ 3 tests reviewed", that holds the reviewed rows
+    next to it and shows them again on a click. A group folds only once everything under it is
+    reviewed; until then it stays, its mark shows a dash, and its title mutes once its own lines
+    are reviewed. A file's mark reviews it whole, and a file reviewed whole folds to its line
+    ("✓ 12 tests reviewed"), which opens on a click with every row shown. Space carries on from
+    the line a test folded into.
 
 On offline_sync #168, 3,460 changed test lines fit in 137 rows: 70 new sentences, 6 reworded, 3
 regrouped and 1 removed, in 8 of its 43 test files. The other 35 change no sentence: 134 calls
@@ -920,6 +927,10 @@ through the page.
     review, close the page and move on: `-autoclose`, on unless set to false. Chosen: the page
     says it closed with a beacon, rather than untangle watching a connection drop, so a tab the
     browser discards doesn't stop it. Done: [Where it runs](#where-it-runs).
+  - Then the Tests view folds what's reviewed, as asked: a reviewed test into a line of reviewed
+    tests, a group once everything under it is (until then it mutes and its mark shows a dash), and
+    a file reviewed whole, which gets a mark of its own. Done: [Tests as
+    sentences](#tests-as-sentences), rule 10.
 
 ## References
 
