@@ -30,6 +30,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
   let cache = '';
   let reportSha = '';
   let labelSha = '';
+  let coverSha = '';
 
   before(async () => {
     repo = TempRepo.create();
@@ -51,7 +52,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     repo.write('test/price_test.dart', "import 'package:sample/price.dart';\n\nvoid main() {\n  price(1);\n  price(2);\n}\n");
     repo.write('lib/price.dart', 'int price(int amount) => amount * 3;\n');
     const fourth = ada('2020-08-05T15:00:00Z');
-    repo.commit({ subject: 'test: Cover the price', author: fourth, committer: fourth });
+    coverSha = repo.commit({ subject: 'test: Cover the price', author: fourth, committer: fourth });
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
     run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, args: ['-chains', 'history'] });
     await waitForReview(reviewClient(run.url));
@@ -92,13 +93,150 @@ describe('Given a served review that follows four commits: a follow-up of the fi
       note = await read(page!, `[...document.querySelectorAll('.cm-note > *')].map((el) => el.textContent).join('\\n')`);
     });
 
-    it('then it opens with the commit\'s subject, the first paragraph of its message, and its follow-up.', () => {
+    it('then it opens with the commit\'s subject and the first paragraph of its message.', () => {
       assert.equal(note, [
         `feat Add a report ${reportSha.slice(0, 7)}`,
         'Prints the total and a closing line.',
         'Show the whole message',
-        `Followed up by Label the sum ${labelSha.slice(0, 7)}.`,
       ].join('\n'));
+    });
+  });
+
+  describe('when the report\'s chain is opened, which its follow-up changed, ', () => {
+    let bar = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      bar = await read(page!, `[...document.querySelectorAll('.fv-head .wb-seg')].map((s) => s.getAttribute('aria-label') + (s.classList.contains('own') ? ' (its own)' : '')).join(' | ') + ' · ' + [...document.querySelectorAll('.fv-head .wb > .lnk, .fv-head .wb > .wb-n')].map((b) => b.textContent).join(' · ')`);
+    });
+
+    it('then a bar under its members shares its lines between its commit and the follow-up, oldest first, then counts them.', () => {
+      assert.equal(bar, `${reportSha.slice(0, 7)} Add a report: 83% of the lines (its own) | ${labelSha.slice(0, 7)} Label the sum: 17% of the lines (its own) · 2 commits · Commit details`);
+    });
+  });
+
+  describe('when the report\'s chain shows its commits in the Commits tab, ', () => {
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      await page!.click('[data-act="show-commits"]');
+      await page!.until(`!!document.querySelector('.cm-list.follow')`);
+      rows = await read(page!, `[document.querySelectorAll('.sb-group')[1].lastElementChild.textContent, ...[...document.querySelectorAll('.cm-row')].map((r) => r.querySelector('.cm-s').textContent + (r.classList.contains('mine') ? ' · ' + r.querySelector('.cm-m b').textContent + (r.querySelector('.ring') ? ' · ringed' : '') : ' · faded'))].join('\\n')`);
+    });
+
+    it('then the chain\'s two commits stand out with their changes here, ringed as its own, and the others fade.', () => {
+      assert.equal(rows, [
+        '2 of 4 in this chain',
+        'Cover the price · faded',
+        'Label the sum · 1 here · ringed',
+        'Double the price · faded',
+        'Add a report · 2 here · ringed',
+      ].join('\n'));
+    });
+  });
+
+  describe('when the follow-up is hovered in the Commits tab, ', () => {
+    let lit = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      await page!.click('[data-act="show-commits"]');
+      await page!.until(`!!document.querySelector('.cm-list.follow')`);
+      await page!.hover(`.cm-row[data-commit="${labelSha}"]`);
+      await page!.until(`!!document.querySelector('.wb-seg.hl')`);
+      lit = await read(page!, `[...new Set([...document.querySelectorAll('.vw-main .ln.add, .vw-main .ln.del')].filter((l) => getComputedStyle(l.querySelector('.tx')).opacity === '1').map((l) => l.querySelector('.tx').textContent.trim()))].join(' ⏎ ') + ' | ' + [...document.querySelectorAll('.wb-seg.hl')].map((s) => s.getAttribute('aria-label')).join(', ')`);
+      await page!.hover('.crumbs');
+      await page!.until(`!document.querySelector('.wb-seg.hl')`);
+    });
+
+    it('then only the line it wrote stays lit, and its part of the bar lights.', () => {
+      assert.equal(lit, `print('sum: \${price(total)}'); | ${labelSha.slice(0, 7)} Label the sum: 17% of the lines`);
+    });
+  });
+
+  describe('when the Commits tab shows and the next chain is asked for, ', () => {
+    let followed = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      await page!.click('[data-act="show-commits"]');
+      await page!.until(`!!document.querySelector('.cm-list.follow')`);
+      await page!.key('n');
+      await page!.until(`(document.querySelector('.crumbs b')?.textContent || '') === 'Double the price'`);
+      followed = await read(page!, `[document.querySelector('[data-tab="commits"]').getAttribute('aria-selected') === 'true' ? 'Commits shown' : 'Commits hidden', document.querySelectorAll('.sb-group')[1].lastElementChild.textContent, [...document.querySelectorAll('.cm-row.mine .cm-s')].map((s) => s.textContent).join(', ')].join(' | ')`);
+    });
+
+    it('then the Commits tab stays and follows the chain that opens.', () => {
+      assert.equal(followed, 'Commits shown | 2 of 4 in this chain | Cover the price, Double the price');
+    });
+  });
+
+  describe('when the tests\' chain lists the other chains its commit wrote in, and one is chosen, ', () => {
+    let chosen = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Cover the price');
+      await page!.click('[data-menu="also"]');
+      await page!.until(`!!document.querySelector('.menu:not([hidden]) .mi')`);
+      const menu = await read(page!, `[...document.querySelectorAll('.menu:not([hidden]) .mi-h, .menu:not([hidden]) .mi')].map((el) => el.matches('.mi') ? el.querySelector('span:not(.ic):not(.k)').textContent + ' · ' + el.querySelector('.k').textContent : el.textContent).join(' | ')`);
+      await page!.click('.menu:not([hidden]) .mi');
+      await page!.until(`(document.querySelector('.crumbs b')?.textContent || '') === 'Double the price'`);
+      chosen = [menu, `→ ${await read(page!, `document.querySelector('.crumbs b').textContent + ', through ' + document.querySelector('.t-head span').textContent`)}`].join('\n');
+    });
+
+    it('then the menu names the price\'s chain, which opens through the tests\' commit.', () => {
+      assert.equal(chosen, [
+        `Where ${coverSha.slice(0, 7)} also wrote lines | Double the price · 1 change`,
+        `→ Double the price, through ${coverSha.slice(0, 7)} · Cover the price`,
+      ].join('\n'));
+    });
+  });
+
+  describe('when the report\'s commit details are opened, then Esc is pressed, ', () => {
+    let card = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Add a report');
+      await page!.click('[data-act="card"]');
+      await page!.until(`!!document.querySelector('.hs-detail.solo')`);
+      const open = await read(page!, `(() => { const el = document.querySelector('.hs-detail.solo'); return [el.previousElementSibling.matches('.cm-note') ? 'under the message' : 'elsewhere', el.querySelector('.hd-facts dd').textContent, el.querySelector('.hd-subj').textContent, [...el.querySelectorAll('.hd-acts .btn')].map((b) => b.textContent).join(', ')].join(' · '); })()`);
+      await page!.key('Escape');
+      await page!.until(`!document.querySelector('.hs-detail')`);
+      card = `${open} | after Esc: ${await read(page!, `document.querySelector('[data-act="card"]').getAttribute('aria-expanded') === 'false' ? 'closed' : 'open'`)}`;
+    });
+
+    it('then History\'s card opens under the message with the commit and its actions, and Esc closes it.', () => {
+      assert.equal(card, `under the message · ${reportSha} · feat: Add a report · Review its changes · 2, Only its changes | after Esc: closed`);
+    });
+  });
+
+  describe('when the report\'s commit details close, with motion on, ', () => {
+    let during = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.reducedMotion(false);
+      await openChain(page!, 'Add a report');
+      await page!.click('[data-act="card"]');
+      await page!.until(`!!document.querySelector('.hs-detail.solo') && document.getAnimations().length === 0`);
+      await page!.click('[data-act="card"]');
+      during = await read(page!, `(() => { const ghost = document.querySelector('.ghost'); if (!ghost) return 'no stand-in'; return 'a stand-in after ' + (ghost.previousElementSibling?.matches('.cm-note') ? 'the message' : 'something else') + ' with ' + ghost.querySelectorAll('.hd-in').length + ' card in it'; })()`);
+      await page!.until(`!document.querySelector('.ghost')`);
+    });
+
+    after(async () => {
+      await page?.reducedMotion(true);
+    });
+
+    it('then a fading stand-in of the card folds under the message.', () => {
+      assert.equal(during, 'a stand-in after the message with 1 card in it');
     });
   });
 

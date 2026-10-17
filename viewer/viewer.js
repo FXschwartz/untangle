@@ -87,6 +87,8 @@
   const state = {
     compare: 'base', tab: 'chains', layout: 'unified', showReviewedDiff: false,
     view: { kind: 'map', family: null }, prevView: null, peek: null, focus: null, lens: null,
+    // By commit: the commit whose card (History's details) is open under its chain's header.
+    card: null,
     // A change's lines from one commit, reviewed under that commit's lens: "<block>@<sha>".
     cmarks: new Set(),
     rev: {},
@@ -230,6 +232,8 @@
   }
   // Which commit wrote a row of a file's hunk (an index into the history), or -1.
   const rowCommit = (f, hi, ri) => { const a = HISTORY && HISTORY.rows[f.idx]; const v = a && a[hi] ? a[hi][ri] : -1; return v == null ? -1 : v; };
+  // The same, for a row drawn in a view: only the review against the base has the history's rows.
+  const wroteRow = (f, hi, ri) => (hxOn() ? rowCommit(f, hi, ri) : -1);
   function rowInLens(f, hi, ri) {
     const d = lensData();
     if (!d) return true;
@@ -248,6 +252,28 @@
       blockCommitsMemo.set(b.id, set);
     }
     return set;
+  }
+  // Who wrote a chain: for each commit (an index into the history), the chain's changed lines it
+  // last wrote and how many of the chain's changes have some.
+  const writersMemo = new WeakMap();
+  function chainWriters(c) {
+    let w = writersMemo.get(c);
+    if (w) return w;
+    w = new Map();
+    if (HISTORY) blocksOf(c.blocks).forEach((b) => {
+      const h = b.file.hunks[b.hunk], seen = new Set();
+      for (let ri = b.first; ri < b.first + b.len; ri++) {
+        if (h.rows[ri][0] === ' ') continue;
+        const ci = rowCommit(b.file, b.hunk, ri);
+        if (ci < 0) continue;
+        if (!w.has(ci)) w.set(ci, { lines: 0, changes: 0 });
+        w.get(ci).lines++;
+        seen.add(ci);
+      }
+      seen.forEach((ci) => { w.get(ci).changes++; });
+    });
+    writersMemo.set(c, w);
+    return w;
   }
   const cmKey = (b, ci) => b.id + '@' + HISTORY.commits[ci].sha;
   // A change's lines from a commit are reviewed: marked so, or the whole change is.
@@ -503,14 +529,14 @@
     return state.peek && state.peek.old && state.peek.path === f.p && state.peek.o === o ? peekHtml(state.peek) : '';
   }
   // One unified row, with one line number: the new line's, or the old one's for a removed line.
-  // o.c: the row takes comments (a line of the pull request's diff).
+  // o.c: the row takes comments (a line of the pull request's diff). o.w: the commit that wrote it.
   function uRow(f, meta, text, ranges, o) {
     const sign = o.sign != null ? o.sign : meta.t === '+' ? '+' : meta.t === '-' ? '−' : '';
     const n = meta.t !== '-' ? meta.n : null;
     const oldNo = meta.t === '-' ? meta.o : null;
     const c = o.c ? (meta.t === '-' ? (o.mv ? '' : 'L:' + meta.o) : n != null ? 'R:' + n : '') : '';
     const notes = (o.badges || '') + (o.toggle || '');
-    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
+    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
   // Each move annotation stays at the moved block's position. The removed body stays
   // collapsed; the added body's annotation immediately precedes its rows.
@@ -596,14 +622,14 @@
         }
         const first = !placed.has(b.id);
         placed.add(b.id);
-        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel });
+        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel, w: wroteRow(f, hi, ri) });
         continue;
       }
       // The change's mark: on its row in the lens, or on its first row drawn here.
       const want = tickRow(b), first = want >= start && want < end ? ri === want : !placed.has(b.id);
       placed.add(b.id);
       out += uRow(f, meta, text, ranges, {
-        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, colors, c: true, sel,
+        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, colors, c: true, sel, w: wroteRow(f, hi, ri),
         tick: first ? tickHtml(b) : '', toggle: first && d ? diffToggle(b) : '',
         badges: ctx.noBadges ? '' : badgesHtml(f, b, ri, t !== '-' ? meta.n : null),
       });
@@ -619,7 +645,7 @@
     const oldNo = side === 'l' && meta.t === '-' ? meta.o : null;
     const c = o.c && num != null ? ` data-c="${side === 'l' ? 'L' : 'R'}:${num}"` : '';
     const notes = side === 'r' ? (o.badges || '') + (o.toggle || '') : '';
-    return `<span class="half ${side} ${o.cls || ''}${f.lang === 'md' ? ' md' : ''}"${c}><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</span>`;
+    return `<span class="half ${side} ${o.cls || ''}${f.lang === 'md' ? ' md' : ''}"${c}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="no">${num != null ? num : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: (side === 'r' && o.refs) || (oldNo != null && o.refs !== false), colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</span>`;
   }
   function splitRowsHtml(f, hi, start, end, ctx) {
     ctx = ctx || {};
@@ -657,7 +683,7 @@
         adds.forEach((i, k) => {
           const m2 = h.meta[i];
           const colors = rowColors(h.rows, f.p, i);
-          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
+          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === 0 ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true, w: wroteRow(f, hi, i) })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
         });
       } else {
         const rows = Math.max(dels.length, adds.length);
@@ -670,8 +696,8 @@
           const sel = (li != null && inCompose(f, hi, li)) || (ai != null && inCompose(f, hi, ai));
           const fade = lensOn() && (li == null || outL(li)) && (ai == null || outL(ai));
           out += `<div class="sl${d ? ' rvd' : ''}${other}${fade ? ' lens-out' : ''}${sel ? ' cm-sel' : ''}" data-n="${am ? am.n : ''}"><span class="g">${k === kTick ? tickHtml(b) : ''}</span>`
-            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del' + (outL(li) ? ' lens-out' : ''), emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null, c: true })
-            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add' + (outL(ai) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === kTick && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null, c: true })
+            + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del' + (outL(li) ? ' lens-out' : ''), emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null, c: true, w: li != null ? wroteRow(f, hi, li) : -1 })
+            + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add' + (outL(ai) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === kTick && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null, c: true, w: ai != null ? wroteRow(f, hi, ai) : -1 })
             + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '') + (lm ? threadsAt(f, 'LEFT', lm.o) : '') + (am ? threadsAt(f, 'RIGHT', am.n) : '');
         }
       }
@@ -1375,6 +1401,21 @@
     const ids = [...new Set(f.blocks.flatMap((b) => m.chainsOf.get(b.id) || []))];
     return [{ head: `The chains this file’s changes are in` }, ...ids.map((id) => chainItem(m.chains[id]))];
   }
+  // By commit: the other chains the open chain's commits wrote lines in, each opening that chain
+  // through the commit, as History's chips do.
+  function alsoMenuItems() {
+    const m = M(), v = state.view, c = v.kind === 'chain' && m.byCommit ? m.chains[v.id] : null;
+    if (!c) return [];
+    const fam = m.families.find((f) => f.id === c.family);
+    const items = [];
+    let last = -1;
+    alsoIn(c, fam).forEach((x) => {
+      const sha = HISTORY.commits[x.ci].sha, to = m.chains[x.chain];
+      if (x.ci !== last) { items.push({ head: `Where ${shortSha(sha)} also wrote lines` }); last = x.ci; }
+      items.push({ ...chainItem(to), key: plural(x.n, 'change'), title: `${to.name}, through ${shortSha(sha)}: only its lines there`, data: { act: 'lens-chain', sha, 'chain-id': to.id } });
+    });
+    return items;
+  }
   function menuHtml(items) {
     return items.map((it) => {
       if (it.sep) return '<div class="mi-sep" role="separator"></div>';
@@ -1395,11 +1436,11 @@
     const el = MENU.el, lens = MENU.open === 'lens';
     // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
     el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' ? 'Chains' : 'More');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
     el.classList.toggle('lens-pop', lens);
     const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
-    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : chainsMenuItems();
+    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : chainsMenuItems();
     const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
     if (!html) { MENU.open = null; MENU.html = ''; el.hidden = true; viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false')); return; }
     if (html !== MENU.html) {
@@ -2198,26 +2239,54 @@
     if (more > 0) h += `<button type="button" class="lnk" data-act="graph-show" title="Show all of them, in the graph">+${more} more</button>`;
     return `<div class="strip" role="group" aria-label="The chain’s members">${h}</div>`;
   }
-  // Why a commit's chain exists: its message, the commits that followed it up, the ones that
-  // changed its lines later, and the chains it builds on or changes.
+  // Why a commit's chain exists: its message. The commits that wrote the chain are in its bar.
   function commitNoteHtml(fam) {
-    const f = fam.commit, m = M();
+    const f = fam.commit;
     const open = state.noteOpen.has(f.id);
     const paras = (f.body || '').split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
     const body = paras.length ? `<p class="cm-text">${messageHtml(open ? paras.join('\n\n') : paras[0])}</p>${paras.length > 1 ? `<button type="button" class="linkish" data-act="note-more" data-family="${f.id}">${open ? 'Show less' : 'Show the whole message'}</button>` : ''}` : '';
-    const commit = (x) => `${esc(subjectOf(x).text)} <code>${shortSha(x.sha)}</code>`;
-    const chainOf = (id) => {
-      const g = m.families.find((x) => x.id === id);
-      return g && g.commit ? `<button type="button" class="linkish" data-chain="${g.chains[0].id}">${esc(trunc(g.commit.subject, 64))}</button>` : '';
-    };
-    const follow = f.commits.filter((x) => x.role === 'follow-up');
-    const rel = [
-      follow.length ? `Followed up by ${follow.map(commit).join('; ')}.` : '',
-      f.revisedBy.length ? `Changed later by ${f.revisedBy.map((x) => `${commit(x)} (${plural(x.lines, 'line')})`).join('; ')}.` : '',
-      f.buildsOn != null && chainOf(f.buildsOn) ? `Builds on ${chainOf(f.buildsOn)}.` : '',
-      f.revises.map(chainOf).filter(Boolean).length ? `Changes the lines of ${f.revises.map(chainOf).filter(Boolean).join(', ')}.` : '',
-    ].filter(Boolean);
-    return `<div class="cm-note"><p class="cm-subj">${f.kind ? `<span class="tag">${esc(f.kind)}</span> ` : ''}${messageHtml(f.subject)} <code>${shortSha(f.sha)}</code></p>${body}${rel.map((x) => `<p class="cm-rel">${x}</p>`).join('')}</div>`;
+    return `<div class="cm-note"><p class="cm-subj">${f.kind ? `<span class="tag">${esc(f.kind)}</span> ` : ''}${messageHtml(f.subject)} <code>${shortSha(f.sha)}</code></p>${body}</div>`;
+  }
+  // The commits of a chain's family: its first and the ones that followed it up (indices into the
+  // history).
+  const familyCommits = (fam) => (fam && fam.commit && hxOn() ? fam.commit.commits.map((x) => HX.index.get(x.sha)).filter((i) => i != null) : []);
+  // Where the chain's own commits also wrote lines: the other chains, with that commit's changes
+  // in each, as History's chips count them.
+  function alsoIn(c, fam) {
+    const m = M(), out = [];
+    familyCommits(fam).forEach((ci) => {
+      const per = new Map();
+      commitParts()[ci].forEach((b) => (m.chainsOf.get(b.id) || []).forEach((id) => { if (id !== c.id) per.set(id, (per.get(id) || 0) + 1); }));
+      [...per].sort((x, y) => y[1] - x[1] || x[0] - y[0]).forEach(([id, n]) => out.push({ ci, chain: id, n }));
+    });
+    return out;
+  }
+  const shareOf = (n, total) => { const p = (n / total) * 100; return p < 1 ? 'under 1%' : `${Math.round(p)}%`; };
+  // By commit, under a chain's members: who last wrote its changed lines, a part of a thin bar for
+  // each commit, oldest first, as wide as its share (the chain's own commits lighter; hovering one
+  // dims the lines it didn't write; a click makes it the lens). One commit alone needs no bar. Then
+  // how many commits (the Commits tab marks them), the other chains its commits wrote in, and its
+  // commit's card.
+  function writersHtml(c, fam) {
+    if (!hxOn()) return '';
+    const w = chainWriters(c);
+    if (!w.size) return '';
+    const own = new Set(familyCommits(fam));
+    const order = [...w.keys()].sort((x, y) => y - x);
+    const total = order.reduce((n, ci) => n + w.get(ci).lines, 0);
+    const segs = order.map((ci) => {
+      const x = w.get(ci), cm = HISTORY.commits[ci], share = shareOf(x.lines, total);
+      const tip = `${cm.subject}\n${shortSha(cm.sha)} · ${cm.author} · ${whenOf(cm.at)}\n${own.has(ci) ? 'This chain’s commit. ' : ''}It last wrote ${x.lines} of the ${plural(total, 'changed line')} here (${share}), in ${plural(x.changes, 'change')}.\n\nClick for only its lines; Shift-click for a range.`;
+      return `<button type="button" class="wb-seg${own.has(ci) ? ' own' : ''}${commitInLens(ci) ? ' in' : ''}" data-act="wb-seg" data-sha="${cm.sha}" data-ci="${ci}" style="flex-grow:${x.lines}" title="${esc(tip)}" aria-label="${esc(`${shortSha(cm.sha)} ${subjectOf(cm).text}: ${share} of the lines`)}"></button>`;
+    }).join('');
+    const also = new Set(alsoIn(c, fam).map((x) => x.chain)).size;
+    const sha = fam && fam.commit ? fam.commit.sha : null;
+    const shown = state.tab === 'commits' && !UI.sideOff;
+    return `<div class="wb">${order.length > 1 ? `<div class="wb-bar" role="group" aria-label="Who wrote this chain’s lines">${segs}</div>` : ''}`
+      + (shown ? `<span class="wb-n" title="The Commits tab marks them">${plural(order.length, 'commit')}</span>` : `<button type="button" class="lnk" data-act="show-commits" title="The commits that wrote this chain’s lines: the Commits tab marks them">${plural(order.length, 'commit')}</button>`)
+      + (also ? `<button type="button" class="lnk" data-act="menu" data-menu="also" aria-haspopup="menu" aria-expanded="${MENU.open === 'also'}" title="The other chains this chain’s commit${own.size > 1 ? 's' : ''} wrote lines in">Also in ${plural(also, 'chain')}${ICON.chevronDown}</button>` : '')
+      + (sha ? `<button type="button" class="lnk" data-act="card" data-sha="${sha}" aria-expanded="${state.card === sha}" title="${state.card === sha ? 'Hide' : 'Show'} the commit’s details, as History shows them">Commit details</button>` : '')
+      + '</div>';
   }
   function renderChain(id) {
     const m = M();
@@ -2236,9 +2305,10 @@
       nav: true,
       tools: oneTestFile ? '' : iconBtn(ICON.graph, UI.graph ? 'Hide the graph' : 'Show the members as a graph', 'data-act="graph"', { label: 'Graph', on: UI.graph }),
       action: outOfLens(s) ? '' : `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-chain" data-chain-id="${c.id}">${s.open ? 'Mark chain reviewed' : 'Mark chain unreviewed'}</button>`,
-      // The members stay under the header, so going from one to another needs no scrolling back.
-      pinned: oneTestFile ? '' : stripHtml(c),
-      below: fam && fam.commit ? commitNoteHtml(fam) : '',
+      // The members stay under the header, so going from one to another needs no scrolling back;
+      // by commit, so do the commits that wrote them.
+      pinned: (oneTestFile ? '' : stripHtml(c)) + (m.byCommit ? writersHtml(c, fam) : ''),
+      below: fam && fam.commit ? commitNoteHtml(fam) + (state.card === fam.commit.sha && hxOn() && HX.index.has(state.card) ? detailHtml(HX.index.get(state.card), '') : '') : '',
     });
     if (oneTestFile) return h + `<p class="fv-note">One test file: its tests, grouped by <code>group(…)</code>.</p>` + extNoteHtml(c) + testListHtml(c, all);
     if (UI.graph) {
@@ -2637,15 +2707,20 @@
   const isReviewLens = () => !!state.lens && state.lens.kind === 'since' && state.lens.why === 'review';
   const commitInLens = (ci) => { const d = lensData(); return !!d && !!d.set && d.set.has(ci); };
 
-  function commitRowHtml(vm, g) {
+  // `chain`: the chain open, which the list follows ({ writers, own }): a commit that wrote some of
+  // its lines says in how many of its changes, one of its own commits is ringed, the others fade.
+  function commitRowHtml(vm, g, chain) {
     const it = vm.item;
     if (it.ghost) return ghostRowHtml(vm, g, 'cm-row');
     const c = it.c, st = commitState(it.i), sub = subjectOf(c), on = commitInLens(it.i);
-    const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
+    const w = chain && chain.writers.get(it.i), own = !!chain && chain.own.has(it.i);
+    const stub = c.brought ? stubSvg(g) : null;
+    const svg = laneSvg(vm, g, dotSvg(st.state), own ? (x, y) => (stub ? stub(x, y) : '') + `<circle class="ring" cx="${x}" cy="${y}" r="8"/>` : stub);
     const cnt = st.state === 'left' ? `<span class="cm-n left">${st.open}</span>` : st.state === 'done' ? `<span class="cm-n ok">${ICON.check}</span>` : '<span class="cm-n">—</span>';
-    const meta = c.brought ? `<code>${shortSha(c.sha)}</code> · brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${dayOf(c.at)}`;
+    const meta = (c.brought ? `<code>${shortSha(c.sha)}</code> · brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${dayOf(c.at)}`) + (w ? ` · <b>${w.changes} here</b>` : '');
     const left = st.total ? `${plural(st.total, 'change')}${st.open ? `, ${st.open} to review` : ', all reviewed'}` : 'Nothing of it is left at the head';
-    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}. Click for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${esc(sub.text)}</span><span class="cm-m">${meta}</span>${cnt}</button>`;
+    const here = !chain ? '' : w ? `\n${own ? 'The open chain’s commit. ' : ''}Its lines are in ${w.changes} of the open chain’s changes.` : '\nNone of its lines are in the open chain.';
+    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}${w ? ' mine' : ''}" data-commit="${c.sha}" data-ci="${it.i}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.${here}\n\nClick for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${esc(sub.text)}</span><span class="cm-m">${meta}</span>${cnt}</button>`;
   }
   function ghostRowHtml(vm, g, cls) {
     const gh = vm.item.ghost, on = !!state.lens && state.lens.kind === 'since' && state.lens.from === gh.sha;
@@ -2676,20 +2751,23 @@
     });
     return n;
   }
-  // The sidebar's Commits tab: the History view, the lens's two presets, then the graph.
+  // The sidebar's Commits tab: the History view, the lens's two presets, then the graph, which
+  // follows the chain open: its commits stand out, and hovering one dims the lines it didn't write.
   function commitsTabHtml() {
     const models = graphItems(), g = laneGeom(models, 12, 40, 8, 26);
-    const rv = HX.live && HX.live.review;
-    const all = withoutLens(() => stats(M().files.flatMap((f) => f.blocks)));
+    const rv = HX.live && HX.live.review, m = M();
+    const all = withoutLens(() => stats(m.files.flatMap((f) => f.blocks)));
+    const open = state.view.kind === 'chain' ? m.chains[state.view.id] : null;
+    const chain = open && chainWriters(open).size ? { writers: chainWriters(open), own: new Set(m.byCommit ? familyCommits(m.families.find((f) => f.id === open.family)) : []) } : null;
     let h = `<button type="button" class="sb-row map" data-act="history-open"${state.view.kind === 'history' ? ' aria-current="true"' : ''} title="Every commit, with what it touched, its checks and its reviews"><span class="tw">${ICON.history}</span><span class="nm ui">History</span><span class="cnt"></span></button>`;
     h += '<div class="sb-group"><span>Changes from</span></div>';
     h += preset('lens-all', 'All changes', all.open, !state.lens, 'Every change of the pull request');
     if (rv && rv.here) h += preset('lens-review', 'Since your review', sinceOpen(rv.head), isReviewLens(), `What changed since the head of your last review, ${shortSha(rv.head)} (${whenOf(rv.at)})`);
-    h += `<div class="sb-group"><span>Commits</span><span>${HISTORY.commits.length}</span></div><div class="cm-list" role="group" aria-label="The commits, newest first">`;
+    h += `<div class="sb-group"><span>Commits</span><span${chain ? ' title="The commits that wrote lines of the chain open"' : ''}>${chain ? `${chain.writers.size} of ${HISTORY.commits.length} in this chain` : HISTORY.commits.length}</span></div><div class="cm-list${chain ? ' follow' : ''}" role="group" aria-label="The commits, newest first">`;
     const rvb = reviewInBranch();
     models.forEach((vm) => {
       if (rvb && vm.item.id === rvb.head) h += flagRowHtml(vm, g, 'cm-flag');
-      h += commitRowHtml(vm, g);
+      h += commitRowHtml(vm, g, chain);
     });
     const last = HISTORY.commits[HISTORY.commits.length - 1];
     if (last.outside[0]) h += `<div class="cm-start" title="The branch starts after ${esc(last.outside[0])}">Branched from <code>${shortSha(last.outside[0])}</code></div>`;
@@ -2824,10 +2902,10 @@
     walk(fileTree(list), 0);
     return treeRowsHtml(rows);
   }
-  function detailHtml(vm, g) {
-    const c = vm.item.c, ci = vm.item.i, st = commitState(ci), list = commitFilesOf(ci);
+  // `lanes`: the graph's lanes beside it, in History; none in a chain, where it opens on its own.
+  function detailHtml(ci, lanes) {
+    const c = HISTORY.commits[ci], st = commitState(ci), list = commitFilesOf(ci);
     const merge = c.parents.length + c.outside.length > 1;
-    const lanes = `<span class="lanes-v" style="width:${g.width}px" aria-hidden="true">${vm.output.map((n, i) => `<i class="${n.k}" style="left:${g.pad + i * g.W}px"></i>`).join('')}</span>`;
     const parent = (p) => `<button type="button" class="linkish" data-act="hd-go" data-sha="${p}" title="${esc(HISTORY.commits[HX.index.get(p)].subject)}: its details"><code>${shortSha(p)}</code></button>`;
     const away = (p) => `<code title="${esc(p)}">${shortSha(p)}</code> <span class="muted">${merge ? 'from ' + esc(baseName()) : 'where the branch starts'}</span>`;
     const person = (name, email) => `${esc(name)}${email ? ` <span class="muted">&lt;<a href="mailto:${esc(email)}">${esc(email)}</a>&gt;</span>` : ''}`;
@@ -2849,7 +2927,7 @@
     const fh = `<div class="hd-fh">${plural(list.length + (c.more || 0), 'file')}${list.length && !c.more ? ` · <span class="a">+${fmt(adds)}</span> <span class="d">−${fmt(dels)}</span>` : ''}${against}</div>`;
     const files = list.length ? detailFilesHtml(list, c.sha) + (c.more ? `<div class="hd-more">and ${fmt(c.more)} more</div>` : '') : '<div class="hd-more">No files changed</div>';
     const rail = `<div class="hd-rail">${iconBtn(ICON.close, 'Close (Esc)', 'data-act="hd-close"')}${iconBtn(ICON.listTree, 'Files as a tree', 'data-act="hd-view" data-v="tree"', { label: 'Files as a tree', on: !UI.filesList })}${iconBtn(ICON.listFlat, 'Files as a list', 'data-act="hd-view" data-v="list"', { label: 'Files as a list', on: !!UI.filesList })}</div>`;
-    return `<div class="hs-detail" data-detail-of="${c.sha}">${lanes}<div class="hd-in"><div class="hd-info"><dl class="hd-facts">${facts}</dl>${msg}${acts}</div><div class="hd-files">${fh}<div role="group" aria-label="The files it changed">${files}</div></div>${rail}${state.peek && state.peek.history && state.peek.history.sha === c.sha ? peekHtml(state.peek) : ''}</div></div>`;
+    return `<div class="hs-detail${lanes ? '' : ' solo'}" data-detail-of="${c.sha}">${lanes}<div class="hd-in"><div class="hd-info"><dl class="hd-facts">${facts}</dl>${msg}${acts}</div><div class="hd-files">${fh}<div role="group" aria-label="The files it changed">${files}</div></div>${rail}${state.peek && state.peek.history && state.peek.history.sha === c.sha ? peekHtml(state.peek) : ''}</div></div>`;
   }
   function renderHistory() {
     if (!hxOn()) return headerHtml({ crumbs: '<b class="ui">History</b>' }) + '<div class="empty">git couldn’t tell this review’s commits.</div>';
@@ -2872,7 +2950,7 @@
     models.forEach((vm) => {
       if (rvb && vm.item.id === rvb.head) h += `<div class="hs-row">${flagRowHtml(vm, g, 'hs-flag')}</div>`;
       h += histRowHtml(vm, g);
-      if (vm.item.c && HX.detail === vm.item.c.sha) h += detailHtml(vm, g);
+      if (vm.item.c && HX.detail === vm.item.c.sha) h += detailHtml(vm.item.i, `<span class="lanes-v" style="width:${g.width}px" aria-hidden="true">${vm.output.map((n, i) => `<i class="${n.k}" style="left:${g.pad + i * g.W}px"></i>`).join('')}</span>`);
       if (vm.item.c && vm.item.c.brought && HX.open.has(vm.item.c.sha)) h += broughtHtml(vm, g);
     });
     const last = list[list.length - 1];
@@ -2901,6 +2979,8 @@
     const n = rv && rv.here ? sinceOpen(rv.head) : 0;
     return n ? `<button type="button" class="lens-offer" data-act="lens-review" title="Show only what changed since the head of your last review, ${shortSha(rv.head)}">New since your review<i>${n}</i></button>` : '';
   }
+  // Going to a chain shows the chains in the sidebar, unless it shows the commits: they follow it.
+  const toChains = () => { if (state.tab !== 'commits') state.tab = 'chains'; };
   function setLens(lens) {
     state.lens = lens;
     lensMemo = null;
@@ -2938,7 +3018,7 @@
     const nx = nextUnreviewed();
     if (!nx) { render(); return toast('Nothing left to review in the lens'); }
     state.view = nx; state.peek = null; state.focus = null;
-    if (state.tab !== 'commits') state.tab = 'chains';
+    toChains();
     render({ top: true });
   }
   // What the graph learns from untangle: your last review's head, GitHub's checks, reviews and
@@ -3039,6 +3119,7 @@
   function sideRows() {
     const out = new Map();
     side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, cnt: (r.querySelector('.cnt') || {}).textContent }));
+    side.querySelectorAll('.cm-row[data-commit]').forEach((r) => out.set('k' + r.dataset.commit, { fade: getComputedStyle(r).opacity }));
     return out;
   }
   // A row done since: its count gives way to a check and it dims. A count that changed rolls. The
@@ -3047,6 +3128,11 @@
   function sideMotion(before) {
     let from = null;
     before.forEach((v) => { if (v.cur) from = v; });
+    // A commit that the chain open now has, or no longer has, eases to its new weight.
+    side.querySelectorAll('.cm-row[data-commit]').forEach((r) => {
+      const v = before.get('k' + r.dataset.commit), now = getComputedStyle(r).opacity;
+      if (v && v.fade !== now) r.animate([{ opacity: v.fade }, { opacity: now }], { duration: 200, easing: EASE });
+    });
     side.querySelectorAll('.sb-row').forEach((r) => {
       const v = before.get(sideKey(r));
       if (!v) return;
@@ -3070,6 +3156,29 @@
     });
   }
   let sideHtml = '';
+  // Hovering a commit, in the Commits tab or in a chain's bar, dims the lines it didn't write (a
+  // rule on the rows' data-w, so no row is touched) and lights the commit in both places.
+  const litStyle = document.createElement('style');
+  document.head.appendChild(litStyle);
+  let litNow = null, litNext = null, litRaf = 0;
+  function lightCommit(ci) {
+    litNext = ci;
+    if (litRaf) return;
+    litRaf = requestAnimationFrame(() => {
+      litRaf = 0;
+      if (litNext !== litNow) {
+        litNow = litNext;
+        litStyle.textContent = litNow == null ? '' : `.vw-main .ln:not([data-w="${litNow}"]) > :not(.g), .vw-main .half:not([data-w="${litNow}"]) { opacity: .3; }`;
+        viewer.classList.toggle('w-lit', litNow != null);
+      }
+      viewer.querySelectorAll('.wb-seg.hl, .cm-row.hl').forEach((el) => el.classList.remove('hl'));
+      if (litNow != null) viewer.querySelectorAll(`.wb-seg[data-ci="${litNow}"], .cm-row[data-ci="${litNow}"]`).forEach((el) => el.classList.add('hl'));
+    });
+  }
+  side.addEventListener('mouseover', (e) => { const r = e.target.closest('.cm-row[data-ci]'); lightCommit(r ? Number(r.dataset.ci) : null); });
+  side.addEventListener('mouseleave', () => lightCommit(null));
+  main.addEventListener('mouseover', (e) => { const sg = e.target.closest('.wb-seg[data-ci]'); lightCommit(sg ? Number(sg.dataset.ci) : null); });
+  main.addEventListener('mouseleave', () => lightCommit(null));
   // The Files tab: folders first, then files, by name. A folder that holds only a folder shows
   // with it ("lib/src/mcp"), as VS Code compacts them; lines mark the levels.
   function fileTree(files) {
@@ -3203,7 +3312,7 @@
     const pk = main.querySelector('.peek');
     if (pk) { const r = pk.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.peek = { el: pk, place: placeOf(pk.previousElementSibling), h: r.height, gap: gapOf(pk), anchor: peekKey(shownPeek) }; }
     const dt = main.querySelector('.hs-detail');
-    if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt) }; }
+    if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt), place: placeOf(dt.previousElementSibling) }; }
     main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
     return snap;
   }
@@ -3288,7 +3397,8 @@
     }
     shownPeek = state.peek;
   }
-  // A commit's details open downward from its row, and fold back into it when they close.
+  // A commit's details open downward from its row (in a chain, from what's above them), and fold
+  // back into it when they close.
   function detailMotion(snap) {
     const el = main.querySelector('.hs-detail');
     const was = snap.detail && snap.detail.sha, now = el && el.dataset.detailOf;
@@ -3299,7 +3409,7 @@
       el.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 200, easing: EASE }).finished.then(open, open);
     }
     if (was && was !== now) {
-      const row = main.querySelector(`.hs-main[data-detail="${CSS.escape(was)}"]`)?.closest('.hs-row');
+      const row = main.querySelector(`.hs-main[data-detail="${CSS.escape(was)}"]`)?.closest('.hs-row') || (!snap.detail.el.matches('.solo') ? null : snap.detail.place());
       if (row) { const g = closeGap(row, snap.detail.gap, [snap.detail.el]); g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' }); }
     }
   }
@@ -3706,7 +3816,7 @@
   function goChain(step) {
     const nx = nextUnreviewed(step);
     if (!nx) return toast('Everything is reviewed.');
-    state.view = nx; state.peek = null; state.focus = null; state.tab = 'chains';
+    state.view = nx; state.peek = null; state.focus = null; toChains();
     render({ top: true });
   }
   // The keys, on ?.
@@ -4315,7 +4425,7 @@
       HX.anchor = HX.index.get(d.detail);
       return render({ reveal: !!HX.detail });
     }
-    if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); }
+    if (d.chain !== undefined && !d.act) { state.view = { kind: 'chain', id: Number(d.chain) }; state.peek = null; state.focus = null; toChains(); return render({ top: true }); }
     if (d.standalone) { state.view = { kind: 'standalone' }; state.peek = null; return render({ top: true }); }
     if (d.open !== undefined && !d.act) return openFile(d.open, d.line);
     if (d.group !== undefined && !d.act) { state.view = { kind: 'group', id: Number(d.group) }; state.peek = null; return render({ top: true }); }
@@ -4332,8 +4442,29 @@
       state.view = { kind: 'chain', id: Number(d.chainId) }; state.peek = null; state.focus = null;
       return render({ top: true });
     }
-    if (act === 'hd-close') { HX.detail = null; return render(); }
-    if (act === 'hd-go') { HX.detail = d.sha; HX.anchor = HX.index.get(d.sha); return render({ reveal: true }); }
+    if (act === 'hd-close') { if (state.view.kind === 'chain') state.card = null; else HX.detail = null; return render(); }
+    // A parent's details are in History.
+    if (act === 'hd-go') {
+      if (state.view.kind !== 'history') { state.view = { kind: 'history' }; state.peek = null; state.focus = null; loadCommits(); }
+      HX.detail = d.sha; HX.anchor = HX.index.get(d.sha);
+      return render({ reveal: true });
+    }
+    // A chain's commit card opens under its header, which may be scrolled away: it lands in view.
+    if (act === 'card') {
+      state.card = state.card === d.sha ? null : d.sha;
+      if (state.peek && state.peek.history) state.peek = null;
+      render();
+      const el = state.card && main.querySelector('.hs-detail');
+      if (el && el.getBoundingClientRect().top < main.getBoundingClientRect().top + headH()) landAt(el.previousElementSibling || el, headH() + 8);
+      return;
+    }
+    if (act === 'show-commits') {
+      state.tab = 'commits';
+      loadCommits();
+      if (UI.sideOff) toggleSide();
+      return render();
+    }
+    if (act === 'wb-seg') return lensCommit(d.sha, e.shiftKey);
     if (act === 'hd-view') { UI.filesList = d.v === 'list'; saveUI(); return render(); }
     if (act === 'hd-dir') {
       HX.closed.has(d.key) ? HX.closed.delete(d.key) : HX.closed.add(d.key);
@@ -4399,7 +4530,7 @@
       const id = Number(d.to), to = M().chains[id];
       if (!to) return;
       const i = to.graph.nodes.findIndex((n) => n.blocks.includes(d.block));
-      state.view = { kind: 'chain', id }; state.peek = null; state.focus = null; state.tab = 'chains';
+      state.view = { kind: 'chain', id }; state.peek = null; state.focus = null; toChains();
       return render(i >= 0 ? { section: i } : { top: true });
     }
     if (act === 'to-node') {
@@ -4478,7 +4609,7 @@
     if (act === 'mark-edits') { const ids = d.edits.split(' ').map(Number); setEdits(ids, !ids.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'toggle-member') { state.memberOpen.has(d.key) ? state.memberOpen.delete(d.key) : state.memberOpen.add(d.key); return render(); }
     if (act === 'note-more') { const id = Number(d.family); state.noteOpen.has(id) ? state.noteOpen.delete(id) : state.noteOpen.add(id); return render(); }
-    if (act === 'next-open') { const nx = nextUnreviewed(); if (nx) { state.view = nx; state.peek = null; state.focus = null; state.tab = 'chains'; return render({ top: true }); } return; }
+    if (act === 'next-open') { const nx = nextUnreviewed(); if (nx) { state.view = nx; state.peek = null; state.focus = null; toChains(); return render({ top: true }); } return; }
     if (act === 'mark-group') { const g = m.groupById.get(Number(d.groupId)); setEdits(g.edits, !g.edits.every((x) => rev().has(x))); hint({ mark: [] }); return render(); }
     if (act === 'group-all') { state.groupAll.add(d.key); return render(); }
     if (act === 'mark-usages') {
@@ -4507,6 +4638,7 @@
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
       if (state.peek) { state.peek = null; return render(); }
       if (HX && HX.detail && state.view.kind === 'history') { HX.detail = null; return render(); }
+      if (state.card && state.view.kind === 'chain' && main.querySelector('.hs-detail')) { state.card = null; return render(); }
       if (state.lens) return setLens(null);
       return;
     }

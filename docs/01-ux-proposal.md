@@ -317,11 +317,27 @@ commit is the one boundary its author declared; the review collapses its back-an
      would repeat it; a test commit can use twenty or more. It matters for the links to later
      chains, about half of them in a messy history, which the note names as such.
 7. **Display.** A chain is named after the commit that started it and opens with its
-   message, its follow-ups, the commits that changed its lines later, and what it builds on
-   or changes. The sidebar lists the chains in commit order, then the renames. The chain map
+   message. The sidebar lists the chains in commit order, then the renames. The chain map
    shows each commit's chain after the chains it builds on or whose lines it changes. Each
    test file's new tests and their setup are one node, read whole, and a chain's root is
    production code before tests.
+8. **Who wrote a chain.** Its commits are shown, not told: a thin bar, pinned under the
+   chain's members, has a part for each commit that last wrote some of its changed lines,
+   oldest first, as wide as its share, the chain's own commits (its first and follow-ups)
+   lighter. A chain one commit wrote has no bar.
+   - Hovering a part dims the lines that commit didn't write; clicking it makes the commit the
+     lens, as History's chips do.
+   - Beside it: how many commits; "Also in N chains", the other chains the chain's own
+     commits wrote lines in, each opening that chain through the commit, with its changes
+     there as History's chips count them; and "Commit details", History's card in place.
+   - The Commits tab follows the chain open: its commits say in how many of its changes they
+     wrote, its own commits are ringed, the others fade. Hovering a commit there dims the
+     lines it didn't write, and going from chain to chain keeps the tab.
+   - No chips for the commits: they compete with the members' chips, crowd the chains with
+     many commits, where by commit helps most, and "Changes from" already picks commits.
+   - Every number counts blame's lines, as the lens does; provenance decides only the
+     families and the map's order. Blame ignores whitespace, so a commit that re-indents a
+     line leaves it with the commit that wrote it.
 
 ### Same change
 
@@ -741,6 +757,20 @@ through the page.
   - Asked: show the linked change in place rather than first or last in the chain, and say
     whether its chain comes before or after. Done: the change in a peek.
   - Validation: [02-test-runs.md](02-test-runs.md#2026-10-16-one-chain-per-commit).
+- **v20:** a chain's commits shown rather than told. Its note's sentences ("Changed later by",
+  "Changes the lines of") were slow to scan, named only later commits, and counted lines no
+  view could show.
+  - Six ways were drawn on offline_sync #168: chips for the commits, a bar of who wrote the
+    lines, "Changes from" narrowed to the chain, History's rows in the chain, a Commits tab
+    that follows the chain, and notes on lines from other commits.
+  - Asked: no chips, since they compete with the members' chips and crowd long chains, and
+    the top bar already picks commits. Keep the bar, pinned with the members, with "Also in
+    N chains" and History's card; make the Commits tab follow the chain; and dim, while a
+    commit is hovered, the lines it didn't write. Done: [Who wrote a chain](#chains-by-commit).
+  - Found: blame credited re-indented lines to the commit that re-indented them. On #168,
+    a test refactor wrote 100 of the 112 lines of another commit's chain by plain blame; with
+    whitespace ignored, that chain's commit keeps 64 and the refactor 12. Blame now ignores
+    whitespace, for the lens too.
 
 ## References
 

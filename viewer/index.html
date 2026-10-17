@@ -319,6 +319,22 @@ button.sb-group:hover { color: var(--text-2); }
 .node.root.here { box-shadow: inset 0 0 0 1px var(--text-3); }
 .fv-head .strip { padding-bottom: 12px; }
 .strip .arr { color: var(--text-3); font-size: 13px; }
+/* By commit, under a chain's members: who wrote its lines, a thin bar of one part per commit
+   (taller than it looks, to be easy to point at), then how many commits and where else they wrote. */
+.wb { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; max-width: min(1040px, 100%); padding: 0 14px 10px 22px; margin-top: -2px; }
+.fv-head .strip + .wb { margin-top: -4px; }
+.wb-bar { display: flex; gap: 2px; flex: 1 1 260px; min-width: 160px; height: 18px; margin-right: 8px; }
+.wb-seg { appearance: none; position: relative; flex: 1 1 0; min-width: 4px; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+.wb-seg::before { content: ""; position: absolute; left: 0; right: 0; top: 7px; height: 4px; border-radius: 2px; background: var(--text-4); transition: background-color var(--fast) var(--ease), opacity var(--fast) var(--ease), transform var(--fast) var(--ease); }
+.wb-seg.own::before { background: var(--text-2); }
+.wb-seg:hover::before, .wb-seg.hl::before { background: var(--text); transform: scaleY(1.5); }
+.wb-seg.in::before { background: var(--accent); }
+.vw.w-lit .wb-seg:not(.hl):not(.in)::before { opacity: .4; }
+.wb-seg:focus-visible { outline-offset: 0; border-radius: 3px; }
+.wb .lnk { height: 26px; font-size: 12px; }
+.wb-n { padding: 0 8px; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.wb .lnk[aria-expanded="true"] { color: var(--text); background: var(--raised); }
+.wb .lnk svg { width: 12px; height: 12px; }
 .lnk { appearance: none; border: 0; background: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 7px; color: var(--text-2); font: 500 12.5px/1 var(--ui); cursor: pointer; }
 .lnk:hover, .lnk[aria-pressed="true"] { color: var(--text); background: var(--raised); }
 .lnk svg { width: 13px; height: 13px; }
@@ -364,6 +380,7 @@ button.sb-group:hover { color: var(--text-2); }
 
 /* ---- The commits. A lens: lines outside it fade, and a member with nothing in it steps back. */
 .ln.lens-out, .half.lens-out, .sl.lens-out > .g { opacity: .36; }
+.vw.w-lit .vw-main .ln > :not(.g), .vw.w-lit .vw-main .half { transition: opacity var(--fast) var(--ease); }
 .sec.lens-out > .sec-h { opacity: .5; }
 .mk.out { box-shadow: inset 0 0 0 1.5px var(--text-4); background: none; }
 .sb-row.lens-out .nm, .node.lens-out .nm { color: var(--text-4); }
@@ -439,6 +456,12 @@ button.sb-group:hover { color: var(--text-2); }
 .cm-m code, .hs-m code, .cm-start code, .hs-start code, .hs-sub code { font: 500 10.5px var(--code); color: var(--text-3); }
 .cm-n { grid-row: 1 / span 2; grid-column: 3; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .cm-n.left { color: var(--accent-ink); }
+/* The list follows the chain open: its commits stand out (one of its own is ringed), the rest fade. */
+.cm-list.follow .cm-row:not(.mine) { opacity: .38; }
+.cm-list.follow .cm-row:not(.mine):hover, .cm-list.follow .cm-row:not(.mine):focus-visible { opacity: .8; }
+.cm-row.hl { background: var(--hover-soft); }
+.cm-m b { font-weight: 600; color: var(--text-2); }
+.lanes .ring { fill: none; stroke: var(--text-2); stroke-width: 1.2; }
 .cm-n.ok, .hs-n.ok { color: var(--done); display: grid; }
 .cm-n.ok svg, .hs-n.ok svg { width: 12px; height: 12px; }
 .cm-row.gone .cm-s, .cm-row.old-head .cm-s { color: var(--text-3); }
@@ -489,6 +512,10 @@ button.sb-group:hover { color: var(--text-2); }
 .hs-row.open { background: var(--raised); border-radius: 8px 8px 0 0; }
 .hs-row.open.in { background: var(--accent-soft); }
 .hs-detail { display: grid; grid-template-columns: auto minmax(0, 1fr); margin-bottom: 8px; border-radius: 0 0 8px 8px; background: var(--raised); }
+/* In a chain, the card opens on its own under the commit's message. */
+.hs-detail.solo { position: sticky; left: 0; grid-template-columns: minmax(0, 1fr); max-width: min(1100px, calc(100% - 44px)); margin: 0 22px 14px; border-radius: 8px; }
+.hs-detail.solo .hd-in { border-top: 0; }
+.hs-detail.solo .hd-info { padding-left: 18px; }
 .lanes-v { position: relative; align-self: stretch; }
 .lanes-v i { position: absolute; top: 0; bottom: 0; width: 1.5px; margin-left: -.75px; background: #4A4A55; }
 .lanes-v i.side { background: #6F6F7A; }

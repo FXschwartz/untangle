@@ -11,8 +11,10 @@ The rules and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md)
 With `-chains history`, chains follow the commits instead. Each commit and the commits that
 followed it up are one chain, however large, named after it and opening with its message;
 later edits to its lines collapse into it, so back-and-forths don't repeat. Only renames keep
-their own chains, and a change that uses a function another commit changed links to it. The
-rules are in [Chains by commit](docs/01-ux-proposal.md#chains-by-commit).
+their own chains, and a change that uses a function another commit changed links to it. A thin
+bar under a chain's members shows which commits wrote its lines, and the Commits tab marks them;
+hovering a commit dims the lines it didn't write. The rules are in
+[Chains by commit](docs/01-ux-proposal.md#chains-by-commit).
 
 New classes, models and functions are read whole. A reading unit is not automatically a chain:
 self-contained new code stays in the file review, and chains connect multiple nodes. New code
