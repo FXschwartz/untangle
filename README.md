@@ -2,34 +2,39 @@
 
 Review a pull request chain by chain, in your browser.
 
-untangle opens a review on a map of chains: each chain follows one change across files (a new
-parameter, the calls that now pass it, the function that had to take a parameter in turn). Every
-chain, group and count comes from fixed rules over git and Dart analyzer facts, with tree-sitter
-for fine-grained edit shapes.
+untangle opens a review on a map of chains. Every chain, group and count comes from fixed rules
+over git and Dart analyzer facts, with tree-sitter for fine-grained edit shapes.
 The rules and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md).
 
-With `-chains history`, chains follow the commits instead. Each commit and the commits that
-followed it up are one chain, however large, named after it and opening with its message;
-later edits to its lines collapse into it, so back-and-forths don't repeat. Only renames keep
-their own chains, and a change that uses a function another commit changed links to it. A thin
-bar under a chain's members shows which commits wrote its lines, and the Commits tab marks them;
-hovering a commit dims the lines it didn't write. The rules are in
-[Chains by commit](docs/01-ux-proposal.md#chains-by-commit).
+Chains follow the commits. Each commit and the commits that followed it up are one chain, however
+large, named after it and opening with its message; later edits to its lines collapse into it, so
+back-and-forths don't repeat. Only renames keep their own chains, and a change that uses a
+function another commit changed links to it. A thin bar under a chain's members shows which
+commits wrote its lines, and the Commits tab marks them; hovering a commit dims the lines it
+didn't write. The rules are in [Chains by commit](docs/01-ux-proposal.md#chains-by-commit).
 
-New classes, models and functions are read whole. A reading unit is not automatically a chain:
+With `-chains structure`, or when the commits can't be replayed, chains follow the code alone:
+each chain follows one change across files (a new parameter, the calls that now pass it, the
+function that had to take a parameter in turn). A reading unit is not automatically a chain there:
 self-contained new code stays in the file review, and chains connect multiple nodes. New code
 forms chains through resolved dependencies across files, without collecting the independent
-consumers of shared utilities. New tests keep each complete scenario together. Existing-code
-changes still follow their signature, rename and call-site chains. Counts and keyboard navigation
-use reading units; individual edit marks and saved reviews remain available underneath.
+consumers of shared utilities. Existing-code changes follow their signature, rename and call-site
+chains.
+
+New classes, models and functions are read whole, and new tests keep each complete scenario
+together. Counts and keyboard navigation use reading units; individual edit marks and saved
+reviews remain available underneath.
 
 Tests read as the sentences they assert: a test's group and test titles join into one ("Given …,
 when …, then …."). A chain shows each test file it changes as an outline of those sentences,
 nested as the calls nest: what changed reads bright, the groups that complete each sentence
-dimmed, a rewording with its changed words marked. A row opens its code in place; ↗ opens the
-file with the test's groups pinned above the code. The Tests view, under History, lists every
-sentence the pull request adds, rewords, regroups or removes, each with the commit that wrote it.
-The rules are in [Tests as sentences](docs/01-ux-proposal.md#tests-as-sentences).
+dimmed, a rewording with its changed words marked. A Given or when without `setUp` or
+`setUpAll` carries a red dot, and hovering a row shows a test's expect calls and the row's lines
+(+X −Y).
+A row opens its code in place; ↗ opens the file with the test's groups pinned above the code. The
+Tests view, under History, lists every sentence the pull request adds, rewords, regroups or
+removes, each with the commit that wrote it. The rules are in
+[Tests as sentences](docs/01-ux-proposal.md#tests-as-sentences).
 
 ```
 untangle [flags] [directory]
@@ -88,14 +93,17 @@ The tests use Node's runner (`node:test`) and need Node 22.18 or later, which ru
    JavaScript retains the compact facts the review needs; the analyzer exits before grouping.
 3. **Analysis.** The rules in [analysis/analyze.js](analysis/analyze.js) use these facts to build
    whole declaration reading units, chains and the chain map. Tree-sitter still supplies atomic
-   edit shapes, preserving edit identities and saved marks. With `-chains history`, the
-   branch's commits are replayed first, so each changed line knows the commit that started it
+   edit shapes, preserving edit identities and saved marks. The branch's commits are replayed
+   first, so each changed line knows the commit that started it
    ([src/provenance.ts](src/provenance.ts)), and chains follow those commits
-   ([analysis/commits.js](analysis/commits.js)).
+   ([analysis/commits.js](analysis/commits.js)); `-chains structure` skips them.
    [analysis/outline.js](analysis/outline.js) outlines each test file's group and test calls,
    both sides matched, so tests read as sentences.
-4. **Serving.** The page shows progress while the review builds, then the review. The existing
-   language server starts after the review is ready to serve live navigation requests.
+4. **Serving.** While the review builds, the page lists the steps the build runs, with their
+   times: what each is doing, the analyzer's files read with about how long is left, the steps a
+   cache spares, and a bar for the whole build. It hears of each change as it happens, then the
+   review replaces it. The existing language server starts after the review is ready to serve
+   live navigation requests.
 
 Analyzer facts and the completed analysis are cached per pair of commits, so reopening a review
 reuses the result. Changes to grouping rules can reuse the facts without starting an analyzer.
@@ -117,18 +125,25 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
     repository at the head or the base (`git grep`).
   - **Keys:** j and k for the next and previous change to review, Space to mark it and go on,
     Shift+Space for its hunk (its member, in a chain), n and p for the next and previous chain
-    with changes to review, c to comment on the line, Ctrl B for the sidebar, Esc to close; `?`
-    lists them.
+    with changes to review, g for the chain's graph, c to comment on the line, Ctrl B for the
+    sidebar, Esc to close; `?` lists them.
+  - **Back** returns to the view before, scrolled where it was: the arrow before the
+    breadcrumb, or the browser's Back (Alt ←, a mouse's back button), since each view the page
+    moves to is a step in the browser's history.
   - **A view's header** is one row: where you are (Map / chain, or Files / folder / file), what
-    it holds, ↑ and ↓ for every change, a chain's graph button, a ⋯ menu, and the view's one
+    it holds, in a chain the member you're reading ("Reading `merge` · 4 of 16"), ↑ and ↓ for
+    every change, the chain's graph button, a ⋯ menu, and the view's one
     action (Mark chain reviewed). The menu holds open in the editor, the whole file, side by
     side, the diffs of reviewed code, the minimap, a comment on the file and the chains a chain
     uses or is used by. A file's "In 3 chains" lists its chains.
-  - **A chain** shows its members as a row of pills, by level, each with what's left in it,
-    pinned under the header with the one you're reading marked: click one, then another, without
-    scrolling back. Its graph is above the code (the header's button hides it, and the browser
-    keeps that): clicking a member shows only its code, without moving the page, and names what
-    its arrows use. A member's counts and "Mark reviewed" show on hover.
+  - **A chain's graph** hangs from the header. At the top of the chain it's open in the page,
+    and it shrinks into the header's graph button as the code scrolls it away. Anywhere else,
+    hover the button and the graph drops over the code, centered on the member you're reading
+    and ringed; click it (or press `g`) and it stays until you pick a member, click elsewhere,
+    press Esc or scroll. A member's click goes to its code; Shift-click shows only its code,
+    without moving the page, and names what its arrows use. In a file whose changes are in
+    chains, the button drops the graph of the line's chain, with a tab per chain. A member's
+    counts and "Mark reviewed" show on hover.
 - **The code** has one gutter: the review mark (muted until the pointer is on its line), one
   line number (the old one, in red, for a removed line) and the sign. Same changes elsewhere and
   changed usages are grey notes at the line's end.
@@ -148,19 +163,25 @@ diff. The interface is set in Schibsted Grotesk and code in JetBrains Mono, both
   opens on its own with the lines the review changes marked. Names in them go to definition.
 - **The Files tab** is a folder tree, folders first; a folder holding only one folder shows with
   it (`lib/src/mcp`), as VS Code compacts them.
+- **The sidebar's tabs** keep their views at the top, over a line: the chain map, History and
+  Tests above the chains; History and the lens's presets above the commits. Hovering a chain, a
+  file, a folder or a commit shows the lines it adds and removes in place of its count.
 - **Panels:** drag the sidebar's edge to resize it (double-click it, or Ctrl B, to hide it). A
   **minimap** at the right of the code shows the view small, with the diff's colors, amber for
   what's left to review and blue for threads; click or drag it to move. Both are kept in the
   browser.
 - **Motion:** marking a hunk reviewed fills its check, settles its diff and folds it into its
   divider while the code below glides up; lines shown from a divider open downward from it; a
-  peek grows from its line; going to a change scrolls to it and pulses it. After a refresh, the
+  peek grows from its line; a test's code opens downward from its row and folds back into it;
+  the chain's graph drops from the header and folds back up by the same motion reversed; going
+  to a change scrolls to it and pulses it. After a refresh, the
   lines the new commits changed glow once. With "reduce motion" set in the system, none of it.
 - **Highlighting** with [Shiki](https://shiki.style): VS Code's grammars and its Dark+ theme.
   Names a grammar leaves plain (variables, properties, parameters) are colored as VS Code's
   semantic highlighting does.
-- **The language server's dot** in the top bar: green when it's up; hover for its process id,
-  and untangle's and the language server's memory and CPU, as px0 shows them.
+- **The language server's dot** in the top bar: green when it's up, beside the memory and CPU
+  that untangle and the language server use together ("721 MB · 0.3%"); hover for its process
+  id and each one's memory and CPU, as px0 shows them.
 - **Open in editor** from a view's ⋯ menu and from peeks: a `vscode://` link by default (through WSL
   when untangle runs there), or `-editor` with a command such as `code -g {file}:{line}:{col}`
   or a URL template such as `cursor://file{file}:{line}:{col}`.

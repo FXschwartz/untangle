@@ -31,7 +31,8 @@ From the review of v3:
 - **Syntax highlighting** must be clearly visible.
 - **The palette is dark,** black and dark grey instead of blue.
 - **Each chain shows its total diff.**
-- **Clicking a graph node focuses on it and filters the code** instead of jumping to it.
+- **Clicking a graph node focuses on it and filters the code** instead of jumping to it. (Since
+  v22, with the chips gone, a click goes to the member, as theirs did, and Shift-click filters.)
 - **Chains form a hierarchy,** shown as a chain-of-chains view.
 - **Folding one hunk must never fold another.**
 
@@ -110,7 +111,9 @@ From the review of v11:
    - each `test(...)`, `group(...)`, `setUp...` or `tearDown...` call.
    A unit starts at its doc comments and annotations. Members written right under each
    other, with no blank line, stay together. A block with removed and added lines keeps its
-   removed lines with the added lines they were diffed against.
+   removed lines with the added lines they were diffed against. Blank lines are never a block
+   of their own: blank lines before a unit go with it, and a block's mark sits on its first line
+   that isn't blank.
 2. **Reading units.** A fully introduced declaration is read in source order as one change:
    a class, mixin, enum, extension, type alias, function, method, top-level binding or
    configured YAML model. A class includes its constructor, fields and methods. This applies
@@ -273,8 +276,9 @@ From the review of v11:
 
 ### Chains by commit
 
-With `-chains history`, chains follow the commits instead of the code's structure alone. A
-commit is the one boundary its author declared; the review collapses its back-and-forths.
+Chains follow the commits rather than the code's structure alone, unless `-chains structure`
+asks for the code's (or the commits can't be replayed). A commit is the one boundary its author
+declared; the review collapses its back-and-forths.
 
 1. **Provenance.** The review's first-parent commits are replayed from where the branch
    started (`src/provenance.ts`). Every line carries its **origin**, the commit that first
@@ -322,7 +326,7 @@ commit is the one boundary its author declared; the review collapses its back-an
    test file's new tests and their setup are one node, read whole, and a chain's root is
    production code before tests.
 8. **Who wrote a chain.** Its commits are shown, not told: a thin bar, pinned under the
-   chain's members, has a part for each commit that last wrote some of its changed lines,
+   header, has a part for each commit that last wrote some of its changed lines,
    oldest first, as wide as its share, the chain's own commits (its first and follow-ups)
    lighter. A chain one commit wrote has no bar.
    - Hovering a part dims the lines that commit didn't write; clicking it makes the commit the
@@ -368,8 +372,9 @@ and reviewing a test starts there: the code is there to confirm it.
    - Unchanged siblings fold under "+N unchanged whens"; code edited under sentences that stay
      (setup, bodies) follows the outline, and changes outside every call (imports, helpers)
      come last, both open: they're the chain's code.
-   - A row opens its code in place: a test its whole body, a group its own lines with its calls
-     folded to their titles. ↗ opens the file at the call.
+   - A row opens its code in place, with the lines it removed beside the ones it has: a test
+     its whole body, a group its own lines with its calls folded to their titles. Blank lines
+     between folded calls don't show. ↗ opens the file at the call.
    - A rewording marks the words that changed. A title with two clauses ("when …, then ….") is
      one row.
    - A same change keeps its places; a rename chain reads as before.
@@ -378,16 +383,24 @@ and reviewing a test starts there: the code is there to confirm it.
    own lines and title.
 7. **The Tests view,** under History in the sidebar: every sentence the review's tests add,
    reword, regroup or remove, file by file, each with the commit (or chain) that wrote it, which
-   opens that chain at the row. Filters keep one kind; Sentences shows each test as its whole
+   opens that chain at the row. Filters keep one kind, each with its count (one with none is
+   off); Sentences shows each test as its whole
    sentence, a renamed group's changed words on the first test it heads. Files that change no
    sentence come last, in one row that opens.
 8. **Pinned groups.** Over a test file's code, in any view, and over an outline, the groups of
    the line at the top of the view whose own lines have scrolled away stay pinned under the
    header, with the test's title when the line is in its body.
+9. **What a row says besides its sentence.** A Given or a when that calls neither `setUp` nor
+   `setUpAll` itself has a red dot. Hovering a row shows, beside the commit that wrote it, a
+   test's expect calls (`expect` and `expectLater` called by name, not in comments), muted, and
+   the diff's lines in the call (+X −Y; in a chain, the chain's). Their room is kept, so nothing
+   moves under the pointer. ↗ is drawn with strokes that stay whole at any zoom.
 
 On offline_sync #168, 3,460 changed test lines fit in 137 rows: 70 new sentences, 6 reworded, 3
 regrouped and 1 removed, in 8 of its 43 test files. The other 35 change no sentence: 134 calls
 with edited setup or bodies. 16 of the new sentences had a Given or when their chain didn't show.
+424 of its 425 Givens and whens set up in `setUp` or `setUpAll`; the other declares its state
+in the group's body.
 
 ### Same change
 
@@ -455,6 +468,9 @@ with edited setup or bodies. 16 of the new sentences had a Given or when their c
   holds, ↑ and ↓ for every change, a ⋯ menu (open in the editor, the whole file, side by side,
   the diffs of reviewed code, the minimap, a comment on the file, the chain map, uses and used
   by), and the view's one action. A file's chains are one control, "In 3 chains".
+- **Back:** each view the page moves to is a step in the browser's history. Once the page has
+  moved, an arrow before the breadcrumb ("Back to Tests") returns to the view before, scrolled
+  where it was, with its sidebar tab; so do the browser's Back, Alt ← and a mouse's back button.
 - **One gutter:** the review mark, muted until the pointer is on its line; one line number
   (the old one, in red, for a removed line); the sign. Same changes elsewhere and changed usages
   are grey notes at the line's end. A hunk's divider shows "Mark hunk reviewed" on hover.
@@ -465,13 +481,22 @@ with edited setup or bodies. 16 of the new sentences had a Given or when their c
 - **Motion:** what changes moves from where it was to where it goes, in 120 to 280 ms, easing
   out. A reviewed hunk's check fills, its diff settles and it folds into its divider while the
   code below glides up; lines shown from a divider open downward from it; a peek, or a commit's
-  details, grows from where it was asked and folds back there when it closes; going to a change
-  scrolls to it and pulses it; landing further down the page jumps, then glides over the last
-  120 px; another view fades in. With "reduce motion", all of it is instant.
+  details, grows from where it was asked and folds back there when it closes; a test's code, or
+  what an outline's fold holds, opens downward from its row and folds back into it; going to a
+  change scrolls to it and pulses it; landing further down the page jumps, then glides over the
+  last 120 px; another view fades in (from above, going back). With "reduce motion", all of it is
+  instant.
 - **Panels:** the sidebar resizes from its edge and hides (Ctrl B); a minimap at the right of the
   code shows the view small, with what's left to review in amber and threads in blue.
 - **The Files tab is a folder tree,** folders first, with a folder that holds only one folder
   shown with it (`lib/src/mcp`), as VS Code compacts them.
+- **The sidebar's tabs pin their views** at the top, over a line, while the list scrolls: the
+  chain map, History and Tests above the chains; History, All changes and Since your review
+  above the commits. Hovering a chain, a file, a folder or a commit shows the lines it adds and
+  removes (+X −Y) in place of its count.
+- **The top bar's dot** (the language server: green, starting, failed) reads the memory and CPU
+  that untangle and its language server use together ("721 MB · 0.3%"), so a review's cost shows
+  at a glance; hovering it lists each one's.
 - **The pull request's comments, as on GitHub.** Threads show under their lines (a resolved one
   folds), with replies, reactions and suggestions. A Threads tab lists them, open ones first,
   with the conversation (description, comments, reviews). The **+** over a line starts a comment
@@ -481,12 +506,35 @@ with edited setup or bodies. 16 of the new sentences had a Given or when their c
 - **Refresh in place.** New commits on the pull request show as a banner with Refresh, as on
   GitHub. untangle builds the new review in the background, and the page reloads on the same
   view when it's ready.
-- **A chain's members** show as a row of pills by level, each with what's left in it, pinned
-  under the header with the member being read marked; clicking one scrolls to its code. The
-  graph draws them above the code, shown by default, with an icon in the header to hide it.
-  Clicking a graph node shows only that node's code and dims unrelated nodes, without scrolling,
-  so the graph stays under the pointer; the names its arrows stand for show then, in the gaps
-  between rows of nodes.
+- **While the review builds,** the page lists every step the build runs, in order, with their
+  times: a check for what's done, a turning mark and what it's doing for the step that runs (the
+  analyzer's files read, with a bar and about how long is left), "cached" for a step the cache
+  spares, and what's to come. A bar under the title fills by each step's usual share, and
+  through the analyzer by its files.
+  - It hears of each change as it happens: untangle answers its question when the build moves on.
+    New lines grow in, a finished step's check draws as its details fold, and the running step's
+    ground glides to the next one.
+  - It's 1,040 pixels wide, enough for a checkout's path on one line, and wraps a longer one at
+    its slashes. Then the review replaces it.
+- **A chain's graph hangs from the header** (v22), each member with what's left in it; there are
+  no member chips. The header names the member being read and its place ("Reading `merge` · 4 of
+  16"), beside the graph's button.
+  - At the top of a chain the graph is open under the header, in the page. As the code scrolls
+    it under the header, its last stretch shrinks toward the button, which pulses once it's gone;
+    scrolling back plays it back. A chain shorter than the pane gets room after its end, so it
+    can still scroll away, and a click on the button scrolls it away at once.
+  - Anywhere else, hovering the button drops the graph over the code from the pinned header (a
+    look: leaving the button and the graph lifts it), and a click keeps it down until a member's
+    click, a click elsewhere, Esc or scrolling. `g` does what the click does.
+  - It drops centered on the member being read, ringed in amber (in a "+N more" group, the
+    group). Its drop and its fold are one animation played forward and back, so a fold midway
+    goes back up from where it got to.
+  - Clicking a member goes to its code and pulses it. Shift-click shows only that member's code
+    and dims the unrelated ones, without scrolling, so the graph stays under the pointer; the
+    names its arrows stand for show then, in the gaps between rows of nodes.
+  - In a file whose changes are in chains, the button drops the graph of the chain of the line
+    being read, with a tab for each of the file's chains, and a member's click opens that chain
+    there.
 - **The commits** (v15, decided in v16): a Commits tab in the sidebar draws them as a graph,
   newest on top; the head commit in the top bar opens it as a popover too ("Changes from": the
   presets, then a line per commit). A History view shows each with what it touched, its checks
@@ -832,6 +880,37 @@ through the page.
     group's mark covering everything under it). Done: [Tests as sentences](#tests-as-sentences).
   - Found: the diff pairs closing braces freely, so an unchanged Given could own a stray `});`
     and show a setup change; lines that only close brackets don't count as a call's own.
+
+- **v22:** the Tests view and the sidebar, refined after use.
+  - Asked: a test's code opens and folds with motion; Back, to return after following a link;
+    the ↗ icon whole (drawn on its 16-pixel grid); a red dot on a Given or when without `setUp`
+    or `setUpAll`; each test's expect calls, muted; a row's lines on hover, in the Tests view
+    and on every sidebar row; the memory and CPU beside the dot; the views pinned at the top of
+    the Chains and Commits tabs. Done: [Tests as sentences](#tests-as-sentences) (rule 9) and
+    [Display](#display).
+  - Chosen: Back is the browser's history, so its Back button and a mouse's work too, and the
+    lens's "Since your review" stays pinned with "All changes" (they're one choice).
+  - Found: a group's code showed only its new lines, so a Given whose old setUp was removed
+    read "setup +7 −6" over additions alone (on #168, a "Given …, when …" group split in two:
+    its old setUp went with the old group). A call's code now shows the lines it removed too.
+    And a blank line before a new test was a change of its own, showing on its own between the
+    folded tests; it now goes with the test, and blank lines between folded calls don't show.
+  - Then the chain's graph, hanging from the header, drawn live on #168's `HlcManager._onUse`
+    in the review artifact: one graph instead of member chips (four rows, 148 of the header's 200
+    pixels there) and a graph above the code. Asked: build it as drawn, with the proposed
+    answers (the open graph pushes the code down and folds with the scroll, scrolling folds a
+    kept graph too, the header names the member being read, files get the button, big chains
+    keep their caps and pan), and the drop and the fold moving the same way both ways. Done:
+    [Display](#display). The code gets 904 of a 956-pixel pane at a time instead of 756.
+  - Found: at a short window's height, the sidebar's pinned views covered most of its list; its
+    top scrolls with the list below 560 pixels.
+  - Then chains follow the commits by default (`-chains structure` keeps the code's), and the page
+    that waits for the review, asked for motion, a better progress and room for paths: it lists
+    the steps to come and the ones a cache spares, counts the analyzer's files with about how long
+    is left, and is 1,040 pixels wide instead of 640. Done: [Display](#display).
+  - Found: the analysis holds Node's thread (3.3 s on #168), so the page's next question waited
+    and the step before it seemed to run on. The page now waits on untangle for each change, and a
+    step that holds the thread starts once untangle has told the page.
 
 ## References
 
