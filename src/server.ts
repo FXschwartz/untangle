@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { Duplex } from 'node:stream';
 import type { Status } from './narrate.js';
 
 export interface Api {
@@ -40,15 +41,23 @@ export interface ServerOptions {
 const MAX_BODY = 32 << 20;
 // How long the progress page's question waits for a change before it's answered anyway.
 const STATUS_WAIT = 15_000;
+// How often a page's presence socket hears from the server, so nothing between them drops it as idle.
+const SOCKET_BEAT = 15_000;
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 export class ReviewServer {
   readonly token = crypto.randomBytes(18).toString('base64url');
   private server: http.Server | null = null;
   private cookie = '';
-  // The pages open now, by the id each one made up, and the calls still being answered.
-  private pages = new Set<string>();
+  // The pages open now, by the id each one made up: the presence sockets each holds, and whether
+  // the browser froze it (asleep, it may be discarded without a word). And the calls still being
+  // answered.
+  private pages = new Map<string, { sockets: number; asleep: boolean }>();
   private calls = 0;
   private idleTimer: NodeJS.Timeout | null = null;
+  private closing = false;
+  // An upgraded socket is no longer the HTTP server's to close.
+  private sockets = new Set<Duplex>();
 
   constructor(
     private readonly opts: ServerOptions,
@@ -61,6 +70,7 @@ export class ReviewServer {
   /** Listens, and returns the URL to open (with the token). */
   async listen(): Promise<string> {
     const server = http.createServer((req, res) => this.handle(req, res).catch((e) => this.send(res, 500, 'text/plain', String(e && e.message))));
+    server.on('upgrade', (req, socket, head) => this.hold(req, socket, head));
     this.server = server;
     const tryPort = (port: number) => new Promise<number>((resolve, reject) => {
       const onError = (e: NodeJS.ErrnoException) => { server.off('listening', onListening); reject(e); };
@@ -82,8 +92,10 @@ export class ReviewServer {
   }
 
   close(): Promise<void> {
+    this.closing = true;
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
+    for (const socket of this.sockets) socket.destroy();
     return new Promise((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
@@ -91,10 +103,14 @@ export class ReviewServer {
     });
   }
 
-  // A page says when it opens and when it closes (a reload does both).
-  private presence(id: string, open: boolean) {
+  // A page says when it opens and when it closes (a reload does both), and when the browser
+  // freezes it (asleep).
+  private presence(id: string, open: boolean, asleep = false) {
+    if (this.closing) return;
     if (open) {
-      this.pages.add(id);
+      const page = this.pages.get(id);
+      if (page) page.asleep = asleep;
+      else this.pages.set(id, { sockets: 0, asleep });
       if (this.idleTimer) clearTimeout(this.idleTimer);
       this.idleTimer = null;
       return;
@@ -111,6 +127,52 @@ export class ReviewServer {
       }, ms);
     };
     wait(after);
+  }
+
+  // An open page holds a WebSocket at api/presence, which takes none of the browser's few
+  // connections to this host, and the browser drops it with the page. Some browsers drop a page
+  // without telling it (Orca's, as a tab closes): the drop alone closes the page, unless it said
+  // it's asleep.
+  private hold(req: http.IncomingMessage, socket: Duplex, head: Buffer) {
+    socket.on('error', () => {});
+    const url = new URL(req.url || '/', 'http://localhost');
+    const id = url.searchParams.get('id');
+    const key = req.headers['sec-websocket-key'];
+    const refuse = (status: string) => { socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); };
+    if (url.pathname !== `${this.opts.basePath}api/presence` || !id || typeof key !== 'string' || String(req.headers.upgrade).toLowerCase() !== 'websocket') return refuse('400 Bad Request');
+    if (!this.authorized(req)) return refuse('403 Forbidden');
+    if (this.closing) return refuse('503 Service Unavailable');
+    const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    this.sockets.add(socket);
+    this.log('page holds its socket');
+    if (!this.pages.has(id)) this.presence(id, true);
+    const page = this.pages.get(id);
+    if (page) page.sockets++;
+    // A ping now and then, so a proxy between them doesn't drop it as idle.
+    const beat = setInterval(() => socket.write(Buffer.from([0x89, 0])), SOCKET_BEAT);
+    // The page sends nothing but pongs and, as it goes, a close: answered in kind. A socket that
+    // sends more isn't a page's.
+    let pending = Buffer.alloc(0);
+    const read = (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      if (pending.length > 1 << 16) return socket.destroy();
+      for (let frame = wsFrame(pending); frame; frame = wsFrame(pending)) {
+        pending = pending.subarray(frame.size);
+        if (frame.opcode === 0x8) socket.end(Buffer.from([0x88, 0]));
+      }
+    };
+    socket.on('data', read);
+    if (head.length) read(head);
+    // The HTTP server keeps a socket open when the other side ends it: a page that ends it without
+    // a close (its browser gone) is gone too.
+    socket.on('end', () => socket.end());
+    socket.on('close', () => {
+      clearInterval(beat);
+      this.sockets.delete(socket);
+      this.log('page dropped its socket');
+      if (page && this.pages.get(id) === page && --page.sockets === 0 && !page.asleep) this.presence(id, false);
+    });
   }
 
   private send(res: http.ServerResponse, code: number, type: string, body: string, headers: Record<string, string> = {}) {
@@ -190,9 +252,9 @@ export class ReviewServer {
         }
       }
       if (route === 'api/presence' && req.method === 'POST') {
-        const said = body as { id?: unknown; open?: unknown } | null;
-        if (!said || typeof said.id !== 'string' || typeof said.open !== 'boolean') return this.json(res, 400, { error: 'say which page (id) and whether it is open' });
-        this.presence(said.id, said.open);
+        const said = body as { id?: unknown; open?: unknown; asleep?: unknown } | null;
+        if (!said || typeof said.id !== 'string' || typeof said.open !== 'boolean' || (said.asleep !== undefined && typeof said.asleep !== 'boolean')) return this.json(res, 400, { error: 'say which page (id) and whether it is open' });
+        this.presence(said.id, said.open, said.asleep === true);
         return this.json(res, 200, { pages: this.pages.size });
       }
       this.calls++;
@@ -208,6 +270,16 @@ export class ReviewServer {
     }
     return this.send(res, 404, 'text/plain', 'Not found');
   }
+}
+
+/** The opcode and size of the WebSocket frame at the start of `buf`, once it has all arrived. */
+function wsFrame(buf: Buffer): { opcode: number; size: number } | null {
+  if (buf.length < 2) return null;
+  const len = buf[1] & 0x7f, masked = buf[1] & 0x80 ? 4 : 0;
+  const head = 2 + (len === 126 ? 2 : len === 127 ? 8 : 0) + masked;
+  if (buf.length < head) return null;
+  const payload = len === 126 ? buf.readUInt16BE(2) : len === 127 ? Number(buf.readBigUInt64BE(2)) : len;
+  return buf.length < head + payload ? null : { opcode: buf[0] & 0x0f, size: head + payload };
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {

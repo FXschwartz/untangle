@@ -1,10 +1,27 @@
 // Talks to a review the way the page does: the printed link's token, then the cookie.
+import crypto from 'node:crypto';
+import http from 'node:http';
+
+/** The socket a page holds while it's open. */
+export interface PresenceSocket {
+  /** 101 once it's held, else the status of the refusal. */
+  status: number;
+  /** Drops the connection without a word, as a browser that destroys the page does. */
+  drop(): void;
+  /** Closes it as a browser does when the page goes: a close frame, answered in kind. */
+  close(): Promise<void>;
+  /** Settles once the connection has ended, whichever side ended it. */
+  ended: Promise<void>;
+}
+
 export interface ReviewClient {
   readonly token: string;
   open(): Promise<{ status: number; location: string | null; cookie: string | null; text: string }>;
   /** The page, after the token has been traded for a cookie. */
   page(): Promise<{ status: number; text: string }>;
   call(route: string, init?: { method?: string; body?: unknown; head?: string; query?: Record<string, string> }): Promise<{ status: number; text: string; data: unknown }>;
+  /** The presence socket of the page that made up this id. */
+  socket(id: string): Promise<PresenceSocket>;
 }
 
 export function reviewClient(pageUrl: string): ReviewClient {
@@ -51,6 +68,35 @@ export function reviewClient(pageUrl: string): ReviewClient {
         // A refusal is plain text.
       }
       return { status: res.status, text, data };
+    },
+    socket(id) {
+      return new Promise((resolve, reject) => {
+        const req = http.request({
+          host: url.hostname,
+          port: url.port,
+          path: `${base}api/presence?id=${encodeURIComponent(id)}`,
+          headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-version': '13', 'sec-websocket-key': crypto.randomBytes(16).toString('base64'), ...(cookie ? { cookie } : {}) },
+        });
+        req.on('upgrade', (res, socket) => {
+          socket.on('error', () => {});
+          // What the server sends (its pings, its close) is read and let go, so its end arrives.
+          socket.resume();
+          const ended = new Promise<void>((done) => socket.once('close', () => done()));
+          resolve({
+            status: res.statusCode ?? 101,
+            drop: () => socket.destroy(),
+            // A client's frames are masked: a close with an empty payload and a zero mask.
+            close: () => { socket.write(Buffer.from([0x88, 0x80, 0, 0, 0, 0])); return ended; },
+            ended,
+          });
+        });
+        req.on('response', (res) => {
+          res.resume();
+          resolve({ status: res.statusCode ?? 0, drop() {}, close: async () => {}, ended: Promise.resolve() });
+        });
+        req.on('error', reject);
+        req.end();
+      });
     },
   };
 }

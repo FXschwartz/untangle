@@ -712,10 +712,12 @@ untangle [flags] <pr-url>      # cloned into the cache first
     `vscode-jsonrpc`, the LSP layer VS Code is built on.
   - **Access:** localhost only, with a random token in the URL, as Jupyter does.
   - **Done when the page is:** each page (the startup page too) tells untangle when it opens and,
-    with a beacon, when it closes. Once the last one has closed and none opens within 5 s (a
-    reload), untangle answers the calls still pending (a mark saved as the page went) and stops.
-    A page the browser discards to save memory says nothing, so it keeps serving that one.
-    `-autoclose=false` keeps it serving until Ctrl+C.
+    with a beacon, when it closes. It also holds a WebSocket while it's open, since some browsers
+    destroy a closed tab's page without letting it say so (Orca's): the socket drops with it, and
+    that closes the page too. Once the last one has closed and none opens within 5 s (a reload),
+    untangle answers the calls still pending (a mark saved as the page went) and stops. A page the
+    browser freezes says it's asleep, since it may be discarded to save memory without a word, so
+    untangle keeps serving that one. `-autoclose=false` keeps it serving until Ctrl+C.
 - **Open in editor:** file headers and peeks link to the editor, `vscode://file/<path>:<line>`
   by default, or a command you configure.
 - **Static export:** `untangle -export` writes the page as one HTML file with everything
@@ -948,6 +950,13 @@ through the page.
   - Found: a click outside a peek that also opened something, such as another test in the Tests
     view, drew the page a second time right after, which cut the peek's fold short: it vanished.
     The second drawing now ignores the peek on its way out.
+  - Found: closing the review's tab in Orca's browser never stopped untangle. Orca closes a tab by
+    removing its webview, so the page gets no `pagehide` and sends no beacon; only its
+    connections drop. Switching tabs or worktrees keeps the page alive. Each page now holds a
+    socket, and its drop closes the page unless the browser froze it first. A first try held an
+    EventSource instead, but each one takes one of the six connections a browser opens to a host,
+    so six tabs of a review stalled its calls; a WebSocket takes none. Done: [Where it
+    runs](#where-it-runs).
 
 ## References
 

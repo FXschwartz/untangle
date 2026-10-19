@@ -62,6 +62,33 @@ describe('Given a review opened while it builds, as untangle serves it by defaul
     });
   });
 
+  describe('when six more pages of it open, ', () => {
+    let seen = '';
+
+    before(async () => {
+      seen = await read(page!, `(async () => {
+        const more = [1, 2, 3, 4, 5, 6].map(() => {
+          const frame = document.createElement('iframe');
+          frame.src = location.href;
+          document.body.appendChild(frame);
+          return frame;
+        });
+        await Promise.race([Promise.all(more.map((frame) => new Promise((resolve) => frame.addEventListener('load', resolve)))), new Promise((resolve) => setTimeout(resolve, 15000))]);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const call = await Promise.race([
+          fetch('api/presence', { method: 'POST', body: JSON.stringify({ id: 'none', open: false }) }).then((r) => r.json()).then((d) => d.pages + ' pages open, and a call answered'),
+          new Promise((resolve) => setTimeout(() => resolve('a call still waiting'), 5000)),
+        ]);
+        more.forEach((frame) => frame.remove());
+        return call;
+      })()`);
+    });
+
+    it('then its calls are still answered: what each page holds open takes none of the browser’s few connections to untangle.', () => {
+      assert.equal(seen, '7 pages open, and a call answered');
+    });
+  });
+
   describe('when the page is reloaded, ', () => {
     let seen = '';
 
@@ -133,6 +160,56 @@ describe('Given the startup page of a review, as untangle serves it by default, 
 
     it('then untangle stops a moment later: nobody waits for that review.', () => {
       assert.equal(seen, 'exit 0');
+    });
+  });
+});
+
+describe('Given a review open in a browser whose closing pages never tell untangle, as Orca’s does, ', { skip, timeout: 180_000 }, () => {
+  let repo: TempRepo | undefined;
+  let run: UntangleRun | undefined;
+  let page: Browser | undefined;
+  let cache = '';
+
+  before(async () => {
+    repo = TempRepo.create();
+    repo.write('pubspec.yaml', pubspec);
+    repo.write('lib/app.dart', "void greet() {\n  print('hi');\n}\n");
+    repo.commit({ subject: 'Start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write('lib/app.dart', "void greet() {\n  print('hello');\n}\n");
+    repo.commit({ subject: 'Say hello', author: ada, committer: ada });
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, autoclose: null, quiet: false });
+    page = await launchBrowser();
+    await page.goto(run.url);
+    await page.until(`!!document.getElementById('viewer') && !!document.querySelector('.vw-title')`, 120_000);
+    // What the page says as it goes never arrives: only its socket drops with it.
+    await page.eval(`(() => {
+      navigator.sendBeacon = () => true;
+      const send = window.fetch;
+      window.fetch = (url, init) => String(url).includes('api/presence') ? Promise.resolve(new Response('{}')) : send(url, init);
+    })()`);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when the page is closed, ', () => {
+    let seen = '';
+
+    before(async () => {
+      await page!.goto('about:blank');
+      const code = await Promise.race([run!.exited, sleep(20_000).then(() => 'still serving')]);
+      const said = run!.output().split('\n').filter((line) => line.includes('page closed')).map((line) => line.trim());
+      seen = [`exit ${code}`, ...said].join('\n');
+    });
+
+    it('then untangle stops a moment later all the same, and says why.', () => {
+      assert.equal(seen, 'exit 0\nThe review’s page closed, so untangle stops (-autoclose=false keeps it serving).');
     });
   });
 });
