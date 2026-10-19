@@ -4,6 +4,7 @@
 ![Node](https://img.shields.io/badge/node-%E2%89%A522-5FA04E.svg?logo=nodedotjs&logoColor=white)
 ![Dart SDK](https://img.shields.io/badge/dart-%E2%89%A53.12-0175C2.svg?logo=dart&logoColor=white)
 ![git](https://img.shields.io/badge/git-%E2%89%A52.40-F05032.svg?logo=git&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)
 
 Review a pull request by what changed, not file by file. `untangle` follows each change across
 files, reads a rename or a repeated edit once, keeps generated code out of the count, and
@@ -36,6 +37,7 @@ Dart, and opens in your browser.
   - [Storage](#storage)
   - [Development](#development)
   - [Credits](#credits)
+  - [License](#license)
 
 ---
 
@@ -348,4 +350,11 @@ with a stand-in for `gh`. A missing `dart` or Chromium skips the tests that need
 The page's icons are VS Code's [Codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0).
 Its faces are [Schibsted Grotesk](https://github.com/schibsted/schibsted-grotesk) and
 [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both under the SIL Open Font
-License 1.1, from [Fontsource](https://fontsource.org).
+License 1.1, from [Fontsource](https://fontsource.org). The grammar that colors Serverpod's
+models comes from Serverpod's VS Code extension, under the BSD 3-Clause License
+([viewer/syntaxes/serverpod.LICENSE.txt](viewer/syntaxes/serverpod.LICENSE.txt)).
+
+## License
+
+`untangle` is distributed under the MIT License. See the [LICENSE](LICENSE) file for more
+information. The icons, fonts and grammar above keep their own licenses.

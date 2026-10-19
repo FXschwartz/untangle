@@ -2,6 +2,7 @@
   "name": "untangle",
   "version": "0.1.0",
   "description": "Review a pull request chain by chain, in your browser.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {
