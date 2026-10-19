@@ -93,6 +93,8 @@ export async function buildReview(target: Target, opts: { noCache: boolean; labe
   if (cached && cached.version === modelVersion) {
     const data = readJson<ReviewData>(path.join(dir, `review${suffix}.json`));
     if (data) {
+      // The names are this run's: the same commits can come by a URL or a directory, and a title can change.
+      Object.assign(data.model.compares.base, { title: opts.title, label: opts.label });
       progress.note(`using the analysis cached in ${tilde(dir)}`);
       return { data, checkouts: null };
     }

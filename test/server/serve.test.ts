@@ -140,6 +140,27 @@ describe('Given a review untangle built once, into its cache, ', () => {
       assert.equal(text, "void greet() {\n  print('hello');\n}\n");
     });
   });
+
+  describe('when the same commits open from another branch, against the base given as a commit, ', () => {
+    let run: UntangleRun | undefined;
+    let names = '';
+
+    before(async () => {
+      repo!.branch('renamed');
+      run = await startUntangle(repo!.dir, { base, cacheDir: cache, gh, quiet: false });
+      const model = jsonScript(await waitForReview(reviewClient(run.url)), 'd-model') as { compares: { base: { title: string; label: string } } };
+      const cached = run.output().includes('using the analysis cached') ? 'from the cache' : 'built again';
+      names = `${cached}\n${model.compares.base.title}\n${model.compares.base.label}`;
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the page names the review as this run does, though its analysis comes from the cache.', () => {
+      assert.equal(names, `from the cache\nrenamed against ${base}\n${base.slice(0, 7)}`);
+    });
+  });
 });
 
 describe('Given reviewed marks, and untangle stopped, ', () => {
