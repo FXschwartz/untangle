@@ -22,6 +22,7 @@ Dart, and opens in your browser.
     - [Go to definition anywhere](#go-to-definition-anywhere)
     - [Tests as sentences](#tests-as-sentences)
     - [The commits, as a lens](#the-commits-as-a-lens)
+    - [Review with your agent](#review-with-your-agent)
     - [And more](#and-more)
   - [Getting started](#getting-started)
     - [1. Install the requirements](#1-install-the-requirements)
@@ -31,6 +32,7 @@ Dart, and opens in your browser.
     - [What it reviews](#what-it-reviews)
     - [Where it opens](#where-it-opens)
     - [Generated code](#generated-code)
+    - [With a coding agent](#with-a-coding-agent)
     - [Keys](#keys)
     - [Flags](#flags)
   - [How it works](#how-it-works)
@@ -125,6 +127,28 @@ replaced.
 
 ![The lens of commit 9c69d53: its lines bright, the rest faded, and 9 changes to review](docs/images/lens.png)
 
+### Review with your agent
+
+When an agent wrote the code, the review is a conversation with the agent. Set *Comments go to* to
+*Local notes* in the Review button's menu (the default without a pull request), and comments stay
+on your machine, numbered N1, N2…, in orchid under their lines. Ask the agent for a review and it
+runs [`untangle watch`](#with-a-coding-agent): the review opens (in Orca's browser inside Orca),
+your notes reach the agent as you write them, and its answers land in their threads, as comments
+on a Claude artifact do. Any agent that runs commands can, on any pull request or branch.
+
+When the agent commits, the page offers to refresh, and each note follows its lines: one whose
+lines changed says so, and keeps the lines it was written on. The agent can resolve what it fixed,
+and the note says who did. *Copy for agent* puts the notes on your clipboard as a prompt, for an
+agent you talk to in a chat, and *Post to GitHub* turns the open ones into your pending review.
+
+![Notes on #168's sync_streams.dart: Claude Code watching, its answers in the threads, a note changed since the head it was written on, and one it resolved](docs/images/notes.png)
+
+The menu keeps the line every copy opens with, and which notes it takes. *Live review* sends your
+notes and replies as you write them; turned off, they wait until you send them, like a pending
+review.
+
+![The Notes menu: Comments go to Local notes, Claude Code watching, Live review, the line for the agent, and Copy for agent](docs/images/notes-menu.png)
+
 ### And more
 
 - **The pull request's conversation**, through `gh`: threads under their lines, replies,
@@ -132,8 +156,8 @@ reactions and suggestions. Comment on a line, a range or a file, resolve threads
 review.
 - **Refresh in place.** When the pull request gets new commits, a banner offers to refresh. Marks
 carry over and unsent comments stay.
-- **Calm, and nothing jumps.** Amber marks what's left to review, a check what's done, and blue
-what comes from GitHub. Marking a hunk folds it while the code below glides up. Peeks grow from
+- **Calm, and nothing jumps.** Amber marks what's left to review, a check what's done, blue what
+comes from GitHub, and orchid your notes. Marking a hunk folds it while the code below glides up. Peeks grow from
 their line and fold back. With reduced motion set, none of it moves.
 - **A key for every step** of a review: see [Keys](#keys).
 - **Share it read-only:** `-export review.html` writes the review as one HTML file.
@@ -196,6 +220,7 @@ and `untangle` stops.
 ```
 untangle [flags] [directory]
 untangle [flags] <pr-url>
+untangle watch | reply | notes | stop ...
 ```
 
 ### What it reviews
@@ -238,6 +263,50 @@ adapters:
   protobuf: false
 ```
 
+### With a coding agent
+
+Ask your agent for an untangle review of its branch, and to answer your notes there. It runs:
+
+```sh
+untangle watch [directory | pr-url]
+```
+
+`watch` starts the review if it isn't running and opens its page, then waits for the notes and
+replies the agent hasn't read, prints them and exits. Exiting is what wakes an agent that runs it
+in the background, as Claude Code does; others run it again after each answer (`-timeout 9m` keeps
+it under a command's time limit). Its first output tells the agent how to go on:
+
+````
+$ untangle watch
+untangle: 3 notes you haven’t read, on marcelomendoncasoares/serverpod_offline_sync#168 at c754fb4. Line numbers are on that commit.
+
+Discuss these with me before changing anything.
+
+N1 · test/serverpod_offline_sync_test_server/test/integration/test_tools/sync_streams.dart:29
+In the change "Store the clock inside the write's savepoint in caller-owned transactions" (392b72b)
+```dart
+  Duration timeout = const Duration(seconds: 10),
+```
+Two waits of ten seconds each, for a round that never leaves memory. Would two seconds do, so a hung test fails fast?
+…
+untangle: you hold this code review. The person reviewing writes notes on the code in its page (http://127.0.0.1:7778/?token=…), and your answers show under them at once.
+untangle: each untangle watch waits for the notes and replies you haven’t read, prints them and exits: run it again after each answer, in the background if you can.
+untangle: answer in a note’s thread with untangle reply N2 'your answer'; add -resolve once you’ve made the change. Commit as you go: the page shows your commits, and the notes follow their lines.
+untangle: untangle notes prints the open notes again; untangle stop closes the review.
+````
+
+| Command                     |                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `untangle reply <N> <text>` | answer in note N's thread; `-resolve` resolves it too, once it's done           |
+| `untangle notes`            | print the open notes, as *Copy for agent* gives them (`-all`: the resolved too) |
+| `untangle stop`             | close the review; a waiting `watch` says so and exits                           |
+
+Each run of `watch` returns only what that agent hasn't read, a few seconds after the last note,
+so a burst arrives together. While an agent watches, untangle looks for its commits every few
+seconds instead of every two minutes. An answer is signed with the agent's name: `-agent <name>`,
+or Claude Code and Gemini CLI, known from their environment. The commands reach the review through
+a file in the cache that holds its port and token, so only your own processes can.
+
 ### Keys
 
 
@@ -249,7 +318,7 @@ adapters:
 | <kbd>n</kbd> <kbd>p</kbd>         | next and previous chain with changes to review                                    |
 | <kbd>g</kbd>                      | the chain's graph, over the code, and back                                        |
 | <kbd>Ctrl</kbd> <kbd>K</kbd>      | jump to a chain, file, symbol or thread                                           |
-| <kbd>c</kbd>                      | comment on the line you're on                                                     |
+| <kbd>c</kbd>                      | comment on the line you're on (a note, in local mode)                             |
 | <kbd>Alt</kbd> <kbd>←</kbd>       | back to where you were                                                            |
 | <kbd>Ctrl</kbd> <kbd>B</kbd>      | show or hide the sidebar                                                          |
 | <kbd>Esc</kbd>                    | close the peek, the palette, a menu or a commit's details; then turn the lens off |
@@ -319,6 +388,10 @@ plus every change you marked, so `git diff untangle/pr-<number> HEAD` shows what
   by `git worktree list`; `git worktree remove` or deleting the folder is safe.
   - `reviews/`: per pair of commits, the analyzer's facts, the review, and marks on parts of a
   change.
+  - `notes/`: your notes, per review like its branch (`notes/github.com/<owner>/<repo>/pr-<number>.json`),
+  with what each agent has read.
+  - `run/`: how to reach each review running now (its port and token), for `untangle watch`,
+  `reply`, `notes` and `stop`.
 
 ## Development
 
