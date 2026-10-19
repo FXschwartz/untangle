@@ -1,23 +1,67 @@
-# untangle
+# `untangle`
 
-Review a pull request by what changed, not file by file.
+![GitHub](https://img.shields.io/badge/GitHub-marcelomendoncasoares-181717.svg?style=flat&logo=github)
+![Node](https://img.shields.io/badge/node-%E2%89%A522-5FA04E.svg?logo=nodedotjs&logoColor=white)
+![Dart SDK](https://img.shields.io/badge/dart-%E2%89%A53.12-0175C2.svg?logo=dart&logoColor=white)
+![git](https://img.shields.io/badge/git-%E2%89%A52.40-F05032.svg?logo=git&logoColor=white)
 
-A pull request is a handful of changes and the code each one drags along: a renamed parameter
-touches every caller, a model change regenerates its classes and a migration. untangle reads it
-that way. It follows each change across files, reads a rename or a repeated edit once, keeps
-generated code out of the count, and remembers what you reviewed down to the line, across new
-pushes. It runs on your machine and opens in your browser.
+Review a pull request by what changed, not file by file. `untangle` follows each change across
+files, reads a rename or a repeated edit once, keeps generated code out of the count, and
+remembers what you reviewed down to the line, across new pushes. It runs on your machine, reads
+Dart, and opens in your browser.
 
 ![A chain on serverpod_offline_sync #168: one commit's change across files, drawn as a graph under the commit that started it](docs/images/chain.png)
 
-```
-untangle                 # the pull request of the current branch, from its directory
-untangle <pr-url>        # any pull request on GitHub, cloned into the cache
-```
+- [`untangle`](#untangle)
+  - [Overview](#overview)
+  - [Features](#features)
+    - [Chains, not files](#chains-not-files)
+    - [A rename is one change](#a-rename-is-one-change)
+    - [Mark changes, not files](#mark-changes-not-files)
+    - [Go to definition anywhere](#go-to-definition-anywhere)
+    - [Tests as sentences](#tests-as-sentences)
+    - [The commits, as a lens](#the-commits-as-a-lens)
+    - [And more](#and-more)
+  - [Getting started](#getting-started)
+    - [1. Install the requirements](#1-install-the-requirements)
+    - [2. Build `untangle`](#2-build-untangle)
+    - [3. Open a review](#3-open-a-review)
+  - [Usage](#usage)
+    - [What it reviews](#what-it-reviews)
+    - [Where it opens](#where-it-opens)
+    - [Generated code](#generated-code)
+    - [Keys](#keys)
+    - [Flags](#flags)
+  - [How it works](#how-it-works)
+  - [Storage](#storage)
+  - [Development](#development)
+  - [Credits](#credits)
 
-The screenshots are serverpod_offline_sync
-[#168](https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168): 15 commits and
-483 changes, read as 14 chains and 7 renames.
+---
+
+## Overview
+
+`untangle` began with a frustration. Reviewing code takes more and more of the day, and while AI
+agents changed how code gets written, they didn't change how it gets reviewed. We still read text
+files, beautifully colorized, with nice shortcuts and search, but text files. And reviewing code
+is not reviewing text.
+
+A pull request is a few decisions and the code each one drags along. Once you approve a model
+change, its migration has nothing left to tell you. Once you approve a renamed parameter in its
+signature, the same rename at every call site is noise. Generated code fills the file list and
+the line count, even when `.gitattributes` marks it. And a file marked as viewed stays that way
+only until the next push touches it: then the whole file is new again, and you hunt for the part
+that changed.
+
+So the question was what a review would look like if the tool read code instead of text. 
+
+`untangle` reads a pull request the way it was written, following its commits without their
+churn. Each change is a chain, named after the commit that started it and followed across files.
+When later commits rework code an earlier one added, those edits fold into the earlier commit's
+chain, so you read the code as it ended up, not every version it went through. A rename or a
+repeated edit reads once. You mark changes, not files, and your marks live in a git branch, so a
+new push brings back only what changed since you looked. The same diff always gives the same
+review.
 
 ## Features
 
@@ -36,9 +80,8 @@ chain reads as a graph of what each change uses; the map shows which chains buil
 The same edit in many places reads once. In #168, `spaceId → userId` is 126 changes in 31 files
 and one row in the sidebar: each place shows its whole edit, and they can be marked together or
 one at a time. Moved code shows only its real edits, with the old copy as one line that opens the
-new one. Generated code (Serverpod's classes and migrations, build_runner, protobuf, files marked
-`linguist-generated`, or patterns in `.review.yaml`) is not reviewed or counted, and opens
-read-only.
+new one. [Generated code](#generated-code), migrations included, is not reviewed or counted, and
+opens read-only.
 
 ![The rename spaceId → userId: one change in 31 files, each place showing its edit](docs/images/rename.png)
 
@@ -46,10 +89,9 @@ read-only.
 
 Space marks the change in front of you and goes to the next; the pill under the code says where
 you are among the changes left ("1 of 224"). Reviewed code stays on screen, muted, and a hunk
-folds away once its last change is reviewed. Your review is a local git branch,
-`untangle/pr-<number>` (or `untangle/<branch>`): the base plus every change you marked. A new
-push brings back only what changed since you looked, and a rebase replays your marks onto the new
-base.
+folds away once its last change is reviewed. Your review is a local git branch: the base plus
+every change you marked. A new push brings back only what changed since you looked, and a rebase
+replays your marks onto the new base.
 
 ![Reviewed code: a folded hunk, muted places marked reviewed, and the next ones still to review](docs/images/reviewed.png)
 
@@ -81,30 +123,46 @@ replaced.
 
 ![The lens of commit 9c69d53: its lines bright, the rest faded, and 9 changes to review](docs/images/lens.png)
 
-### And
+### And more
 
 - **The pull request's conversation**, through `gh`: threads under their lines, replies,
-  reactions and suggestions. Comment on a line, a range or a file, resolve threads, and submit a
-  review.
+reactions and suggestions. Comment on a line, a range or a file, resolve threads, and submit a
+review.
 - **Refresh in place.** When the pull request gets new commits, a banner offers to refresh. Marks
-  carry over and unsent comments stay.
+carry over and unsent comments stay.
 - **Calm, and nothing jumps.** Amber marks what's left to review, a check what's done, and blue
-  what comes from GitHub. Marking a hunk folds it while the code below glides up. Peeks grow from
-  their line and fold back. With reduced motion set, none of it moves.
-- **Keys:** j and k for the next and previous change to review, Space to mark it and go on, n and
-  p for the next and previous chain, g for the chain's graph, c to comment, Ctrl K to jump, Esc to
-  close. `?` lists them all.
+what comes from GitHub. Marking a hunk folds it while the code below glides up. Peeks grow from
+their line and fold back. With reduced motion set, none of it moves.
+- **A key for every step** of a review: see [Keys](#keys).
 - **Share it read-only:** `-export review.html` writes the review as one HTML file.
 
-## Install
+## Getting started
 
-Needs Node 22 or later, git 2.40 or later, and Dart 3.12 or later (`dart` on `PATH`; Flutter's
-works). `gh` is optional: it finds a directory's pull request, reads private repositories, and
-brings the comments and reviews. untangle asks GitHub through `gh` as your own login, so it never
-handles a token. Without `gh`, GitHub's public API answers for public repositories, without
-comments.
+`untangle` runs from a clone of this repository. Three steps put it on your `PATH`; after that,
+`untangle` in a repository reviews its branch's pull request.
 
-```
+> [!NOTE]
+> `untangle` is built for Dart: the chains, the shape of each edit and go to definition come from
+> the Dart analyzer, Dart's tree-sitter grammar and the Dart language server. Files in other
+> languages are still reviewed, as highlighted diffs.
+
+### 1. Install the requirements
+
+- **Node** 22 or later, and **git** 2.40 or later.
+- **Dart** 3.12 or later, with `dart` on `PATH` (Flutter's works).
+- [**gh**](https://cli.github.com), optional, logged in with `gh auth login`. It finds a
+directory's pull request, reads private repositories, and brings the comments and reviews.
+`untangle` asks GitHub through `gh` as your own login, so it never handles a token. Without
+`gh`, GitHub's public API answers for public repositories, without comments.
+- [**mergiraf**](https://mergiraf.org), optional. After a rebase, your marks are replayed onto
+the new base with a three-way merge; mergiraf's merge by syntax leaves fewer of them to review
+again.
+
+### 2. Build `untangle`
+
+```sh
+git clone https://github.com/marcelomendoncasoares/untangle.git
+cd untangle
 npm install
 npm run build   # TypeScript, the native Dart extractor, the highlighter and the fonts
 npm link        # puts `untangle` on PATH
@@ -113,6 +171,24 @@ npm link        # puts `untangle` on PATH
 The build compiles the Dart extractor into `dist/dart-analyzer`. Rebuild after changing platforms
 or upgrading the Dart SDK.
 
+### 3. Open a review
+
+In a repository whose branch has a pull request:
+
+```sh
+untangle
+```
+
+Or for any pull request on GitHub:
+
+```sh
+untangle https://github.com/marcelomendoncasoares/serverpod_offline_sync/pull/168
+```
+
+A page opens at once and lists the build's steps as they run: checkouts, packages, diff, Dart
+analyzer, commits and analysis. Then the review replaces it. Close the page when you're done,
+and `untangle` stops.
+
 ## Usage
 
 ```
@@ -120,83 +196,154 @@ untangle [flags] [directory]
 untangle [flags] <pr-url>
 ```
 
+### What it reviews
+
 - **A directory** (default `.`) reviews the pull request of its branch, found with `gh`. Without
-  one, it reviews what the branch adds to the default branch, or to `-base <branch>`.
+one, it reviews what the branch adds to the default branch, or to `-base <branch>`.
 - **A pull request URL** (`https://github.com/<owner>/<repo>/pull/<number>`) is cloned into the
-  cache first; the next pull request of the same repository only fetches.
+cache first; the next pull request of the same repository only fetches.
 
-untangle serves the review on `127.0.0.1` and opens it. When it runs in an Orca terminal, the
+### Where it opens
+
+`untangle` serves the review on `127.0.0.1` and opens it. When it runs in an Orca terminal, the
 review opens in Orca's browser; otherwise it opens in your default browser. `BROWSER` overrides
-both. The link carries a token, as Jupyter's does. Closing the review's page stops untangle five
-seconds later, so you can launch, review, close and move on. A reload keeps it serving, and so
-does `-autoclose=false`.
+both. The link carries a token, as Jupyter's does.
 
-| Flag | |
-|---|---|
-| `-base string` | compare with this branch or commit instead of the pull request's base |
-| `-chains string` | what chains follow: `history`, the commits that started each change (default), or `structure`, the code alone |
-| `-autoclose` | stop once the review's last open page closes (default true; `-autoclose=false` keeps serving) |
-| `-export string` | write the review to this HTML file, to share it read-only, and exit |
-| `-editor string` | open locations with this command or URL; `{file}`, `{line}` and `{col}` are replaced (also `UNTANGLE_EDITOR`; VS Code's `vscode://` link by default) |
-| `-host string` | address to bind (default `127.0.0.1`) |
-| `-port int` | port (default `7778`; a busy default falls back to a free one; `0` picks one) |
-| `-base-path string` | URL path prefix to serve from (e.g. `/rev-123/`), behind a proxy |
-| `-no-open` | do not launch a browser |
-| `-no-cache` | build the review again, even when it is cached |
-| `-quiet` | print only the review's URL |
-| `-verbose` | log the language server, `pub get` and requests |
-| `-no-color` | disable colour output |
-| `-v`, `-version` | print the version |
+Closing the review's page stops `untangle` five seconds later, so you can launch, review, close
+and move on. A reload keeps it serving, and so does `-autoclose=false`.
+
+### Generated code
+
+Generated files are set aside: listed and readable, never reviewed or counted. `untangle`'s
+adapters switch on by what the repository contains:
+
+
+| Adapter        | On when the repository has       | Generated files                                                                   | A usage of them links to             |
+| -------------- | -------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------ |
+| `serverpod`    | a `.spy.yaml` model              | `**/generated/**`, `**/migrations/**`                                             | the model in its `.spy.yaml`         |
+| `build_runner` | a `*.g.dart` or `*.freezed.dart` | `*.g.dart`, `*.freezed.dart`, `*.gr.dart`, `*.config.dart`, `*.mocks.dart`        | the declaration it was generated for |
+| `protobuf`     | a `.proto`                       | `*.pb.dart`, `*.pbenum.dart`, `*.pbjson.dart`, `*.pbserver.dart`, `*.pbgrpc.dart` | the message in its `.proto`          |
+
+
+Files that `.gitattributes` marks `linguist-generated` are generated too. A `.review.yaml` at the
+repository's root, read at the pull request's head, adds patterns, turns an adapter on or off, or
+maps generated classes to YAML models of your own under `models`, as the Serverpod adapter does:
+
+```yaml
+generated:
+  - lib/src/api/**
+adapters:
+  protobuf: false
+```
+
+### Keys
+
+
+| Key                               |                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| <kbd>j</kbd> <kbd>k</kbd>         | next and previous change to review                                                |
+| <kbd>Space</kbd>                  | mark the change reviewed and go to the next one                                   |
+| <kbd>Shift</kbd> <kbd>Space</kbd> | mark the hunk, or the member in a chain                                           |
+| <kbd>n</kbd> <kbd>p</kbd>         | next and previous chain with changes to review                                    |
+| <kbd>g</kbd>                      | the chain's graph, over the code, and back                                        |
+| <kbd>Ctrl</kbd> <kbd>K</kbd>      | jump to a chain, file, symbol or thread                                           |
+| <kbd>c</kbd>                      | comment on the line you're on                                                     |
+| <kbd>Alt</kbd> <kbd>←</kbd>       | back to where you were                                                            |
+| <kbd>Ctrl</kbd> <kbd>B</kbd>      | show or hide the sidebar                                                          |
+| <kbd>Esc</kbd>                    | close the peek, the palette, a menu or a commit's details; then turn the lens off |
+| <kbd>?</kbd>                      | list the keys                                                                     |
+
+
+On a Mac, <kbd>⌘</kbd> takes Ctrl's place, and Back is <kbd>⌘</kbd> <kbd>[</kbd>.
+
+### Flags
+
+
+| Flag                |                                                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-base string`      | compare with this branch or commit instead of the pull request's base                                                                                |
+| `-chains string`    | what chains follow: `history`, the commits that started each change (default), or `structure`, the code alone                                        |
+| `-autoclose`        | stop once the review's last open page closes (default true; `-autoclose=false` keeps serving)                                                        |
+| `-export string`    | write the review to this HTML file, to share it read-only, and exit                                                                                  |
+| `-editor string`    | open locations with this command or URL; `{file}`, `{line}` and `{col}` are replaced (also `UNTANGLE_EDITOR`; VS Code's `vscode://` link by default) |
+| `-host string`      | address to bind (default `127.0.0.1`)                                                                                                                |
+| `-port int`         | port (default `7778`; a busy default falls back to a free one; `0` picks one)                                                                        |
+| `-base-path string` | URL path prefix to serve from (e.g. `/rev-123/`), behind a proxy                                                                                     |
+| `-no-open`          | do not launch a browser                                                                                                                              |
+| `-no-cache`         | build the review again, even when it is cached                                                                                                       |
+| `-quiet`            | print only the review's URL                                                                                                                          |
+| `-verbose`          | log the language server, `pub get` and requests                                                                                                      |
+| `-no-color`         | disable colour output                                                                                                                                |
+| `-v`, `-version`    | print the version                                                                                                                                    |
+
 
 ## How it works
 
-Every chain, group and count comes from fixed rules over git and Dart analyzer facts, with
-tree-sitter for the shape of each edit, so the same diff always gives the same review. The rules
-and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md).
+- **Fixed rules.** Every chain, group and count comes from fixed rules over git and the Dart
+analyzer's facts, with tree-sitter for the shape of each edit, so the same diff always gives
+the same review.
+- **Checkouts.** The base is a git worktree that shares objects with the repository. The head is
+the directory itself when it has nothing uncommitted and its packages are resolved, otherwise a
+worktree too. Only worktrees get `pub get`; your own checkout never does.
+- **Dart analyzer.** A short-lived native process resolves the changed files on both sides and
+streams declarations, definitions, calls and overrides.
+- **Commits.** The branch's commits are replayed, so each changed line knows the commit that
+started it. Blame ignores whitespace, so a re-indented line stays with the commit that wrote it.
+- **Analysis.** [analysis/analyze.js](analysis/analyze.js) builds the reading units, the
+same-change groups, the chains and the map, and [analysis/outline.js](analysis/outline.js)
+outlines the tests. It's cached per pair of commits, so reopening a review reuses it.
+- **Serving.** A Node server on localhost serves the page and answers its calls. The page shows
+the build's steps as they run, then the review replaces it. The Dart language server starts
+once the review is up, for live go to definition.
+- **Marks.** Your marks come back from the review branch's content, not from a list of ids, so a
+push brings back only what changed. When the base moves, the branch is replayed onto it with a
+three-way merge (mergiraf first, when it's installed), and what still conflicts goes back to
+unreviewed.
 
-1. **Checkouts.** The base is a git worktree that shares objects with the repository. The head is
-   the directory itself when it has nothing uncommitted and its packages are resolved, otherwise a
-   worktree too. Only worktrees get `pub get`; your own checkout never does.
-2. **Dart analyzer.** A short-lived native process resolves the changed files on both sides and
-   streams declarations, definitions, calls and overrides.
-3. **Analysis.** The branch's commits are replayed, so each changed line knows the commit that
-   started it. Then [analysis/analyze.js](analysis/analyze.js) builds the reading units, the
-   chains and the map, and [analysis/outline.js](analysis/outline.js) outlines the tests.
-4. **Serving.** The page shows the build's steps as they run, then the review replaces it. The
-   Dart language server starts once the review is up, for live go to definition.
+The rules and the design are in [docs/01-ux-proposal.md](docs/01-ux-proposal.md), and their runs
+on real pull requests in [docs/02-test-runs.md](docs/02-test-runs.md).
 
-The analysis is cached per pair of commits, so reopening a review reuses it.
+## Storage
 
-## Cache
+Your review lives in git, and everything else in `untangle`'s cache.
 
-`~/.cache/untangle` (`$XDG_CACHE_HOME`, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on Windows;
-`UNTANGLE_CACHE` overrides it):
-
-- `repos/`: clones made for pull request URLs (bare, blobs on demand).
-- `worktrees/`: checkouts of base and head commits. A worktree of your own repository is listed
+- **The review branch**, `untangle/pr-<number>` (or `untangle/<branch>`), is a local branch of the
+repository you review, or of its clone in the cache for a pull request URL. It holds the base
+plus every change you marked, so `git diff untangle/pr-<number> HEAD` shows what's left.
+- **The cache** is `~/.cache/untangle` (`$XDG_CACHE_HOME`, `~/Library/Caches` on macOS,
+`%LOCALAPPDATA%` on Windows; `UNTANGLE_CACHE` overrides it):
+  - `repos/`: clones made for pull request URLs (bare, blobs on demand).
+  - `worktrees/`: checkouts of base and head commits. A worktree of your own repository is listed
   by `git worktree list`; `git worktree remove` or deleting the folder is safe.
-- `reviews/`: per pair of commits, the analyzer's facts, the review, and marks on parts of a
-  change. Whole marks live on the review's branch.
+  - `reviews/`: per pair of commits, the analyzer's facts, the review, and marks on parts of a
+  change.
 
 ## Development
 
 ```
-npm test         # build, then the unit and server tests
-npm run test:e2e # build, then the browser tests
-npm run test:all # build, then every test
-npm run check    # type-check the program and the tests
+npm test              # build, then the unit and server tests
+npm run test:e2e      # build, then the browser tests
+npm run test:all      # build, then every test
+npm run test:coverage # every test, then the code no test ran
+npm run check         # type-check the program and the tests
 ```
 
-The tests use Node's runner (`node:test`) and need Node 22.18 or later. They stay offline. A
-missing `dart` or Chromium skips the tests that need it.
+The tests use Node's runner (`node:test`) and need Node 22.18 or later. They stay offline,
+with a stand-in for `gh`. A missing `dart` or Chromium skips the tests that need it.
 
-| Path | |
-|---|---|
-| `src/` | the CLI, the server and the pipeline, in TypeScript |
-| `analyzer/` | the native Dart extractor and its pinned dependencies |
-| `analysis/` | the analysis rules and the generated-code adapters |
-| `viewer/` | the page |
-| `docs/` | the UX proposal, the test runs, the prototype, and these screenshots |
+
+| Path        |                                                                                        |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `src/`      | the CLI, the server and the pipeline, in TypeScript                                    |
+| `analyzer/` | the native Dart extractor and its pinned dependencies                                  |
+| `analysis/` | the analysis rules and the generated-code adapters                                     |
+| `viewer/`   | the page                                                                               |
+| `test/`     | the unit, server and browser tests                                                     |
+| `bench/`    | a benchmark of the Dart language server step ([bench/README.md](bench/README.md))      |
+| `docs/`     | the first prompt, the UX proposal, the test runs, the prototype, and these screenshots |
+
+
+## Credits
 
 The page's icons are VS Code's [Codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0).
 Its faces are [Schibsted Grotesk](https://github.com/schibsted/schibsted-grotesk) and
