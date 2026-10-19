@@ -7,6 +7,7 @@ import { changedSince, LiveSession, openInEditor, type Side } from './live.js';
 import { Metrics } from './metrics.js';
 import type { PageConfig } from './page.js';
 import { ghReady, GitHubError, PullRequestConversation, type Action, type CommitFacts } from './github.js';
+import type { NotesContext, Post, Side as NoteSide } from './notes.js';
 import { broughtBy, hasCommit, reviewedHead, sinceRows, type History } from './history.js';
 import { git, gitAsync, gitMaybe, runAsync } from './exec.js';
 import { fileHunks, generatedPatterns, parseHunks } from './pipeline/diff.js';
@@ -148,6 +149,52 @@ export class ReviewSession {
       github: facts,
       githubError: this.github ? this.facts.error : null,
       ghosts,
+    };
+  }
+
+  // Each changed line's change, by "<path>\n<side>\n<line>": built the first time a note asks.
+  private changes: Map<string, { name: string; sha: string | null }> | null = null;
+
+  /** The change a line is in: its chain's name and, by commit, the commit that started it. */
+  private changeAt(p: string, side: NoteSide, line: number): { name: string; sha: string | null } | null {
+    if (!this.changes) {
+      const c = this.data.model.compares.base;
+      const families = new Map<number, { sha?: string; same?: boolean }>((c.families || []).map((f: { id: number }) => [f.id, f]));
+      const chainOf = new Map<string, { name: string; sha: string | null }>();
+      c.chains.forEach((ch: { name: string; kind?: string; family: number; blocks: string[] }) => {
+        const fam = ch.kind === 'commit' ? families.get(ch.family) : undefined;
+        ch.blocks.forEach((id) => { if (!chainOf.has(id)) chainOf.set(id, { name: ch.name, sha: fam && !fam.same && fam.sha ? fam.sha : null }); });
+      });
+      this.changes = new Map();
+      c.files.forEach((f: { p: string; hunks: Array<{ o: number; n: number; rows: Array<[string]> }>; blocks: Array<{ id: string; hunk: number; first: number; len: number }> }) => {
+        f.blocks.forEach((b) => {
+          const change = chainOf.get(b.id);
+          const h = f.hunks[b.hunk];
+          if (!change || !h) return;
+          let o = h.o, n = h.n;
+          h.rows.forEach(([t], i) => {
+            if (i >= b.first && i < b.first + b.len) {
+              if (t !== '-') this.changes!.set(`${f.p}\nRIGHT\n${n}`, change);
+              if (t !== '+') this.changes!.set(`${f.p}\nLEFT\n${o}`, change);
+            }
+            if (t !== '+') o++;
+            if (t !== '-') n++;
+          });
+        });
+      });
+    }
+    return this.changes.get(`${p}\n${side}\n${line}`) || null;
+  }
+
+  /** What the notes need of this review: its commits, the change of each line, and GitHub to post to. */
+  notesContext(name: string, branch: string | null): NotesContext {
+    const gh = this.github;
+    return {
+      repo: this.target.repo, base: this.target.baseSha, head: this.target.headSha, name, branch,
+      change: (p, side, line) => this.changeAt(p, side, line),
+      post: gh ? (x: Post) => gh.act('thread' in x
+        ? { action: 'reply', mode: 'review', thread: x.thread, body: x.body }
+        : { action: 'thread', mode: 'review', draft: { path: x.path, body: x.body, line: x.line, side: x.side, startLine: x.startLine, startSide: x.startSide } }) : null,
     };
   }
 

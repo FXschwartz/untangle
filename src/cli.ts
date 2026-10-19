@@ -3,17 +3,21 @@
 //
 //   untangle [flags] [directory]
 //   untangle [flags] <pr-url>
+//   untangle watch | reply | notes | stop ...
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseArgs, usage, UsageError, type Options } from './args.js';
+import * as agent from './agent.js';
+import { notesUsage, parseCommand, replyUsage, stopUsage, usage, UsageError, watchUsage, type Options } from './args.js';
 import { buildReview, buildSteps, type ReviewData } from './build.js';
 import { reviewDir } from './cache.js';
 import { readHistory } from './history.js';
 import { gitMaybe } from './exec.js';
 import { LiveSession } from './live.js';
 import { Narrator, type Status } from './narrate.js';
+import { NoteError, Notes, notesFile, type NoteAction, type Scope } from './notes.js';
 import { openBrowser } from './open.js';
 import { fonts, highlighter, progressPage, reviewPage, type PageConfig } from './page.js';
+import { prKey, removeRun, wantedDir, writeRun, type RunInfo } from './runs.js';
 import { ReviewServer } from './server.js';
 import { editorFrom, ReviewSession } from './session.js';
 import { isPrUrl, latestHead, resolveDirectory, resolveUrl, type Target } from './target.js';
@@ -23,15 +27,31 @@ import { VERSION } from './version.js';
 // before it stops.
 const AUTOCLOSE_AFTER = 5000;
 
+// An agent's long wait for notes is answered at least this often, however long it asked to wait.
+const WATCH_ROUND = 5 * 60_000;
+
 async function main(): Promise<number> {
-  let opts: Options;
+  let command: ReturnType<typeof parseCommand>;
   try {
-    opts = parseArgs(process.argv.slice(2));
+    command = parseCommand(process.argv.slice(2));
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
-    process.stderr.write(`${e.message}\n${usage(VERSION)}`);
+    const help = { watch: watchUsage, reply: replyUsage, notes: notesUsage, stop: stopUsage }[process.argv[2]];
+    process.stderr.write(`${e.message}\n${help ? help() : usage(VERSION)}`);
     return 2;
   }
+  if (command.cmd === 'help') {
+    process.stdout.write(command.text);
+    return 0;
+  }
+  if (command.cmd === 'watch') return agent.watch({ target: command.opts.target, given: command.given, forward: command.forward, agent: command.agent, timeout: command.timeout });
+  if (command.cmd === 'reply') return agent.reply(command);
+  if (command.cmd === 'notes') return agent.notes(command);
+  if (command.cmd === 'stop') return agent.stop(command);
+  return review(command.opts);
+}
+
+async function review(opts: Options): Promise<number> {
   if (opts.help) {
     process.stdout.write(usage(VERSION));
     return 0;
@@ -63,22 +83,32 @@ async function main(): Promise<number> {
   let live: LiveSession | null = null;
   let target: Target | null = null;
   let url = '';
+  // The review's notes: kept for its branch, they stay through refreshes. Where the page opened.
+  let notes: Notes | null = null;
+  let opened: 'orca' | 'browser' | null = null;
+  let run: RunInfo | null = null;
   if (!exporting) {
     const idle = { after: AUTOCLOSE_AFTER, then: () => { say.stopping('The review’s page closed, so untangle stops (-autoclose=false keeps it serving).'); void stop(); } };
     server = new ReviewServer(
       { host: opts.host, port: opts.port, portExplicit: opts.portExplicit, basePath: opts.basePath, idle: opts.autoclose ? idle : undefined },
       say,
       {
-        page: () => (render && session ? render(session.config()) : null),
+        // The page comes with the notes, so it opens in the mode they're in.
+        page: () => (render && session ? render({ ...session.config(), notes: notes?.view() }) : null),
         asset: (name) => {
           const body = name === 'highlight.js' ? highlighter() : name === 'fonts.css' ? fonts() : null;
           return body && { type: name.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', body };
         },
-        call: (route, method, query, body, head) => {
+        call: (route, method, query, body, head, signal) => {
           if (route === 'refresh') return method === 'POST' ? refresh() : check(query.has('check'));
-          if (!session || !target) return Promise.resolve({ status: 503, data: { error: 'the review is still being built' } });
+          if (route === 'stop' && method === 'POST') {
+            setTimeout(() => { say.stopping('untangle stop closed the review.'); void stop(); }, 50);
+            return Promise.resolve({ data: { stopping: true } });
+          }
+          if (!session || !target || !notes) return Promise.resolve({ status: 503, data: { error: 'the review is still being built' } });
           // A page from before a refresh shows other commits: what it sends would land on the wrong lines.
           if (head && head !== target.headSha && route !== 'metrics') return Promise.resolve({ status: 409, data: { error: `untangle now reviews ${target.headSha.slice(0, 7)}: reload the page.`, moved: target.headSha } });
+          if (route === 'notes' || route.startsWith('notes/')) return notesCall(notes, route, method, query, body, signal);
           return session.call(route, method, query, body);
         },
       },
@@ -88,16 +118,63 @@ async function main(): Promise<number> {
     url = await server.listen();
     say.serving(url);
     if (opts.quiet) process.stdout.write(url + '\n');
-    if (opts.open) void openBrowser(url).then((where) => { if (!where) say.note('no browser to open: open the link above'); else say.verbose(where === 'orca' ? 'opened in Orca’s browser' : 'opened in the browser'); });
+    if (opts.open) void openBrowser(url).then((where) => { opened = where; if (!where) say.note('no browser to open: open the link above'); else say.verbose(where === 'orca' ? 'opened in Orca’s browser' : 'opened in the browser'); });
+    // The run file: how untangle's commands (watch, reply, notes, stop) reach this review.
+    const m = byUrl ? /github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/pull\/(\d+)/.exec(opts.target) : null;
+    const w = byUrl ? null : wantedDir(dir);
+    run = { pid: process.pid, url, token: server.token, dir: w ? w.dir : null, pr: m ? prKey(m[1], m[2], Number(m[3])) : null, repoKey: w?.repoKey ?? undefined, branch: w?.branch ?? null, started: new Date().toISOString() };
+    writeRun(run);
+    process.on('exit', () => removeRun(process.pid));
   }
 
   const stop = async () => {
+    // A waiting untangle watch hears that the review closed before it does.
+    if (notes) { notes.close(); await new Promise((r) => setTimeout(r, 100)); }
     await server?.close();
     await live?.stop();
     process.exit(0);
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+
+  // The notes' API: the page's (list, add, reply, resolve, copy, post) and the agents' (hello, watch,
+  // reply, export).
+  const notesCall = async (book: Notes, route: string, method: string, query: URLSearchParams, body: unknown, signal: AbortSignal): Promise<{ status?: number; data: unknown }> => {
+    const name = (query.get('agent') || '').trim().slice(0, 40) || 'Agent';
+    try {
+      if (route === 'notes' && method === 'GET') return { data: book.view() };
+      if (route === 'notes' && method === 'POST') return { data: await book.act((body || {}) as NoteAction) };
+      if (route === 'notes/hello' && method === 'GET') return { data: { title: target ? names(target).title : '', url, head: target?.headSha, pages: server ? server.pageCount : 0, opened } };
+      if (route === 'notes/watch' && method === 'GET') {
+        const wait = Math.min(WATCH_ROUND, Math.max(0, Number(query.get('wait')) || WATCH_ROUND));
+        return { data: await book.watch(name, { timeout: wait, signal }) };
+      }
+      if (route === 'notes/agent' && method === 'POST') {
+        const b = (body || {}) as { agent?: string; n?: number; body?: string | null; resolve?: boolean };
+        return { data: book.reply(String(b.agent || '').trim().slice(0, 40) || 'Agent', Number(b.n), b.body ?? null, !!b.resolve) };
+      }
+      if (route === 'notes/export' && method === 'GET') {
+        const scope = (['open', 'new', 'all'].includes(query.get('scope') || '') ? query.get('scope') : 'open') as Scope;
+        return { data: { text: book.exportText(scope) } };
+      }
+    } catch (e) {
+      if (e instanceof NoteError) return { status: e.status, data: { error: e.message } };
+      throw e;
+    }
+    return { status: 404, data: { error: `no such call: ${method} ${route}` } };
+  };
+  // The notes of a target's review, moved onto its commits.
+  const attachNotes = (t: Target, s: ReviewSession) => {
+    const n = names(t);
+    const file = notesFile(t.repoKey, n.snapshotKey);
+    if (!notes || notes.file !== file) {
+      notes?.close();
+      const book: Notes = new Notes(file, () => server?.broadcast({ notes: book.revision }));
+      notes = book;
+    }
+    notes.attach(s.notesContext(t.pr ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}` : t.repoKey.startsWith('local/') ? path.basename(t.repo) : n.repoName, t.pr ? t.pr.headRefName : n.branch));
+    if (run) writeRun(run = { ...run, repoKey: t.repoKey, branch: t.pr ? t.pr.headRefName : n.branch, title: n.title, head: t.headSha });
+  };
 
   const resolve = (progress: Narrator) => (byUrl ? resolveUrl(opts.target, (l) => progress.detail(l)) : resolveDirectory(dir, opts.base, (l) => progress.detail(l)));
   // What a review is called: in the terminal and the page, and the branch that keeps its marks.
@@ -109,7 +186,8 @@ async function main(): Promise<number> {
     // A base given as a commit shows once, not as "65bcfb7 65bcfb7".
     const base = t.baseSha.startsWith(t.baseRef) ? t.baseSha.slice(0, 7) : `${t.baseRef} ${t.baseSha.slice(0, 7)}`;
     return {
-      title, base,
+      title, base, repoName,
+      branch: branch && branch !== 'HEAD' ? branch : null,
       where: `${repoName} · ${base} → ${t.headSha.slice(0, 7)}`,
       key: `${t.repoKey}:${t.baseSha.slice(0, 12)}-${t.headSha.slice(0, 12)}`,
       snapshotKey: pr ? `pr-${pr.number}` : branch && branch !== 'HEAD' ? branch : `head-${t.headSha.slice(0, 7)}`,
@@ -144,9 +222,11 @@ async function main(): Promise<number> {
   let latest = { at: 0, head: null as string | null };
   const refreshView = () => (refreshing ? { state: refreshing.state, head: refreshing.head, steps: refreshing.status.steps, error: refreshing.error } : { state: 'idle', head: target?.headSha || null });
   const check = async (ask: boolean) => {
-    // Asking GitHub at most twice a minute, however many pages ask.
-    if (ask && target && Date.now() - latest.at > 30_000) latest = { at: Date.now(), head: await latestHead(target, byUrl).catch(() => latest.head) };
-    return { data: { ...refreshView(), latest: ask ? latest.head : undefined } };
+    // Asking GitHub at most twice a minute, however many pages ask. While an agent holds the review,
+    // its commits show within seconds: the branch is asked every few, GitHub every 15.
+    const every = notes?.watched() ? (byUrl ? 15_000 : 2_000) : 30_000;
+    if (ask && target && Date.now() - latest.at > every) latest = { at: Date.now(), head: await latestHead(target, byUrl).catch(() => latest.head) };
+    return { data: { ...refreshView(), latest: ask ? latest.head : undefined, watched: notes?.watched() || false } };
   };
   const refresh = async (): Promise<{ status?: number; data: unknown }> => {
     if (!target) return { status: 503, data: { error: 'the review is still being built' } };
@@ -182,6 +262,7 @@ async function main(): Promise<number> {
       live = next.live;
       session = next.session;
       render = next.render;
+      attachNotes(t, next.session);
       progress.finish();
       progress.note(`now reviewing ${n.where}; marks go to the branch ${next.session.snapshot.branch}`);
       r.state = 'ready';
@@ -211,11 +292,12 @@ async function main(): Promise<number> {
       say.note(`wrote ${file} (${Math.round(fs.statSync(file).size / 1024)} KB)`);
       return 0;
     }
-    const opened = await open(t, say, opts.noCache);
+    const built = await open(t, say, opts.noCache);
     target = t;
-    live = opened.live;
-    session = opened.session;
-    render = opened.render;
+    live = built.live;
+    session = built.session;
+    render = built.render;
+    attachNotes(t, built.session);
     say.note(`marks go to the branch ${session.snapshot.branch}`);
     say.ready(url, opts.autoclose);
     // Start live navigation after extraction and grouping have finished.

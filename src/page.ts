@@ -27,6 +27,8 @@ export interface PageConfig {
   github?: { number: number; url: string } | { off: string } | null;
   head?: string;
   base?: string;
+  /** The review's notes, kept on this machine: what the page shows of them at first. */
+  notes?: unknown;
 }
 
 const read = (f: string) => fs.readFileSync(path.join(ROOT, 'viewer', f), 'utf8');

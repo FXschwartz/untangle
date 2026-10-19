@@ -204,3 +204,38 @@ function waitForUrl(child: ChildProcess, text: { out: () => string; err: () => s
     });
   });
 }
+
+/** Runs one of the agent's commands (watch, reply, notes, stop) in `cwd`, to its end. */
+export function untangleCommand(args: string[], opts: { cacheDir: string; gh: GhStub; cwd: string; env?: NodeJS.ProcessEnv; timeout?: number }): Promise<{ code: number | null; out: string; err: string }> {
+  const child = spawn(process.execPath, [cli, ...args], { cwd: opts.cwd, env: untangleEnv(opts.cacheDir, opts.gh, opts.env), stdio: ['ignore', 'pipe', 'pipe'] });
+  const text = collect(child);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`untangle ${args.join(' ')} did not end\n${text.out()}\n${text.err()}`)); }, opts.timeout ?? 120_000);
+    child.once('error', (e) => { clearTimeout(timer); reject(e); });
+    child.once('exit', (code) => { clearTimeout(timer); resolve({ code, out: text.out(), err: text.err() }); });
+  });
+}
+
+/** The reviews running from this cache, by their run files: a watch starts them in the background. */
+export function runsIn(cacheDir: string): Array<{ pid: number; url: string; token: string }> {
+  const dir = path.join(cacheDir, 'run');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => /^\d+\.json$/.test(f)).flatMap((f) => {
+    try {
+      return [JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** Stops the reviews running from this cache, and waits until they're gone. */
+export async function stopRuns(cacheDir: string): Promise<void> {
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (const { pid } of runsIn(cacheDir)) {
+    if (pid === process.pid) continue;
+    try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+    for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    if (alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
+  }
+}

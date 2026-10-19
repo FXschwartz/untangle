@@ -31,6 +31,10 @@
   --done-soft: rgba(88, 197, 151, .16);
   --gh: #5C9DF8;
   --gh-soft: rgba(92, 157, 248, .14);
+  /* Notes: comments kept on this machine, for a coding agent. */
+  --local: #E08AD8;
+  --local-soft: rgba(224, 138, 216, .13);
+  --local-ink: #EDB0E7;
   /* Diff tints, opaque over the sheet: a sticky gutter over them hides what scrolls under it. */
   --add: #16231B;
   --add-strong: #1F4126;
@@ -159,6 +163,11 @@ a.t-pr:hover { text-decoration: underline; text-decoration-color: var(--text-3);
 .lsp-row { display: flex; justify-content: space-between; gap: 12px; }
 .lsp-row b { color: var(--text); font: 500 12px/1.45 var(--code); }
 .vw-review { position: relative; flex: none; }
+/* An agent holding the review (untangle watch): watching, or working on the notes it took. */
+.vw-agent { display: inline-flex; align-items: center; gap: 7px; flex: none; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--local-soft); color: var(--local-ink); font: 600 12px/1 var(--ui); white-space: nowrap; cursor: default; }
+.vw-agent[hidden] { display: none; }
+.vw-agent .dot, .rv-agent .dot { background: var(--local); }
+.vw-agent .dot.watching, .rv-agent .dot.watching { animation: pulse 1.8s ease-in-out infinite; }
 .vw-review[hidden] { display: none; }
 .vw-body { display: grid; grid-template-columns: var(--side-w) 0 minmax(0, 1fr); min-height: 0; }
 .vw.side-off .vw-body { grid-template-columns: 0 0 minmax(0, 1fr); }
@@ -219,6 +228,17 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .sb-group span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.sb-group { appearance: none; border: 0; background: none; width: 100%; font-family: var(--ui); text-align: left; cursor: pointer; }
 button.sb-group:hover { color: var(--text-2); }
+/* The Threads tab's sections (notes, and what comes from GitHub): each folds. */
+.sb-sec { appearance: none; display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 14px; padding: 6px 6px; border: 0; border-radius: 6px; background: none; color: var(--text-2); font: 600 12px/1.2 var(--ui); text-align: left; cursor: pointer; }
+.sb-sec:first-child { margin-top: 4px; }
+.sb-sec:hover { background: var(--hover-soft); color: var(--text); }
+.sb-sec .tw { display: inline-grid; color: var(--text-3); }
+.sb-sec .tw svg { width: 12px; height: 12px; }
+.sb-sec .sw { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--local); }
+.sb-sec.github .sw { background: var(--gh); }
+.sb-sec .nm { flex: 1; min-width: 0; }
+.sb-sec .cnt { font: 500 11.5px/1 var(--ui); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sb-sec-body > .sb-group:first-child { padding-top: 10px; }
 .sb-row { appearance: none; position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; height: 28px; padding: 0 8px 0 calc(8px + var(--d, 0) * 14px); border: 0; border-radius: 6px; background: transparent; color: var(--text); font: 400 12.5px/1 var(--ui); text-align: left; cursor: pointer; transition: background-color var(--fast) var(--ease); }
 .sb-row:hover { background: var(--hover-soft); }
 .sb-row[aria-current="true"] { background: var(--raised); }
@@ -247,6 +267,9 @@ button.sb-group:hover { color: var(--text-2); }
 .mk.gen { background: none; box-shadow: inset 0 0 0 1.5px var(--text-4); }
 .mk.gh { background: var(--gh); }
 .mk.pend { background: none; box-shadow: inset 0 0 0 1.5px var(--gh); }
+.mk.note { background: none; box-shadow: inset 0 0 0 1.5px var(--local); }
+.mk.note.ch { background: var(--local); box-shadow: none; }
+.mk.ok.ag { color: var(--local-ink); font: 700 11px/1 var(--ui); }
 .mk.away { background: none; box-shadow: inset 0 0 0 1.5px var(--text-4); }
 .ig { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--hair); pointer-events: none; }
 /* A level's guide ends on its last row: halfway down, turning toward that row (└). */
@@ -313,6 +336,8 @@ button.sb-group:hover { color: var(--text-2); }
 .fv-row .tools { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 .fv-row .btn { flex: none; }
 .cm-cnt { display: inline-flex; align-items: center; gap: 3px; color: var(--gh); font: 500 11.5px/1 var(--ui); white-space: nowrap; }
+.cm-cnt.note { color: var(--local); }
+.cm-cnt + .cm-cnt { margin-left: 6px; }
 .cm-cnt svg { width: 12px; height: 12px; }
 /* Notes under a header: one quiet line each. */
 .fv-note { position: sticky; left: 0; max-width: min(760px, 100%); padding: 0 22px 12px; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
@@ -1010,6 +1035,42 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 .th-away svg { width: 14px; height: 14px; }
 .th-hunk { margin-top: 6px; padding: 8px 12px; border-radius: 10px 10px 0 0; background: var(--ground); font: 12px/1.5 var(--code); white-space: pre; overflow-x: auto; color: var(--text-2); }
 .th-hunk + .th { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.th-hunk .no { display: inline-block; min-width: 30px; margin-right: 10px; text-align: right; color: var(--text-4); }
+.th-hunk .d { background: var(--del); }
+/* Notes: threads kept on this machine, with orchid on their edge, the note's number for an avatar. */
+.th.note { box-shadow: inset 2px 0 0 var(--local); }
+.th.note.resolved { box-shadow: inset 2px 0 0 var(--hair-2); }
+.th.new.note { box-shadow: inset 2px 0 0 var(--local), inset 0 0 0 1px rgba(224, 138, 216, .3); }
+.th.new.note .th-new-h svg { color: var(--local); }
+.th.note .cm { grid-template-columns: 28px minmax(0, 1fr); }
+.th.note .th-f { padding-left: 52px; }
+.th.note.by-agent .th-fold .ag-mark { color: var(--local-ink); font: 700 12px/1 var(--ui); }
+.nt-n { display: block; width: 28px; height: 20px; border-radius: 6px; background: var(--local-soft); color: var(--local-ink); font: 700 11px/20px var(--code); text-align: center; }
+.av.ag { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: #2A2030; color: var(--local-ink); font: 700 12px/1 var(--ui); }
+.cm-tag.local { color: var(--local-ink); background: var(--local-soft); }
+.cm-tag.since, .cm-tag.held { color: var(--accent-ink); background: var(--accent-soft); }
+.cm-tag code { font-size: 10.5px; color: inherit; }
+.cm-st { font-size: 11.5px; color: var(--text-3); }
+.th-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.th-tools .btn { background: var(--hover); color: var(--text-2); }
+.th-tools .btn:hover { background: #2A2A31; color: var(--text); }
+.nt-was { margin: 4px 14px 10px 52px; padding: 6px 0; border-radius: 8px; background: var(--sheet); font: 400 12px/19px var(--code); overflow-x: auto; }
+.nt-was p { margin: 0; padding: 0 10px 4px; font: 500 11.5px/1.4 var(--ui); color: var(--text-3); }
+.nt-was .r { display: flex; white-space: pre; background: var(--del); }
+.nt-was .no { width: 40px; flex: none; padding-right: 10px; text-align: right; color: var(--del-no); }
+.nt-was .tx { padding-right: 12px; color: #C9C9D1; }
+.nt-quote { display: grid; gap: 4px; margin: 10px 14px 0 52px; font-size: 12px; }
+.nt-quote .cm-body { font-size: 12.5px; }
+.th-away.note .tw { color: var(--local); }
+.cmp.local:focus-within { box-shadow: inset 0 0 0 1px rgba(224, 138, 216, .55); }
+.cmp-dest { display: inline-flex; align-items: center; gap: 6px; }
+.cmp-dest i { width: 7px; height: 7px; border-radius: 50%; background: var(--gh); }
+.cmp-dest.local i { background: var(--local); }
+.cmp-dest b { color: var(--text-2); font-weight: 600; }
+/* In local mode, the + and the lines a note is written on are orchid. */
+.vw.local .cm-add { background: var(--local); color: #22101F; }
+.vw.local .ln.cm-sel, .vw.local .sl.cm-sel, .vw.local .ln.cm-drag, .vw.local .sl.cm-drag, .vw.local .ln.cm-sel .g, .vw.local .ln.cm-drag .g, .vw.local .sl.cm-sel .g, .vw.local .sl.cm-drag .g { background-image: linear-gradient(var(--local-soft), var(--local-soft)); }
+.vw.local .ln.cm-sel .g, .vw.local .ln.cm-drag .g, .vw.local .sl.cm-sel .g, .vw.local .sl.cm-drag .g { box-shadow: inset 2px 0 0 var(--local); }
 /* The pull request's conversation. */
 .conv { position: sticky; left: 0; display: grid; gap: 12px; max-width: 900px; padding: 4px 22px 40px; }
 .conv > .cm { padding: 12px 14px; border-radius: 10px; background: var(--raised); }
@@ -1035,6 +1096,35 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 .rv-opt .muted { font-size: 12px; }
 .rv-opt.off { opacity: .5; cursor: not-allowed; }
 .rv-opt input { accent-color: var(--gh); margin-top: 2px; }
+.rv-btn .rv-n.nt { background: var(--local); color: #22101F; }
+/* The menu's switch, and the Notes menu. */
+.rv-mode { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.rv-mode b { font-size: 13px; font-weight: 600; }
+.rv-seg button { display: inline-flex; align-items: center; gap: 7px; height: 26px; }
+.rv-seg .sw { width: 7px; height: 7px; border-radius: 50%; background: var(--local); }
+.rv-seg .sw.gh { background: var(--gh); }
+.rv-sub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-3); }
+.rv-sub b { color: var(--text-2); font-weight: 600; }
+.rv-sub code { font: 500 11.5px var(--code); color: var(--text-2); }
+.rv-agent { display: flex; align-items: baseline; gap: 8px; padding: 9px 10px; border-radius: 9px; background: var(--sheet); }
+.rv-agent .dot { flex: none; transform: translateY(-1px); }
+.rv-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; cursor: pointer; }
+.rv-check > span { display: grid; gap: 1px; }
+.rv-check b { font-weight: 600; }
+.rv-check .muted { font-size: 12px; }
+.rv-check input { margin: 2px 0 0; accent-color: var(--local); }
+.rv-lbl { font: 600 10.5px/1 var(--ui); letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); }
+.rv-ta { display: block; width: 100%; min-height: 52px; resize: vertical; margin-top: -6px; padding: 8px 10px; border: 0; border-radius: 8px; outline: none; background: var(--sheet); color: var(--text); font: 400 12.5px/1.5 var(--ui); box-shadow: inset 0 0 0 1px var(--hair-2); }
+.rv-ta:focus { box-shadow: inset 0 0 0 1px var(--local); }
+.rv-pop.local .rv-opts { padding: 0; gap: 2px; }
+.rv-pop.local .rv-opt { align-items: center; padding: 5px 4px; border-radius: 6px; }
+.rv-pop.local .rv-opt:hover { background: var(--hover); }
+.rv-pop.local .rv-opt input { accent-color: var(--local); margin-top: 0; }
+.rv-opt .ct { margin-left: auto; font: 500 11.5px/1 var(--code); color: var(--text-3); }
+.rv-f { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.rv-f .btn:not(.primary) { background: var(--hover); }
+.rv-f .btn:not(.primary):hover { background: #2A2A31; }
+.sb-pend.nt { background: var(--local-soft); }
 /* Suggestions for @ and # in comments. */
 .mn-pop { position: fixed; z-index: 75; display: grid; grid-template-columns: minmax(0, 1fr); width: min(420px, calc(100vw - 16px)); max-height: 280px; overflow: hidden auto; padding: 4px; border-radius: 10px; background: var(--raised); box-shadow: var(--float); }
 .mn-pop[hidden] { display: none; }
@@ -1136,6 +1226,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
         <span class="lsp-row"><span>Language server’s CPU</span><b data-m="lspCpu">…</b></span>
       </span>
     </div>
+    <div class="vw-agent" id="vw-agent" role="status" hidden></div>
     <div class="vw-review" id="vw-review" hidden></div>
   </header>
   <div class="vw-body">

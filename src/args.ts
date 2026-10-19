@@ -3,7 +3,7 @@
 
 interface Flag {
   name: string;
-  type: 'string' | 'int' | 'bool';
+  type: 'string' | 'int' | 'bool' | 'duration';
   usage: string;
   default?: string | number | boolean;
 }
@@ -49,51 +49,96 @@ export interface Options {
 export class UsageError extends Error {}
 
 export function usage(version: string): string {
-  const lines = [
+  return [
     `untangle ${version} - review a pull request chain by chain`,
     '',
     'usage:',
     '  untangle [flags] [directory]',
     '  untangle [flags] <pr-url>',
+    '  untangle watch | reply | notes | stop ...',
     '',
     'A directory reviews its branch’s pull request, or else what the branch adds to the default branch.',
     'A pull request URL is cloned into the cache first. The review opens in your browser.',
     '',
+    'A coding agent holds a review with these commands (-h after one lists its flags):',
+    '  watch [directory | pr-url]  start the review if it isn’t running, wait for the notes and replies',
+    '                              the agent hasn’t read, print them and exit',
+    '  reply <N> <text>            answer in note N’s thread',
+    '  notes                       print the open notes, as Copy for agent gives them',
+    '  stop                        close the review',
+    '',
     'flags:',
-  ];
-  for (const f of FLAGS) {
-    const def = f.default !== undefined ? ` (default ${typeof f.default === 'string' ? JSON.stringify(f.default) : f.default})` : '';
+    ...flagLines(FLAGS),
+  ].join('\n') + '\n';
+}
+
+/** Flags as Go's flag package prints them. */
+function flagLines(flags: Flag[]): string[] {
+  const lines: string[] = [];
+  for (const f of flags) {
+    const def = f.default !== undefined ? ` (default ${typeof f.default === 'string' && f.type !== 'duration' ? JSON.stringify(f.default) : f.default})` : '';
     if (f.name.length === 1 && f.type === 'bool') lines.push(`  -${f.name}\t${f.usage}${def}`);
     else lines.push(`  -${f.name}${f.type === 'bool' ? '' : ' ' + f.type}`, `    \t${f.usage}${def}`);
   }
-  return lines.join('\n') + '\n';
+  return lines;
 }
 
-export function parseArgs(argv: string[]): Options {
+/**
+ * Reads flags the way Go's flag package does. Flags may come anywhere unless `stop` is set, when the
+ * first argument that isn't one ends them (so a note's text may start with a dash).
+ */
+function readFlags(argv: string[], flags: Flag[], stop: boolean): { values: Map<string, string | boolean>; rest: string[]; raw: string[] } {
   const values = new Map<string, string | boolean>();
   const rest: string[] = [];
+  const raw: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { rest.push(...argv.slice(i + 1)); break; }
-    if (!arg.startsWith('-') || arg === '-') { rest.push(arg); continue; }
+    if (!arg.startsWith('-') || arg === '-') {
+      if (stop) { rest.push(...argv.slice(i)); break; }
+      rest.push(arg);
+      continue;
+    }
     const body = arg.replace(/^--?/, '');
     const eq = body.indexOf('=');
     const name = eq < 0 ? body : body.slice(0, eq);
     if (name === 'h' || name === 'help') { values.set('help', true); continue; }
-    const flag = FLAGS.find((f) => f.name === name);
+    const flag = flags.find((f) => f.name === name);
     if (!flag) throw new UsageError(`flag provided but not defined: -${name}`);
     if (flag.type === 'bool') {
       const v = eq < 0 ? 'true' : body.slice(eq + 1);
       if (!/^(true|false|1|0)$/.test(v)) throw new UsageError(`invalid boolean value "${v}" for -${name}`);
       values.set(name, v === 'true' || v === '1');
+      raw.push(arg);
     } else {
       const v = eq >= 0 ? body.slice(eq + 1) : argv[++i];
       if (v === undefined) throw new UsageError(`flag needs an argument: -${name}`);
       if (flag.type === 'int' && !/^\d+$/.test(v)) throw new UsageError(`invalid value "${v}" for flag -${name}: parse error`);
+      if (flag.type === 'duration' && duration(v) === null) throw new UsageError(`invalid value "${v}" for flag -${name}: parse error`);
       values.set(name, v);
+      raw.push(eq >= 0 ? arg : `-${name}=${v}`);
     }
   }
+  return { values, rest, raw };
+}
+
+/** A duration as Go writes one (300ms, 90s, 10m, 1h30m), in milliseconds. */
+export function duration(text: string): number | null {
+  if (text === '0') return 0;
+  if (!/^(\d+(\.\d+)?(ms|s|m|h))+$/.test(text)) return null;
+  const unit: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+  let total = 0;
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)(ms|s|m|h)/g)) total += Number(m[1]) * unit[m[2]];
+  return Math.round(total);
+}
+
+export function parseArgs(argv: string[]): Options {
+  const { values, rest } = readFlags(argv, FLAGS, false);
   if (rest.length > 1) throw new UsageError(`one directory or pull request URL at a time (got ${rest.length})`);
+  return options(values, rest[0] || '.');
+}
+
+function options(values: Map<string, string | boolean>, target: string): Options {
   const str = (k: string) => (values.has(k) ? String(values.get(k)) : null);
   const bool = (k: string) => values.get(k) === true;
   let basePath = str('base-path') || '/';
@@ -104,7 +149,7 @@ export function parseArgs(argv: string[]): Options {
   const chains = str('chains') || 'history';
   if (chains !== 'history' && chains !== 'structure') throw new UsageError(`invalid value "${chains}" for flag -chains: history or structure`);
   return {
-    target: rest[0] || '.',
+    target,
     autoclose: values.has('autoclose') ? bool('autoclose') : true,
     base: str('base'),
     basePath,
@@ -122,4 +167,73 @@ export function parseArgs(argv: string[]): Options {
     version: bool('v') || bool('version'),
     help: bool('help'),
   };
+}
+
+// ---- The commands a coding agent runs to hold a review.
+
+const AGENT: Flag = { name: 'agent', type: 'string', usage: 'the agent’s name, shown with its answers (default: from the environment, else "Agent")' };
+const REVIEW: Flag = { name: 'review', type: 'string', usage: 'the review’s directory or pull request URL', default: '.' };
+const WATCH_FLAGS: Flag[] = [AGENT, { name: 'timeout', type: 'duration', usage: 'stop waiting after this long (e.g. 9m), for an agent whose commands have a time limit; 0 waits until something comes', default: '0s' }];
+const REPLY_FLAGS: Flag[] = [AGENT, { name: 'resolve', type: 'bool', usage: 'resolve the note too, once it’s done' }, REVIEW];
+const NOTES_FLAGS: Flag[] = [{ name: 'all', type: 'bool', usage: 'the resolved notes too' }, REVIEW];
+const STOP_FLAGS: Flag[] = [REVIEW];
+
+export type Command =
+  | { cmd: 'review'; opts: Options }
+  | { cmd: 'help'; text: string }
+  /** `forward`: the review's flags as given, for a review watch starts. `given`: a target was named. */
+  | { cmd: 'watch'; opts: Options; forward: string[]; agent: string | null; timeout: number; given: boolean }
+  | { cmd: 'reply'; review: string | null; agent: string | null; resolve: boolean; note: number; text: string | null }
+  | { cmd: 'notes'; review: string | null; all: boolean }
+  | { cmd: 'stop'; review: string | null };
+
+const commandUsage = (name: string, what: string, line: string, about: string[], flags: Flag[], more: string[] = []) => [
+  `untangle ${name} - ${what}`, '', 'usage:', `  untangle ${name} ${line}`, '', ...about, '', 'flags:', ...flagLines(flags), ...more,
+].join('\n') + '\n';
+
+export const watchUsage = () => commandUsage('watch', 'hold a review as a coding agent', '[flags] [directory | pr-url]', [
+  'Starts the review if it isn’t running, and opens its page (in Orca’s browser, inside Orca). Then it',
+  'waits for the notes and replies this agent hasn’t read, prints them and exits: run it again after',
+  'each answer, in the background if the agent can. A directory named watch is ./watch.',
+], WATCH_FLAGS, ['', 'The review’s own flags (untangle -h) go to a review watch starts.']);
+export const replyUsage = () => commandUsage('reply', 'answer in a note’s thread', '[flags] <N> <text>', [
+  'N is the note’s number (N2, or 2). The text is the rest of the line; - reads it from stdin.',
+], REPLY_FLAGS);
+export const notesUsage = () => commandUsage('notes', 'print a review’s notes, as Copy for agent gives them', '[flags]', ['Prints the open notes, with their code and threads.'], NOTES_FLAGS);
+export const stopUsage = () => commandUsage('stop', 'close a review', '[flags]', ['Stops the review: its page closes and a waiting untangle watch says so.'], STOP_FLAGS);
+
+/** The command line: a review, or one of the agent's commands (its first word). */
+export function parseCommand(argv: string[]): Command {
+  const [first, ...more] = argv;
+  if (first === 'watch') {
+    const both = [...WATCH_FLAGS, ...FLAGS.filter((f) => !['export', 'v', 'version'].includes(f.name))];
+    const { values, rest, raw } = readFlags(more, both, false);
+    if (values.get('help')) return { cmd: 'help', text: watchUsage() };
+    if (rest.length > 1) throw new UsageError(`one directory or pull request URL at a time (got ${rest.length})`);
+    const own = new Set(WATCH_FLAGS.map((f) => '-' + f.name));
+    return {
+      cmd: 'watch', opts: options(values, rest[0] || '.'),
+      forward: raw.filter((r) => !own.has(r.replace(/^-+/, '-').replace(/=.*$/, ''))),
+      agent: values.has('agent') ? String(values.get('agent')) : null,
+      timeout: duration(String(values.get('timeout') ?? '0')) ?? 0,
+      given: rest.length > 0,
+    };
+  }
+  if (first === 'reply') {
+    const { values, rest } = readFlags(more, REPLY_FLAGS, true);
+    if (values.get('help')) return { cmd: 'help', text: replyUsage() };
+    const m = /^[Nn]?(\d+)$/.exec(rest[0] || '');
+    if (!m) throw new UsageError(rest.length ? `${rest[0]} is not a note: say which, as N2 or 2` : 'which note? untangle reply <N> <text>');
+    const text = rest.slice(1).join(' ');
+    if (!text && !values.get('resolve')) throw new UsageError('what to answer? untangle reply <N> <text>, or -resolve alone');
+    return { cmd: 'reply', review: values.has('review') ? String(values.get('review')) : null, agent: values.has('agent') ? String(values.get('agent')) : null, resolve: values.get('resolve') === true, note: Number(m[1]), text: text || null };
+  }
+  if (first === 'notes' || first === 'stop') {
+    const { values, rest } = readFlags(more, first === 'notes' ? NOTES_FLAGS : STOP_FLAGS, true);
+    if (values.get('help')) return { cmd: 'help', text: first === 'notes' ? notesUsage() : stopUsage() };
+    if (rest.length) throw new UsageError(`untangle ${first} takes no arguments (got ${rest.join(' ')}): the review is -review`);
+    const review = values.has('review') ? String(values.get('review')) : null;
+    return first === 'notes' ? { cmd: 'notes', review, all: values.get('all') === true } : { cmd: 'stop', review };
+  }
+  return { cmd: 'review', opts: parseArgs(argv) };
 }

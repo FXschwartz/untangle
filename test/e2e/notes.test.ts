@@ -1,0 +1,290 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { e2eSkip, launchBrowser, type Browser } from '../helpers/browser.ts';
+import { conversationOf, pendingAnswer, pendingLookup, type ConversationSpec } from '../helpers/conversation.ts';
+import { stubGh, type GhStub } from '../helpers/gh.ts';
+import { reviewClient, waitForReview } from '../helpers/http.ts';
+import { pubspec } from '../helpers/review.ts';
+import { TempRepo, type Person } from '../helpers/repo.ts';
+import { startUntangle, untangleCommand, type UntangleRun } from '../helpers/run.ts';
+import { read, rest } from './page.ts';
+
+const skip = e2eSkip();
+const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
+const callLine = 6;
+const printLine = 2;
+
+const beforeApp = ['void greet() {', "  print('hi');", '}', '', 'void main() {', '  greet();', '}', ''].join('\n');
+const afterApp = ['void greet(String name) {', '  print(name);', '}', '', 'void main() {', "  greet('ada');", '}', ''].join('\n');
+
+/** The + is a pointer target, so a busy machine can drop the first move. */
+async function showAdd(page: Browser, line: number): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.hover(`[data-c="R:${line}"]`);
+    try {
+      await page.until(`document.querySelector('.cm-add')?.classList.contains('on')`, 5_000);
+      return;
+    } catch {
+      // Try the move again.
+    }
+  }
+  await page.until(`document.querySelector('.cm-add')?.classList.contains('on')`);
+}
+
+/** Types into a box and waits until it holds the text. */
+async function fill(page: Browser, selector: string, text: string): Promise<void> {
+  const ready = `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(text)}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.click(selector);
+    await page.key('a', { ctrl: true });
+    await page.type(text);
+    try {
+      await page.until(ready, 5_000);
+      return;
+    } catch {
+      // Type it again.
+    }
+  }
+  await page.until(ready);
+}
+
+// A note as the page shows it: its comments (who, tags, text), or, folded, its header.
+const noteShown = (n: number) => `(() => { const th = document.querySelector('.th.note[data-note="${n}"]'); if (!th) return 'none'; if (th.matches('.resolved') && !th.querySelector('.cm')) return 'folded: ' + th.querySelector('.th-fold').textContent.replace(/\\s+/g, ' ').trim(); return [...th.querySelectorAll('.cm')].map((cm) => [cm.querySelector('.nt-n')?.textContent ?? '', cm.querySelector('.cm-who')?.textContent ?? '', ...[...cm.querySelectorAll('.cm-h > span:not(.cm-tag):not(.cm-st):not([title])')].map((s) => s.textContent), ...[...cm.querySelectorAll('.cm-tag')].map((tag) => '(' + tag.textContent + ')'), '- ' + (cm.querySelector('.cm-body')?.textContent ?? '').trim()].filter(Boolean).join(' ')).join(' / '); })()`;
+
+function posted(gh: GhStub, mutation: string): string {
+  const call = [...gh.calls()].reverse().find((item) => item.stdin.includes(`${mutation}(input:`));
+  if (!call) throw new Error(`no ${mutation} call`);
+  return JSON.stringify((JSON.parse(call.stdin) as { variables: { input: unknown } }).variables.input);
+}
+
+describe('Given a served review of pull request 7, and an agent’s commands, ', { skip, timeout: 300_000 }, () => {
+  let repo: TempRepo | undefined;
+  let gh: GhStub | undefined;
+  let run: UntangleRun | undefined;
+  let page: Browser | undefined;
+  let cache = '';
+  let head = '';
+  let spec: ConversationSpec;
+  const env = { UNTANGLE_NOTES_QUIET: '100' };
+  const agent = (args: string[]) => untangleCommand(args, { cacheDir: cache, gh: gh!, cwd: repo!.dir, env });
+
+  before(async () => {
+    repo = TempRepo.create();
+    repo.write('pubspec.yaml', pubspec);
+    repo.write('lib/app.dart', beforeApp);
+    repo.commit({ subject: 'Start the package', author: ada('2020-06-01T15:00:00Z'), committer: ada('2020-06-01T15:00:00Z') });
+    repo.branch('feature');
+    repo.write('lib/app.dart', afterApp);
+    head = repo.commit({ subject: 'Name the greeting', author: ada('2020-06-02T15:00:00Z'), committer: ada('2020-06-02T15:00:00Z') });
+    spec = { number: 7, title: 'Add a greeting', url: 'https://github.com/acme/sample/pull/7', head, threads: [] };
+    gh = stubGh([
+      {
+        match: ['pr', 'view'],
+        stdout: { number: 7, title: 'Add a greeting', url: spec.url, state: 'OPEN', baseRefName: 'main', baseRefOid: repo.rev('main'), headRefName: 'feature', headRefOid: head },
+      },
+      { match: ['api', 'graphql'], stdinIncludes: 'statusCheckRollup', stdout: { data: { repository: { pullRequest: { commits: { nodes: [] }, reviews: { nodes: [] }, timelineItems: { nodes: [] } } } } } },
+      { match: ['api', 'graphql'], stdinIncludes: pendingLookup, stdout: pendingAnswer(null) },
+      { match: ['api', 'graphql'], stdinIncludes: 'organization(login:', stdout: { data: { organization: null } } },
+      { match: ['api', 'graphql'], stdinIncludes: 'addPullRequestReviewThread', stdout: conversationOf({ ...spec, pending: { id: 'REVIEW_PENDING', comments: 1 }, threads: [{ id: 'THREAD_9', path: 'lib/app.dart', line: printLine, body: 'Print a greeting, not the name.', pending: true }] }) },
+      { match: ['api', 'graphql'], stdout: conversationOf(spec) },
+    ]);
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { cacheDir: cache, gh, env });
+    await waitForReview(reviewClient(run.url));
+    page = await launchBrowser();
+    await page.reducedMotion(true);
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('.t-head') && !!document.querySelector('.rv-btn')`, 30_000);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    gh?.remove();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  async function openApp(): Promise<void> {
+    await page!.click('[data-tab="files"]');
+    await page!.until(`!!document.querySelector('[data-open="lib/app.dart"]')`);
+    await page!.click('[data-open="lib/app.dart"]');
+    await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"]')`);
+  }
+
+  describe('when the review’s menu opens, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.click('.rv-btn');
+      await page!.until(`!!document.querySelector('.rv-pop .rv-mode')`);
+      shown = await read(page!, `[document.querySelector('.rv-btn').textContent.trim(), ...[...document.querySelectorAll('.rv-seg button')].map((b) => b.textContent + (b.getAttribute('aria-pressed') === 'true' ? ' (on)' : ''))].join(' | ')`);
+    });
+
+    it('then new comments go to GitHub, as before.', () => {
+      assert.equal(shown, 'Review | GitHub (on) | Local notes');
+    });
+  });
+
+  describe('when Local notes is chosen and a line’s + is clicked, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.click('.rv-seg [data-mode="local"]');
+      await page!.until(`document.querySelector('.rv-btn').textContent.trim() === 'Notes'`);
+      await rest(page!);
+      await openApp();
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.th.new.note textarea')`);
+      shown = await read(page!, `[document.querySelector('.rv-btn').textContent.trim(), document.querySelector('.th.new.note .th-new-h b').textContent, document.querySelector('.th.new.note .cmp-hint').textContent, ...[...document.querySelectorAll('.th.new.note .cmp-f button')].map((b) => b.textContent)].join(' | ')`);
+    });
+
+    it('then the button says Notes, and the box saves a note here, with one button.', () => {
+      assert.equal(shown, `Notes | Note on line +${callLine} | Saved locally · Markdown · Ctrl+Enter: Add note | Cancel | Add note`);
+    });
+  });
+
+  describe('when the note is added, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await fill(page!, '.th.new.note textarea', 'Why greet `ada`?');
+      await page!.click('.th.new.note [data-act="nt-add"]');
+      await page!.until(`!!document.querySelector('.th.note[data-note="1"]')`);
+      shown = await read(page!, noteShown(1));
+    });
+
+    it('then it sits under its line, numbered N1 and local.', () => {
+      assert.equal(shown, `N1 You line ${callLine} (Local) - Why greet ada?`);
+    });
+  });
+
+  describe('when an agent answers it with untangle reply, ', () => {
+    let replied: { code: number | null; out: string };
+    let shown: string;
+
+    before(async () => {
+      replied = await agent(['reply', '-agent', 'Codex', 'N1', 'Because', 'ada', 'is', 'the', 'first', 'user.']);
+      await page!.until(`!!document.querySelector('.th.note[data-note="1"] .cm.agent')`, 10_000);
+      shown = await read(page!, noteShown(1));
+    });
+
+    it('then the answer shows under the note at once, with the agent’s name.', () => {
+      assert.deepEqual([replied.code, replied.out, shown], [0, 'untangle: answered N1.\n', `N1 You line ${callLine} (Local) - Why greet ada? / Codex (Agent) - Because ada is the first user.`]);
+    });
+  });
+
+  describe('when the agent resolves it, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await agent(['reply', '-agent', 'Codex', '-resolve', 'N1']);
+      await page!.until(`!!document.querySelector('.th.note.resolved.by-agent[data-note="1"]')`, 10_000);
+      shown = await read(page!, noteShown(1));
+    });
+
+    it('then the note folds, saying the agent resolved it.', () => {
+      assert.equal(shown, `folded: ✦Resolved by Codex· N1 · line ${callLine} · 2 comments`);
+    });
+  });
+
+  describe('when every note is copied for the agent, ', () => {
+    let copied: string;
+    let printed: string;
+
+    before(async () => {
+      await page!.eval(`navigator.clipboard.writeText = (text) => { window.__copied = text; return Promise.resolve(); }`);
+      await page!.click('.rv-btn');
+      await page!.until(`!!document.querySelector('.rv-pop [name="nt-scope"][value="all"]')`);
+      await page!.click('.rv-pop [name="nt-scope"][value="all"]');
+      await page!.until(`document.querySelector('.rv-pop [name="nt-scope"][value="all"]').checked`);
+      await page!.click('.rv-pop [data-act="nt-copy"]');
+      await page!.until(`typeof window.__copied === 'string'`);
+      copied = await read(page!, 'window.__copied');
+      printed = (await agent(['notes', '-all'])).out;
+      await rest(page!);
+    });
+
+    it('then the copy is what untangle notes prints: the note, its code, and its thread.', () => {
+      assert.deepEqual([copied, copied], [printed, [
+        `My review notes on acme/sample#7 (branch feature, at ${head.slice(0, 7)}). Line numbers are on that commit.`,
+        '',
+        'Discuss these with me before changing anything.',
+        '',
+        `N1 · lib/app.dart:${callLine} (resolved)`,
+        'In the change "greet(name)"',
+        '```dart',
+        "  greet('ada');",
+        '```',
+        'Why greet `ada`?',
+        'Codex: Because ada is the first user.',
+        '',
+      ].join('\n')]);
+    });
+  });
+
+  describe('when a note on the print is posted to GitHub, ', () => {
+    let sent: string;
+    let shown: string;
+
+    before(async () => {
+      await showAdd(page!, printLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.th.new.note textarea')`);
+      await fill(page!, '.th.new.note textarea', 'Print a greeting, not the name.');
+      await page!.click('.th.new.note [data-act="nt-add"]');
+      await page!.until(`!!document.querySelector('.th.note[data-note="2"] [data-act="nt-post1"]')`);
+      await page!.click('.th.note[data-note="2"] [data-act="nt-post1"]');
+      await page!.until(`(document.querySelector('#vw-toast')?.textContent || '') === 'N2 is in your pending review on GitHub'`);
+      sent = posted(gh!, 'addPullRequestReviewThread');
+      shown = await read(page!, `[document.querySelector('.th.note[data-note="2"]') ? 'still a note' : 'left the notes', document.querySelector('[data-thread="THREAD_9"] .cm-tag.pending')?.textContent ?? 'no thread'].join(' | ')`);
+    });
+
+    it('then GitHub is asked for a thread on its line, in the pending review, and the note leaves the notes for it.', () => {
+      assert.deepEqual([sent, shown], [`{"pullRequestId":"PR_1","path":"lib/app.dart","body":"Print a greeting, not the name.","subjectType":"LINE","line":${printLine},"side":"RIGHT"}`, 'left the notes | Pending']);
+    });
+  });
+
+  describe('when GitHub’s thread is answered in local mode, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.click('[data-thread="THREAD_9"] [data-act="reply-open"]');
+      await page!.until(`!!document.querySelector('[data-thread="THREAD_9"] textarea[data-draft="reply:THREAD_9"]')`);
+      shown = await read(page!, `[...document.querySelectorAll('[data-thread="THREAD_9"] .cmp-f button')].map((b) => b.textContent).join(' | ')`);
+      await fill(page!, '[data-thread="THREAD_9"] textarea[data-draft="reply:THREAD_9"]', 'Say why it prints the name at all.');
+      await page!.click('[data-thread="THREAD_9"] [data-act="nt-quote"]');
+      await page!.until(`!!document.querySelector('.th.note[data-note="3"] .nt-quote')`);
+      shown += ' / ' + await read(page!, `(() => { const th = document.querySelector('.th.note[data-note="3"]'); return [th.querySelector('.nt-quote .muted').textContent, th.querySelector('.nt-quote .cm-body').textContent.trim(), th.querySelector('.cm .cm-body').textContent.trim()].join(' | '); })()`);
+    });
+
+    it('then the answer is a note on its line that quotes it, not a reply on GitHub.', () => {
+      assert.equal(shown, 'Cancel | Add note / On grace’s thread on GitHub | Print a greeting, not the name. | Say why it prints the name at all.');
+    });
+  });
+
+  describe('when GitHub is chosen again and a line’s + is clicked, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.click('.rv-btn');
+      await page!.until(`!!document.querySelector('.rv-seg [data-mode="github"]')`);
+      await page!.click('.rv-seg [data-mode="github"]');
+      await page!.until(`!document.querySelector('.rv-btn.local')`);
+      await rest(page!);
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.th.new textarea')`);
+      shown = await read(page!, `[document.querySelector('.th.new').matches('.note') ? 'a note' : 'a comment', document.querySelector('.th.new .cmp-hint').textContent, ...[...document.querySelectorAll('.th.new .cmp-f button')].map((b) => b.textContent)].join(' | ')`);
+      await page!.click('.th.new [data-act="compose-cancel"]');
+    });
+
+    it('then the box posts to GitHub, into the pending review.', () => {
+      assert.equal(shown, 'a comment | Posts to GitHub · Markdown · Ctrl+Enter: Add review comment | Cancel | Add review comment');
+    });
+  });
+});

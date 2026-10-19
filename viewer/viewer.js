@@ -143,10 +143,10 @@
     try { localStorage.setItem(STORE, data); } catch (e) { /* storage unavailable */ }
   }
   window.addEventListener('pagehide', flushSave);
-  // This browser's layout: the sidebar's width and whether it shows, the minimap, and a commit's
-  // files as a tree or a list.
+  // This browser's layout: the sidebar's width and whether it shows, the minimap, a commit's files
+  // as a tree or a list, and the Threads tab's folded sections.
   const UI_KEY = 'untangle:ui';
-  const UI = { side: 272, sideOff: false, minimap: true, filesList: false };
+  const UI = { side: 272, sideOff: false, minimap: true, filesList: false, foldedThreads: [] };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
@@ -1435,7 +1435,7 @@
       if (ed) items.push(ed, { sep: true });
       showing(CONFIG.served && f.s === 'M' && f.hunks && f.hunks.length ? f : null);
       const more = [];
-      if (GH.on && GH.data && !GH.data.pr.locked) more.push({ label: 'Comment on this file', icon: ICON.comment, data: { act: 'file-comment', p: f.p } });
+      if (localMode() ? NT.data : GH.on && GH.data && !GH.data.pr.locked) more.push({ label: localMode() ? 'Write a note on this file' : 'Comment on this file', icon: ICON.comment, data: { act: 'file-comment', p: f.p } });
       if (CONFIG.served && f.s === 'M') more.push({ label: 'The file before these changes', icon: ICON.file, data: { act: 'open-source', side: 'base', p: f.p } });
       if (more.length) items.push({ sep: true }, ...more);
     };
@@ -1721,8 +1721,168 @@
   const flushDrafts = () => { if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; writeDrafts(); } };
   window.addEventListener('pagehide', flushDrafts);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDrafts(); });
-  // Whether lines can take new comments: GitHub places them on its head, which must be this review's.
-  const canCommentLines = () => GH.on && GH.data && !GH.stale && !GH.data.pr.locked;
+  // ---------- Notes: comments kept on this machine, for a coding agent, instead of on GitHub.
+  // untangle keeps them for the review and moves each with its lines to newer commits. An agent
+  // reads them with `untangle watch` and answers in their threads with `untangle reply`; the
+  // Review button's menu says where new comments go, and copies the notes as a prompt.
+  const NT = {
+    on: !!CONFIG.served,
+    data: null, error: null, loading: false, again: false, busy: null, errors: new Map(),
+    anchors: new Map(), files: new Map(), byN: new Map(),
+    opened: new Set(), replying: new Set(), editing: null, folded: new Set(), was: new Set(), showResolved: false,
+    reveal: null, opening: null, openingTimer: null, seenAgents: new Set(),
+  };
+  // GitHub can take comments: the review has a pull request, and gh answered (or hasn't yet).
+  const ghCan = () => GH.on && !(GH.error && !GH.data);
+  // Where new comments go: local notes where GitHub can't take them, else the review's last
+  // choice, GitHub at first.
+  const localMode = () => NT.on && (!ghCan() || (!!NT.data && NT.data.mode === 'local'));
+  // Whether lines can take new comments: a note anywhere; on GitHub, on its head, which must be this review's.
+  const canCommentLines = () => (localMode() ? !!NT.data : GH.on && GH.data && !GH.stale && !GH.data.pr.locked);
+  // Whether notes can go to GitHub now: as threads on its head, which must be this review's.
+  const canPost = () => ghCan() && !!GH.data && !GH.stale && !GH.data.pr.locked;
+  const okJson = (r) => r.json().catch(() => ({ error: r.statusText })).then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; });
+  // An agent shows in the bar while it watches, and for a while after it took your notes.
+  const agentsNow = () => (NT.data ? NT.data.agents.filter((a) => a.state === 'watching' || Date.now() - Date.parse(a.since) < 15 * 60000) : []);
+
+  function ntSet(d) {
+    const was = NT.data;
+    NT.data = d;
+    NT.anchors = new Map(); NT.files = new Map(); NT.byN = new Map();
+    const fileOf = (p) => { if (!NT.files.has(p)) NT.files.set(p, { line: [], file: [], away: [], open: 0 }); return NT.files.get(p); };
+    const m = M('base');
+    const generated = new Set(m.generated.map((g) => g.p));
+    d.notes.forEach((n) => {
+      NT.byN.set(n.n, n);
+      const e = fileOf(n.path);
+      if (!n.resolved) e.open++;
+      if (n.file) { e.file.push(n); return; }
+      // A note shows under its line when this review's diff has the line; else with its file.
+      const inDiff = !n.gone && n.line != null && (generated.has(n.path) || (n.side === 'LEFT' ? m.old : m.head).has(n.path + ':' + n.line));
+      if (!inDiff) { e.away.push(n); return; }
+      const k = n.path + '\n' + n.side + '\n' + n.line;
+      if (!NT.anchors.has(k)) NT.anchors.set(k, []);
+      NT.anchors.get(k).push(n);
+      e.line.push(n);
+    });
+    if (NT.opening == null || !NT.openingTimer) NT.opening = d.opening;
+    // What an agent did since the page last looked: its answers fade in, and it's said once.
+    const news = [];
+    if (was) {
+      const before = new Map(was.notes.map((n) => [n.n, n]));
+      d.notes.forEach((n) => {
+        const b = before.get(n.n);
+        const answers = n.comments.filter((c) => c.by && !(b && b.comments.some((x) => x.id === c.id)));
+        answers.forEach((c) => GH.fresh.add(c.id));
+        if (answers.length) news.push(`${answers[0].by} answered N${n.n}`);
+        if (n.resolved && n.resolved.by && !(b && b.resolved)) news.push(`${n.resolved.by} resolved N${n.n}`);
+      });
+    }
+    d.agents.forEach((a) => { if (!NT.seenAgents.has(a.name)) { NT.seenAgents.add(a.name); if (was && a.state === 'watching') news.push(`${a.name} is watching this review`); } });
+    if (news.length) toast(news.slice(0, 3).join(' · '));
+  }
+  function ntLoad() {
+    if (!NT.on) return;
+    if (NT.loading) { NT.again = true; return; }
+    NT.loading = true;
+    api('notes', { cache: 'no-store' }).then(okJson)
+      .then((j) => { NT.error = null; if (!NT.data || j.rev !== NT.data.rev) { ntSet(j); render(); } })
+      .catch((e) => { NT.error = e.message; render(); })
+      .then(() => { NT.loading = false; if (NT.again) { NT.again = false; ntLoad(); } });
+  }
+  // A change to the notes: the answer is the notes after it (and, posted, GitHub's conversation).
+  function ntAct(key, payload, done) {
+    if (NT.busy) return;
+    NT.busy = key;
+    NT.errors.delete(key);
+    render();
+    api('notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }).then(okJson)
+      .then((j) => { if (j.conversation) { GH.at = Date.now(); ghSet(j.conversation); } ntSet(j); if (done) done(j); })
+      .catch((e) => { NT.errors.set(key, e.message); ntLoad(); if (/post/.test(key)) ghLoad(true); })
+      .then(() => { NT.busy = null; render(); });
+  }
+  // The menu's settings: shown at once, then kept.
+  function ntSettings(patch) {
+    if (!NT.data) return;
+    Object.assign(NT.data, patch);
+    render();
+    api('notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'settings', ...patch }) }).then(okJson)
+      .then((j) => { ntSet(j); render(); })
+      .catch((e) => { toast(`Couldn’t save: ${e.message}`); ntLoad(); });
+  }
+  const ntBusyAttr = (key) => (NT.busy ? ` disabled${NT.busy === key ? ' aria-busy="true"' : ''}` : '');
+
+  // A note's text, as markdown: paragraphs, lists, quotes, code, emphasis and links. Rendered
+  // here: GitHub doesn't see notes.
+  function noteMd(text) {
+    const inline = (str) => String(str).split(/(`[^`]+`)/).map((part, i) => (i % 2 ? `<code>${esc(part.slice(1, -1))}</code>` : esc(part)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^\w*])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<em>$2</em>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'))).join('');
+    const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+    let out = '', para = [], list = null;
+    const flush = () => {
+      if (para.length) { out += `<p>${para.map(inline).join('<br>')}</p>`; para = []; }
+      if (list) { out += `<${list.tag}>${list.items.map((x) => `<li>${inline(x)}</li>`).join('')}</${list.tag}>`; list = null; }
+    };
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      const f = /^\s*(`{3,}|~{3,})/.exec(l);
+      if (f) {
+        flush();
+        const code = [];
+        for (i++; i < lines.length && !(lines[i].trim().startsWith(f[1]) && /^\s*[`~]+\s*$/.test(lines[i])); i++) code.push(lines[i]);
+        out += `<pre><code>${esc(code.join('\n'))}</code></pre>`;
+        continue;
+      }
+      if (!l.trim()) { flush(); continue; }
+      if (/^\s*>/.test(l)) {
+        flush();
+        const quote = [];
+        for (; i < lines.length && /^\s*>/.test(lines[i]); i++) quote.push(lines[i].replace(/^\s*>\s?/, ''));
+        i--;
+        out += `<blockquote>${noteMd(quote.join('\n'))}</blockquote>`;
+        continue;
+      }
+      const li = /^\s*(?:([-*+])|\d+[.)])\s+(.*)$/.exec(l);
+      if (li) {
+        const tag = li[1] ? 'ul' : 'ol';
+        if (para.length || (list && list.tag !== tag)) flush();
+        if (!list) list = { tag, items: [] };
+        list.items.push(li[2]);
+        continue;
+      }
+      if (list) flush();
+      para.push(l);
+    }
+    flush();
+    return out;
+  }
+  // Text on the clipboard: from the click itself, else through a selection.
+  function copyText(text, said) {
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { /* refused */ }
+      ta.remove();
+      toast(ok ? said : 'The browser refused the clipboard: select the text and copy it.');
+      return ok;
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(() => { toast(said); return true; }, fallback);
+    return Promise.resolve(fallback());
+  }
+  // The copy for the agent: the head, the opening line, then each note, as untangle notes prints it.
+  function ntExport(list) {
+    const d = NT.data;
+    const opening = (NT.opening != null ? NT.opening : d.opening).trim();
+    return [d.header + '\n', opening && opening + '\n', ...(list.length ? list.map((n) => n.text) : ['No notes to send.\n'])].filter(Boolean).join('\n');
+  }
+  const ntScoped = (scope) => { const d = NT.data; return !d ? [] : scope === 'all' ? d.notes : d.notes.filter((n) => !n.resolved && (scope !== 'new' || !n.copied)); };
 
   function ghSet(d) {
     const ids = d.threads.flatMap((t) => t.comments.map((c) => c.id)).concat(d.comments.map((c) => c.id));
@@ -1838,21 +1998,34 @@
   const ROLE = { OWNER: 'Owner', MEMBER: 'Member', COLLABORATOR: 'Collaborator', CONTRIBUTOR: 'Contributor' };
   const EMOJI = { THUMBS_UP: '👍', THUMBS_DOWN: '👎', LAUGH: '😄', HOORAY: '🎉', CONFUSED: '😕', HEART: '❤️', ROCKET: '🚀', EYES: '👀' };
   const busyAttr = (key) => (GH.busy ? ` disabled${GH.busy === key ? ' aria-busy="true"' : ''}` : '');
-  // A text box for markdown: Write and Preview, an error, and its buttons ([label, attrs, primary]).
-  function composerHtml(key, o) {
-    const previewing = GH.preview.has(key);
-    const p = previewing ? GH.previews.get(key) : null;
-    const err = GH.errors.get(key);
-    const btns = o.buttons.map(([label, attrs, primary]) => `<button type="button" class="btn sm${primary ? ' primary' : ''}" ${attrs} data-key="${esc(key)}"${primary ? ' data-primary="1"' : ''}${busyAttr(key)}>${GH.busy === key && primary ? 'Sending…' : label}</button>`).join('');
-    return `<div class="cmp" data-cmp="${esc(key)}"><div class="cmp-tabs"><button type="button" data-act="cmp-pane" data-key="${esc(key)}" data-pane="write" aria-pressed="${!previewing}">Write</button><button type="button" data-act="cmp-pane" data-key="${esc(key)}" data-pane="preview" aria-pressed="${previewing}">Preview</button><span class="sp"></span>`
-      + (o.suggest ? iconBtn(ICON.suggest, 'Suggest a change: the lines, to edit into what they should be', `data-act="cmp-suggest" data-key="${esc(key)}"`) : '') + '</div>'
-      + (previewing ? `<div class="cmp-pre cm-body">${p && p.html != null ? clean(p.html) : p && p.error ? `<p class="cmp-err">${esc(p.error)}</p>` : '<p class="muted">Rendering…</p>'}</div>`
-        : `<textarea class="cmp-ta" data-draft="${esc(key)}" placeholder="${esc(o.placeholder || 'Leave a comment')}" rows="${o.rows || 4}">${esc(drafts.get(key) || '')}</textarea>`)
-      + (err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : '') + (o.extra || '')
-      + `<div class="cmp-f"><span class="cmp-hint">Markdown · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busyAttr(key)}>Cancel</button>` : ''}${btns}</div></div>`;
+  // Where a comment box sends: kept here as a note (and to a watching agent), or posted to GitHub.
+  function destHtml(local) {
+    if (!local) return '<span class="cmp-dest"><i></i><b>Posts to GitHub</b></span>';
+    const a = agentsNow()[0], live = !NT.data || NT.data.live;
+    return `<span class="cmp-dest local"><i></i><b>Saved locally${!live ? ', held until you send it' : a ? `, sent to ${esc(a.name)}` : ''}</b></span>`;
   }
-  // The buttons to send a comment: into the pending review, or (with none pending) on its own.
+  // A text box for markdown: Write and Preview, an error, and its buttons ([label, attrs, primary]).
+  // A note's (o.local) previews here and sends to untangle; o.dest says where it sends.
+  function composerHtml(key, o) {
+    const B = o.local ? NT : GH;
+    const previewing = GH.preview.has(key);
+    const p = previewing && !o.local ? GH.previews.get(key) : null;
+    const err = B.errors.get(key);
+    const busy = (k) => (B.busy ? ` disabled${B.busy === k ? ' aria-busy="true"' : ''}` : '');
+    const btns = o.buttons.map(([label, attrs, primary]) => `<button type="button" class="btn sm${primary ? ' primary' : ''}" ${attrs} data-key="${esc(key)}"${primary ? ' data-primary="1"' : ''}${busy(key)}>${B.busy === key && primary ? (o.local ? 'Saving…' : 'Sending…') : label}</button>`).join('');
+    const pane = `data-act="cmp-pane" data-key="${esc(key)}"${o.local ? ' data-local="1"' : ''}`;
+    const pre = o.local ? (noteMd(drafts.get(key) || '') || '<p class="muted">Nothing to preview.</p>') : p && p.html != null ? clean(p.html) : p && p.error ? `<p class="cmp-err">${esc(p.error)}</p>` : '<p class="muted">Rendering…</p>';
+    return `<div class="cmp${o.local ? ' local' : ''}" data-cmp="${esc(key)}"><div class="cmp-tabs"><button type="button" ${pane} data-pane="write" aria-pressed="${!previewing}">Write</button><button type="button" ${pane} data-pane="preview" aria-pressed="${previewing}">Preview</button><span class="sp"></span>`
+      + (o.suggest ? iconBtn(ICON.suggest, 'Suggest a change: the lines, to edit into what they should be', `data-act="cmp-suggest" data-key="${esc(key)}"`) : '') + '</div>'
+      + (previewing ? `<div class="cmp-pre cm-body">${pre}</div>`
+        : `<textarea class="cmp-ta" data-draft="${esc(key)}" placeholder="${esc(o.placeholder || (o.local ? 'A note for your agent' : 'Leave a comment'))}" rows="${o.rows || 4}">${esc(drafts.get(key) || '')}</textarea>`)
+      + (err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : '') + (o.extra || '')
+      + `<div class="cmp-f"><span class="cmp-hint">${o.dest ? destHtml(o.local) + ' · ' : ''}Markdown · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busy(key)}>Cancel</button>` : ''}${btns}</div></div>`;
+  }
+  // The buttons to send a comment: into the pending review, or (with none pending) on its own. In
+  // local mode, one: Add note (on a GitHub thread, a note that quotes it).
   function sendButtons(act, attrs) {
+    if (localMode()) return [['Add note', `data-act="${act === 'gh-reply' ? 'nt-quote' : 'nt-add'}" ${attrs || ''}`, true]];
     if (GH.data && GH.data.pending) return [['Add review comment', `data-act="${act}" data-mode="review" ${attrs || ''}`, true]];
     return [['Add single comment', `data-act="${act}" data-mode="single" ${attrs || ''}`, false], ['Start a review', `data-act="${act}" data-mode="review" ${attrs || ''}`, true]];
   }
@@ -1900,7 +2073,7 @@
     const key = 'reply:' + t.id, err = GH.errors.get('resolve:' + t.id);
     const res = t.resolved ? (t.canUnresolve ? 'Unresolve' : '') : t.canResolve ? 'Resolve' : '';
     const resBtn = res ? `<button type="button" class="btn" data-act="gh-resolve" data-thread="${esc(t.id)}" data-on="${!t.resolved}" title="${t.resolved ? 'Open the conversation again' : 'Resolve the conversation'}"${busyAttr('resolve:' + t.id)}>${GH.busy === 'resolve:' + t.id ? 'Saving…' : res}</button>` : '';
-    const reply = GH.replying.has(t.id) || drafts.has(key) ? composerHtml(key, { placeholder: 'Reply…', rows: 3, buttons: sendButtons('gh-reply', `data-thread="${esc(t.id)}"`), cancel: 'reply-cancel' })
+    const reply = GH.replying.has(t.id) || drafts.has(key) ? composerHtml(key, { local: localMode(), dest: true, placeholder: localMode() ? 'A note on this thread, for your agent' : 'Reply…', rows: 3, buttons: sendButtons('gh-reply', `data-thread="${esc(t.id)}"`), cancel: 'reply-cancel' })
       : t.canReply ? `<button type="button" class="th-reply" data-act="reply-open" data-thread="${esc(t.id)}">Reply…</button>` : '';
     if (reply || resBtn || err) h += `<div class="th-f">${reply}${resBtn}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>`;
     return h + '</div>';
@@ -1909,39 +2082,49 @@
   function newThreadHtml(c) {
     const sign = (side) => (side === 'LEFT' ? '−' : '+');
     const what = c.startLine != null && (c.startLine !== c.line || c.startSide !== c.side) ? `lines ${sign(c.startSide)}${c.startLine} to ${sign(c.side)}${c.line}` : `line ${sign(c.side)}${c.line}`;
-    return `<div class="th new" data-thread="new"><div class="th-new-h">${ICON.comment}<b>Comment on ${what}</b><span class="muted">Drag the + over more lines, or shift-click it on another line of this hunk, for a range.</span></div>`
-      + composerHtml(c.key, { buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
+    const local = localMode();
+    return `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on ${what}</b><span class="muted">Drag the + over more lines, or shift-click it on another line of this hunk, for a range.</span></div>`
+      + composerHtml(c.key, { local, dest: true, buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
   }
-  // Threads on a side's line of a file, and the comment being written there.
+  // Threads and notes on a side's line of a file, and the comment being written there.
   function threadsAt(f, side, line) {
-    if (!GH.on || line == null || !GH.data) return '';
-    const list = GH.anchors.get(f.p + '\n' + side + '\n' + line);
-    let h = list ? list.map((t) => threadHtml(t)).join('') : '';
+    if (line == null) return '';
+    const k = f.p + '\n' + side + '\n' + line;
+    const list = GH.on && GH.data ? GH.anchors.get(k) : null, notes = NT.data ? NT.anchors.get(k) : null;
+    let h = (list ? list.map((t) => threadHtml(t)).join('') : '') + (notes ? notes.map((n) => noteHtml(n)).join('') : '');
     const c = state.compose;
     if (c && c.path === f.p && c.side === side && c.line === line) h += newThreadHtml(c);
     return h;
   }
   // Threads under a unified row: on its new line, and on its old one (a removed or unchanged line).
   function threadsRow(f, meta, noLeft) {
-    if (!GH.on || !GH.data) return '';
+    if (!(GH.on && GH.data) && !NT.data && !state.compose) return '';
     return (meta.t !== '-' ? threadsAt(f, 'RIGHT', meta.n) : '') + (!noLeft && meta.t !== '+' && meta.o != null ? threadsAt(f, 'LEFT', meta.o) : '');
   }
   // Whether a row of a hunk is in the range a comment is being written on.
   const inCompose = (f, hi, ri) => { const c = state.compose; return !!c && c.path === f.p && c.hi === hi && ri >= c.r0 && ri <= c.r1; };
-  // Comments on a file (not a line), threads whose line isn't in this version, and a new file comment.
+  // Comments and notes on a file (not a line), threads and notes whose line isn't in this version,
+  // and a new file comment.
   function fileThreadsHtml(f) {
-    if (!GH.on || !GH.data) return '';
-    const e = GH.files.get(f.p) || { file: [], away: [] };
+    const e = (GH.on && GH.data && GH.files.get(f.p)) || { file: [], away: [] };
+    const nt = (NT.data && NT.files.get(f.p)) || { file: [], away: [] };
     let h = '';
     if (GH.fileCompose === f.p) {
-      const key = 'file:' + f.p;
-      h += `<div class="th new" data-thread="new"><div class="th-new-h">${ICON.comment}<b>Comment on the file</b></div>${composerHtml(key, { buttons: sendButtons('gh-thread', 'data-file="1"'), cancel: 'file-cancel' })}</div>`;
+      const key = 'file:' + f.p, local = localMode();
+      h += `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on the file</b></div>${composerHtml(key, { local, dest: true, buttons: sendButtons('gh-thread', 'data-file="1"'), cancel: 'file-cancel' })}</div>`;
     }
     h += e.file.map((t) => threadHtml(t, { head: '<b>On the file</b>' })).join('');
+    h += nt.file.map((n) => noteHtml(n, { head: '<b>On the file</b>' })).join('');
     if (e.away.length) {
       const open = GH.away.has(f.p);
       h += `<button type="button" class="th-away" data-act="away-toggle" data-p="${esc(f.p)}" aria-expanded="${open}"><span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span>${e.away.length} thread${e.away.length > 1 ? 's' : ''} on code this version doesn’t have (outdated${GH.stale ? ', or on newer commits' : ''})</button>`;
       if (open) h += e.away.map((t) => hunkSnippet(t) + threadHtml(t, { head: `<b>${t.outdated ? 'Outdated' : 'On a newer commit'}</b>` })).join('');
+    }
+    // Notes whose lines went, or left the diff, stay open here until folded.
+    if (nt.away.length) {
+      const open = !NT.folded.has(f.p);
+      h += `<button type="button" class="th-away note" data-act="nt-away" data-p="${esc(f.p)}" aria-expanded="${open}"><span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span>${nt.away.length} note${nt.away.length > 1 ? 's' : ''} on code this version doesn’t show</button>`;
+      if (open) h += nt.away.map((n) => noteSnippet(n) + noteHtml(n, { head: n.gone ? `<b>Gone since <code>${esc(shortSha(n.wrote.head))}</code></b>` : `<b>${esc(noteLines(n))}, outside the diff</b>` })).join('');
     }
     return h ? `<div class="fthreads">${h}</div>` : '';
   }
@@ -1951,20 +2134,94 @@
     const lines = t.hunk.split('\n').slice(1).slice(-5);
     return `<div class="th-hunk">${lines.map((l) => `<div class="${l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : ''}">${esc(l)}</div>`).join('')}</div>`;
   }
+  // A note's lines, as a thread's are said: line 28, lines 47 to 49, line −12 (the base's).
+  function noteLines(n) {
+    if (n.file) return 'the file';
+    const sign = n.side === 'LEFT' ? '−' : '';
+    return n.startLine != null && n.startLine !== n.line ? `lines ${sign}${n.startLine} to ${sign}${n.line}` : `line ${sign}${n.line}`;
+  }
+  // The code a note was on, above it in its file's list: the lines it was written on when they're
+  // gone, else its lines (outside the diff).
+  function noteSnippet(n) {
+    const w = n.gone ? n.wrote : n;
+    const from = w.startLine != null ? w.startLine : w.line;
+    if (!w.code || !w.code.length) return '';
+    return `<div class="th-hunk${n.gone ? ' gone' : ''}">${w.code.map((t, i) => `<div class="${n.gone ? 'd' : ''}"><span class="no">${from + i}</span>${esc(t) || ' '}</div>`).join('')}</div>`;
+  }
+  // Whether an agent has read a note: held, read, or waiting for its next untangle watch.
+  function noteStatus(n) {
+    const st = n.status;
+    if (st === 'held') return '<span class="cm-tag held" title="Live review is off: it waits until you send it, from the Notes menu">Held</span>';
+    if (st && st.read) return `<span class="cm-st" title="${esc(st.read)} read it through untangle watch">read by ${esc(st.read)}</span>`;
+    if (st === 'queued') return '<span class="cm-st" title="An agent’s next untangle watch reads it">not read yet</span>';
+    return '';
+  }
+  const AGENT_AV = '<span class="av ag" aria-hidden="true">✦</span>';
+  // A comment of a note: yours, or an agent's (its mark, its name). The note's first comment leads
+  // with its number, its lines and its tags.
+  function noteCommentHtml(n, c, first, lead) {
+    const mine = c.by == null;
+    const id = n.n + ':' + c.id, key = 'nedit:' + id;
+    const tools = mine ? iconBtn(ICON.edit, 'Edit', `data-act="nt-edit-open" data-n="${n.n}" data-id="${esc(c.id)}"`) + iconBtn(ICON.trash, lead ? 'Delete the note' : 'Delete', `data-act="nt-delete" data-n="${n.n}" data-id="${esc(c.id)}"${ntBusyAttr('del:' + id)}`) : '';
+    const body = NT.editing === id
+      ? composerHtml(key, { local: true, buttons: [[lead ? 'Update note' : 'Update reply', `data-act="nt-edit" data-n="${n.n}" data-id="${esc(c.id)}"`, true]], cancel: 'nt-edit-cancel' })
+      : `<div class="cm-body">${noteMd(c.body)}</div>`;
+    const when = `<span title="${esc(new Date(c.at).toLocaleString())}">${ago(c.at)}${c.edited ? ' · edited' : ''}</span>`;
+    const since = (what) => `<span class="cm-tag since" title="${what === 'Gone' ? 'The commits since you wrote it removed its lines' : 'The commits since you wrote it changed its lines: it’s on the lines that replaced them'}">${what} since <code>${esc(shortSha(n.wrote.head))}</code></span>`;
+    const tags = lead ? '<span class="cm-tag local" title="Kept on this machine, not on GitHub">Local</span>' + (n.gone ? since('Gone') : n.changed ? since('Changed') : '') + noteStatus(n) : mine ? '' : '<span class="cm-tag">Agent</span>';
+    const av = lead ? `<span class="nt-n" title="Note ${n.n}: “N${n.n}” names it to your agent">N${n.n}</span>` : mine ? '<span class="av"></span>' : AGENT_AV;
+    const head = first ? `<div class="cm-h"><b class="cm-who">${mine ? 'You' : esc(c.by)}</b>${lead ? `<span>${esc(noteLines(n))}</span>` : ''}${tags}${when}</div>` : '';
+    const err = NT.errors.get('del:' + id);
+    return `<div class="cm${first ? ' first' : ''}${mine ? '' : ' agent'}" data-comment="${esc(c.id)}">${first ? av : '<span></span>'}<div class="cm-main">${head}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>` : ''}</div>`;
+  }
+  // A note under its lines: a thread with orchid on its edge. Resolved notes fold, saying who
+  // resolved them: you, or the agent.
+  function noteHtml(n, o) {
+    o = o || {};
+    const open = !n.resolved || NT.opened.has(n.n);
+    const k = n.comments.length;
+    let h = `<div class="th note${n.resolved ? ' resolved' : ''}${n.resolved && n.resolved.by ? ' by-agent' : ''}" data-note="${n.n}">`;
+    if (n.resolved || o.head) {
+      const by = !n.resolved ? '' : n.resolved.by ? `<span class="ag-mark" aria-hidden="true">✦</span><span>Resolved by ${esc(n.resolved.by)}</span>` : `${ICON.check}<span>Resolved</span>`;
+      h += `<button type="button" class="th-fold" data-act="nt-fold" data-n="${n.n}" aria-expanded="${open}"><span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span>${by}${o.head ? `<span>${o.head}</span>` : ''}<span class="muted">· N${n.n} · ${esc(noteLines(n))} · ${k} comment${k === 1 ? '' : 's'}</span></button>`;
+    }
+    if (!open) return h + '</div>';
+    if (n.quote) h += `<div class="nt-quote"><span class="muted">On ${esc(n.quote.author || 'a')}’s thread on GitHub</span><div class="cm-body">${noteMd(n.quote.body.split('\n').map((l) => '> ' + l).join('\n'))}</div></div>`;
+    let prev = null;
+    h += n.comments.map((c, i) => { const first = !prev || prev.by !== c.by || i === 1; prev = c; return noteCommentHtml(n, c, first, i === 0); }).join('');
+    if (n.changed && !n.gone && NT.was.has(n.n)) {
+      const w = n.wrote, from = w.startLine != null ? w.startLine : w.line;
+      h += `<div class="nt-was"><p>The lines it was written on, at <code>${esc(shortSha(w.head))}</code>:</p>${w.code.map((t, i) => `<div class="r"><span class="no">${from + i}</span><span class="tx">${esc(t) || ' '}</span></div>`).join('')}</div>`;
+    }
+    const key = 'nreply:' + n.n, err = NT.errors.get('res:' + n.n) || NT.errors.get('post:' + n.n);
+    const reply = NT.replying.has(n.n) || drafts.has(key)
+      ? composerHtml(key, { local: true, dest: true, placeholder: 'Reply…', rows: 3, buttons: [['Reply', `data-act="nt-reply" data-n="${n.n}"`, true]], cancel: 'nt-reply-cancel' })
+      : `<button type="button" class="th-reply" data-act="nt-reply-open" data-n="${n.n}">Reply…</button>`;
+    const btn = (act, label, title, extra) => `<button type="button" class="btn sm" data-act="${act}" data-n="${n.n}" title="${esc(title)}"${extra || ''}>${label}</button>`;
+    const tools = (n.changed && !n.gone ? btn('nt-was', NT.was.has(n.n) ? 'Hide the lines it was on' : 'Show the lines it was on', `The lines you wrote it on, at ${shortSha(n.wrote.head)}`, ` aria-expanded="${NT.was.has(n.n)}"`) : '')
+      + btn('nt-copy1', 'Copy', 'Copy this note for your agent')
+      + (!n.resolved && !n.gone && canPost() ? btn('nt-post1', NT.busy === 'post:' + n.n ? 'Posting…' : 'Post to GitHub', 'Post it into your pending review on GitHub: it leaves the notes', ntBusyAttr('post:' + n.n)) : '')
+      + btn('nt-resolve', n.resolved ? 'Unresolve' : 'Resolve', n.resolved ? 'Open it again' : 'Resolve it: it folds away', ntBusyAttr('res:' + n.n));
+    h += `<div class="th-f">${reply}<span class="th-tools">${tools}</span>${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>`;
+    return h + '</div>';
+  }
   // The threads on a section's lines, and how many of them are open.
   function threadsIn(f, hi, s0, e0) {
     const out = { all: 0, open: 0 };
-    if (!GH.on || !GH.data) return out;
+    if (!GH.anchors.size && !NT.anchors.size) return out;
     const meta = hunkMeta(f.hunks[hi]);
     const add = (list) => (list || []).forEach((t) => { out.all++; if (!t.resolved) out.open++; });
     for (let i = s0; i < e0; i++) {
       const r = meta[i];
-      if (r.n != null && r.t !== '-') add(GH.anchors.get(f.p + '\nRIGHT\n' + r.n));
-      if (r.o != null && r.t !== '+') add(GH.anchors.get(f.p + '\nLEFT\n' + r.o));
+      if (r.n != null && r.t !== '-') { add(GH.anchors.get(f.p + '\nRIGHT\n' + r.n)); add(NT.anchors.get(f.p + '\nRIGHT\n' + r.n)); }
+      if (r.o != null && r.t !== '+') { add(GH.anchors.get(f.p + '\nLEFT\n' + r.o)); add(NT.anchors.get(f.p + '\nLEFT\n' + r.o)); }
     }
     return out;
   }
-  const openThreadsHtml = (p) => { const e = GH.on && GH.files.get(p); return e && e.open ? `<span class="cm-cnt" title="Open threads">${ICON.comment}${e.open}</span>` : ''; };
+  const openThreadsHtml = (p) => {
+    const e = GH.on && GH.files.get(p), n = NT.files.get(p);
+    return (e && e.open ? `<span class="cm-cnt" title="Open threads">${ICON.comment}${e.open}</span>` : '') + (n && n.open ? `<span class="cm-cnt note" title="Open notes">${ICON.comment}${n.open}</span>` : '');
+  };
   // A line of a file's diff by side: its hunk and row.
   function rowAt(path, side, line) {
     const x = side === 'LEFT' ? M().old.get(path + ':' + line) : M().head.get(path + ':' + line);
@@ -2043,9 +2300,47 @@
     h += `<div class="conv-new">${composerHtml('issue', { placeholder: 'Add a comment to the conversation', buttons: [['Comment', 'data-act="gh-comment"', true]] })}</div></div>`;
     return h;
   }
-  // The Threads tab: the conversation, then threads, open ones first, in the files' order.
+  // The notes in the Threads tab: open ones in the files' order, then the resolved ones.
+  function notesTabHtml() {
+    const d = NT.data;
+    if (!d) return `<div class="sb-gh">${NT.error ? `<span class="d">${esc(NT.error)}</span>` : 'Loading the notes…'}</div>`;
+    const order = new Map(M().files.map((f, i) => [f.p, i]));
+    const sorted = d.notes.slice().sort((x, y) => (order.has(x.path) ? order.get(x.path) : 1e9) - (order.has(y.path) ? order.get(y.path) : 1e9) || (x.path < y.path ? -1 : x.path > y.path ? 1 : 0) || (x.line || 0) - (y.line || 0));
+    const row = (n) => {
+      const last = n.comments[n.comments.length - 1];
+      const text = last.body.replace(/```[\s\S]*?```/g, '[code]').replace(/[#>*_`]/g, '').replace(/\s+/g, ' ').trim();
+      const where = n.file ? 'file' : n.startLine != null ? `${n.startLine}–${n.line}` : n.line;
+      const mk = n.resolved ? (n.resolved.by ? '<i class="mk ok ag" aria-hidden="true">✦</i>' : `<i class="mk ok">${ICON.check}</i>`) : `<i class="mk note${n.changed || n.gone ? ' ch' : ''}"></i>`;
+      const who = last.by ? `${last.by}: ` : n.comments.length > 1 ? 'You: ' : '';
+      const resolved = n.resolved ? ` · resolved${n.resolved.by ? ` by ${n.resolved.by}` : ''}` : '';
+      return `<button type="button" class="sb-row thr${n.resolved ? ' done' : ''}" data-act="nt-open" data-n="${n.n}" title="${esc(`N${n.n} · ${n.path}:${where}${resolved}${n.changed && !n.gone ? ' · changed since you wrote it' : n.gone ? ' · its lines are gone' : ''} · ${who}${trunc(text, 200)}`)}">${mk}<span class="nm">N${n.n} · ${esc(fileName(n.path))}:${where}<span class="sn">${esc(trunc(who + text, 90))}</span></span><span class="cnt">${n.comments.length > 1 ? n.comments.length : ''}</span></button>`;
+    };
+    const open = sorted.filter((n) => !n.resolved), done = sorted.filter((n) => n.resolved);
+    let h = open.length ? open.map(row).join('') : `<div class="sb-gh">${localMode() ? 'None open: the + on a line writes one.' : 'None open.'}</div>`;
+    if (done.length) {
+      h += `<button type="button" class="sb-group" data-act="nt-resolved-toggle" aria-expanded="${NT.showResolved}"><span>Resolved notes</span><span>${done.length} ${NT.showResolved ? '▾' : '▸'}</span></button>`;
+      if (NT.showResolved) h += done.map(row).join('');
+    }
+    return h;
+  }
+  // A section of the Threads tab, open or folded (kept in this browser): Notes, or From GitHub.
+  const sectionOpen = (key) => !(Array.isArray(UI.foldedThreads) && UI.foldedThreads.includes(key));
+  function threadsSectionHtml(key, label, title, count, body) {
+    const open = sectionOpen(key);
+    return `<button type="button" class="sb-sec ${key}" data-act="threads-fold" data-key="${key}" aria-expanded="${open}" title="${esc(title)}"><span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><i class="sw" aria-hidden="true"></i><span class="nm">${label}</span><span class="cnt">${count}</span></button>`
+      + (open ? `<div class="sb-sec-body">${body}</div>` : '');
+  }
+  // The Threads tab: the notes (in local mode, or when there are some) and what comes from GitHub,
+  // each a section that folds; then the conversation, and threads, open ones first, in the files' order.
   function commentsTabHtml(v) {
-    if (!GH.on) return `<div class="sb-gh">${esc((CONFIG.github && CONFIG.github.off) || 'This review has no pull request, so no comments.')}</div>`;
+    const gh = GH.on ? githubTabHtml(v) : `<div class="sb-gh">${esc((CONFIG.github && CONFIG.github.off) || 'This review has no pull request: comments stay here, as notes.')}</div>`;
+    if (!NT.on || !(localMode() || (NT.data && NT.data.notes.length))) return gh;
+    const notes = NT.data ? NT.data.notes.filter((n) => !n.resolved).length : '';
+    const threads = GH.data ? GH.data.threads.filter((t) => !t.resolved).length : '';
+    return threadsSectionHtml('notes', 'Notes', 'Kept on this machine, for your agent', notes, notesTabHtml())
+      + threadsSectionHtml('github', GH.on ? 'From GitHub' : 'GitHub', GH.on ? 'The pull request’s conversation and threads' : 'This review has no pull request', threads, gh);
+  }
+  function githubTabHtml(v) {
     const d = GH.data;
     let h = `<div class="sb-gh">${GH.error ? `<span class="d">${esc(GH.error)}</span>` : !d ? 'Loading the conversation from GitHub…' : GH.loading ? 'Refreshing…' : `From GitHub, ${ago(new Date(GH.at).toISOString())}`}<span class="sp"></span>${iconBtn(ICON.refresh, 'Refresh from GitHub', 'data-act="gh-refresh"')}</div>`;
     if (!d) return h;
@@ -2070,26 +2365,93 @@
     }
     return h;
   }
-  // The top bar's review button and, opened, the review to finish: a summary and a verdict.
+  // The top bar's review button and, opened, its menu: where new comments go, then the review to
+  // finish (a summary and a verdict) or, in local mode, the notes to copy for the agent.
   function renderReviewBar() {
+    renderAgent();
     const el = $('#vw-review');
     if (!el) return;
-    el.hidden = !GH.on;
-    if (!GH.on) return;
+    el.hidden = !GH.on && !NT.on;
+    if (el.hidden) return;
+    const local = localMode();
     const d = GH.data, n = d && d.pending ? d.pending.comments : 0;
-    let h = `<button type="button" class="btn rv-btn" data-act="review-toggle" aria-expanded="${GH.reviewOpen}" aria-haspopup="dialog" title="${n ? `Finish your review: ${n} pending comment${n === 1 ? '' : 's'}` : 'Comment on, approve or request changes to the pull request'}">${n ? `Finish review <span class="rv-n">${n}</span>` : 'Review'}${ICON.chevronDown}</button>`;
-    if (GH.reviewOpen && d) {
-      const mine = d.pr.mine;
-      const opt = (ev, label, note, off) => `<label class="rv-opt${off ? ' off' : ''}"><input type="radio" name="rv-event" value="${ev}"${GH.event === ev ? ' checked' : ''}${off ? ' disabled' : ''}><span><b>${label}</b><span class="muted">${note}</span></span></label>`;
-      h += `<div class="rv-pop" role="dialog" aria-label="Finish your review"><div class="rv-h"><b>Finish your review</b><span class="muted">${n ? `${n} pending comment${n === 1 ? '' : 's'}` : 'no pending comments'}</span></div>`
-        + (GH.stale ? `<div class="sb-warn">GitHub has newer commits than this review (<code>${esc(d.pr.head.slice(0, 7))}</code>). <button type="button" class="linkish" data-act="refresh">Refresh</button></div>` : '')
-        + composerHtml('review', {
-          placeholder: 'Leave a comment', rows: 4,
-          extra: `<div class="rv-opts">${opt('COMMENT', 'Comment', 'General feedback, without approving.', false)}${opt('APPROVE', 'Approve', mine ? 'Not for your own pull request.' : 'Feedback, and approval to merge.', mine)}${opt('REQUEST_CHANGES', 'Request changes', mine ? 'Not for your own pull request.' : 'Feedback that must be addressed before merging.', mine)}</div>`,
-          buttons: (n ? [['Discard pending review', 'data-act="gh-discard"', false]] : []).concat([['Submit review', 'data-act="gh-submit"', true]]),
-        }) + '</div>';
+    const open = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
+    const label = local ? `Notes${open ? ` <span class="rv-n nt">${open}</span>` : ''}` : n ? `Finish review <span class="rv-n">${n}</span>` : 'Review';
+    const title = local ? 'Your notes, kept on this machine: copy them for your agent, or post them to GitHub' : n ? `Finish your review: ${n} pending comment${n === 1 ? '' : 's'}` : 'Comment on, approve or request changes to the pull request';
+    let h = `<button type="button" class="btn rv-btn${local ? ' local' : ''}" data-act="review-toggle" aria-expanded="${GH.reviewOpen}" aria-haspopup="dialog" title="${esc(title)}">${label}${ICON.chevronDown}</button>`;
+    if (GH.reviewOpen) {
+      h += `<div class="rv-pop${local ? ' local' : ''}" role="dialog" aria-label="${local ? 'Your notes' : 'Finish your review'}">${modeHtml()}`;
+      if (local) h += notesPopHtml();
+      else if (!d) h += `<p class="rv-sub">${GH.error ? esc(GH.error) : 'Loading the conversation from GitHub…'}</p>`;
+      else {
+        const mine = d.pr.mine;
+        const opt = (ev, label, note, off) => `<label class="rv-opt${off ? ' off' : ''}"><input type="radio" name="rv-event" value="${ev}"${GH.event === ev ? ' checked' : ''}${off ? ' disabled' : ''}><span><b>${label}</b><span class="muted">${note}</span></span></label>`;
+        const kept = NT.data ? NT.data.notes.length : 0;
+        h += `<div class="rv-h"><b>Finish your review</b><span class="muted">${n ? `${n} pending comment${n === 1 ? '' : 's'}` : 'no pending comments'}</span></div>`
+          + (GH.stale ? `<div class="sb-warn">GitHub has newer commits than this review (<code>${esc(d.pr.head.slice(0, 7))}</code>). <button type="button" class="linkish" data-act="refresh">Refresh</button></div>` : '')
+          + composerHtml('review', {
+            placeholder: 'Leave a comment', rows: 4,
+            extra: `<div class="rv-opts">${opt('COMMENT', 'Comment', 'General feedback, without approving.', false)}${opt('APPROVE', 'Approve', mine ? 'Not for your own pull request.' : 'Feedback, and approval to merge.', mine)}${opt('REQUEST_CHANGES', 'Request changes', mine ? 'Not for your own pull request.' : 'Feedback that must be addressed before merging.', mine)}</div>`,
+            buttons: (n ? [['Discard pending review', 'data-act="gh-discard"', false]] : []).concat([['Submit review', 'data-act="gh-submit"', true]]),
+          })
+          + (kept ? `<p class="rv-sub">Your ${kept} local note${kept === 1 ? '' : 's'} stay${kept === 1 ? 's' : ''} here. Switch to Local notes to copy them.</p>` : '');
+      }
+      h += '</div>';
     }
+    // What had the focus in the menu keeps it as the menu is drawn again: a radio, the switch, the
+    // line for the agent (with its caret). Drafts get theirs back from render.
+    const ae = el.contains(document.activeElement) ? document.activeElement : null;
+    const sel = !ae ? null : ae.name ? `[name="${ae.name}"]${ae.type === 'radio' ? `[value="${ae.value}"]` : ''}` : ae.matches('[data-nt-opening]') ? '[data-nt-opening]' : ae.dataset.act && ae.dataset.draft == null ? `[data-act="${ae.dataset.act}"]${ae.dataset.mode ? `[data-mode="${ae.dataset.mode}"]` : ''}` : null;
+    const caret = ae && ae.matches('[data-nt-opening]') ? [ae.selectionStart, ae.selectionEnd, ae.scrollTop] : null;
     el.innerHTML = h;
+    const again = sel && el.querySelector(sel);
+    if (again) {
+      again.focus({ preventScroll: true });
+      if (caret) { again.setSelectionRange(caret[0], caret[1]); again.scrollTop = caret[2]; }
+    }
+  }
+  // The menu's switch: new comments go to GitHub, or stay here as notes.
+  function modeHtml() {
+    const local = localMode(), can = ghCan();
+    const why = !GH.on ? ((CONFIG.github && CONFIG.github.off) || 'This review has no pull request') : `GitHub didn’t answer: ${GH.error || ''}`;
+    return `<div class="rv-mode"><b>Comments go to</b><div class="mini-seg rv-seg" role="group" aria-label="Comments go to">`
+      + `<button type="button" data-act="nt-mode" data-mode="github" aria-pressed="${!local}"${can ? '' : ` disabled title="${esc(why)}"`}><i class="sw gh"></i>GitHub</button>`
+      + `<button type="button" data-act="nt-mode" data-mode="local" aria-pressed="${local}" title="Keep new comments on this machine, as notes for your agent"><i class="sw"></i>Local notes</button></div></div>`;
+  }
+  // The Notes menu: what's kept, live review, the line the copy opens with, which notes it takes,
+  // and the two ways out: Copy for agent, Post to GitHub.
+  function notesPopHtml() {
+    const d = NT.data;
+    if (!d) return `<p class="rv-sub">${NT.error ? esc(NT.error) : 'Loading the notes…'}</p>`;
+    const open = d.notes.filter((x) => !x.resolved), fresh = open.filter((x) => !x.copied);
+    const a = agentsNow()[0];
+    const pr = /^#(\d+)\s/.exec(M().raw.title || '');
+    const opt = (v, label, k) => `<label class="rv-opt"><input type="radio" name="nt-scope" value="${v}"${d.scope === v ? ' checked' : ''}><span><b>${label}</b></span><span class="ct">${k}</span></label>`;
+    let h = `<p class="rv-sub"><b>${open.length} open note${open.length === 1 ? '' : 's'}</b>, kept for ${pr ? '#' + pr[1] : 'this review'} on this machine. Nothing leaves it until you copy or post ${open.length === 1 ? 'it' : 'them'}, or an agent runs <code>untangle watch</code>.</p>`;
+    if (a) h += `<p class="rv-sub rv-agent"><i class="dot ${a.state}"></i><span><b>${esc(a.name)} ${a.state === 'watching' ? 'is watching' : 'is working on your notes'}</b>${d.live ? ': notes and replies reach it as you write them.' : ': notes and replies wait until you send them.'}</span></p>`;
+    h += `<label class="rv-check"><input type="checkbox" name="nt-live"${d.live ? ' checked' : ''}><span><b>Live review</b><span class="muted">${d.live ? 'Notes and replies reach a watching agent as you write them.' : 'Notes and replies wait until you send them, like a pending review.'}</span></span></label>`;
+    if (d.held) h += `<button type="button" class="sb-pend nt" data-act="nt-send"${ntBusyAttr('send')}>Send ${d.held} held comment${d.held === 1 ? '' : 's'}${a ? ` to ${esc(a.name)}` : ''}</button>`;
+    h += `<label class="rv-lbl" for="nt-opening">For the agent</label><textarea id="nt-opening" class="rv-ta" data-nt-opening rows="2" placeholder="The line the copy opens with">${esc(NT.opening != null ? NT.opening : d.opening)}</textarea>`;
+    h += `<div class="rv-opts" role="radiogroup" aria-label="Which notes to copy">${opt('open', 'Open notes', open.length)}${opt('new', 'Not copied yet', fresh.length)}${opt('all', 'All including resolved', d.notes.length)}</div>`;
+    const pend = GH.data && GH.data.pending ? GH.data.pending.comments : 0;
+    if (pend) h += `<button type="button" class="sb-pend" data-act="nt-mode" data-mode="github">${pend} pending on GitHub · Finish your review</button>`;
+    const err = NT.errors.get('post') || NT.errors.get('send');
+    if (err) h += `<div class="cmp-err" role="alert">${esc(err)}</div>`;
+    const postable = open.filter((x) => !x.gone).length;
+    h += `<div class="rv-f">${GH.on ? `<button type="button" class="btn sm" data-act="nt-post" title="${canPost() ? 'Your open notes become threads of your pending review on GitHub, and leave the notes' : 'GitHub can’t take them now'}"${canPost() && postable ? '' : ' disabled'}${ntBusyAttr('post')}>${NT.busy === 'post' ? 'Posting…' : 'Post to GitHub'}</button>` : ''}`
+      + `<button type="button" class="btn sm primary" data-act="nt-copy"${ntScoped(d.scope).length ? '' : ' disabled'}>Copy for agent</button></div>`;
+    return h;
+  }
+  // The bar's pill while an agent holds the review: watching, or working on your notes.
+  function renderAgent() {
+    const el = $('#vw-agent');
+    if (!el) return;
+    const a = agentsNow()[0];
+    el.hidden = !a;
+    if (!a) return;
+    const h = `<i class="dot ${a.state}"></i><span>${esc(a.name)} ${a.state === 'watching' ? 'is watching' : 'is working'}</span>`;
+    if (el.innerHTML !== h) el.innerHTML = h;
+    el.title = a.state === 'watching' ? `${a.name} runs untangle watch on this review: your notes and replies reach it ${NT.data.live ? 'as you write them' : 'when you send them'}` : `${a.name} read your notes: its answers show under them`;
   }
   let toastTimer = null;
   function toast(msg) {
@@ -2121,7 +2483,7 @@
     addBtn.classList.add('on');
   }
   main.addEventListener('mouseover', (e) => {
-    if (!GH.on || drag || e.target === addBtn) return;
+    if ((!GH.on && !NT.on) || drag || e.target === addBtn) return;
     const cell = e.target.closest('[data-c]');
     if (cell && main.contains(cell)) placeAdd(cell); else addBtn.classList.remove('on');
   });
@@ -3888,12 +4250,15 @@
     const pct = t.all ? Math.round((1 - t.lines / t.all) * 100) : 100;
     const v = state.view;
     const tab = (k, label, n) => `<button type="button" role="tab" data-tab="${k}" aria-selected="${state.tab === k}">${label}<i>${n}</i></button>`;
-    const openThreads = GH.data ? GH.data.threads.filter((x) => !x.resolved).length : '…';
+    // The Threads tab: GitHub's open threads and the open notes.
+    const threadsOn = GH.on || NT.on;
+    const openNotes = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
+    const openThreads = GH.on && !GH.data && !GH.error ? '…' : (GH.data ? GH.data.threads.filter((x) => !x.resolved).length : 0) + openNotes;
     let h = `<div class="sb-top"><div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
       + (t.open ? `<b>${t.open}</b><span>change${t.open === 1 ? '' : 's'} to review</span>` : `<b>${ICON.check}</b><span>All ${t.total} changes reviewed</span>`)
       + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where your marks are kept" aria-label="Marks" aria-haspopup="dialog" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
       // Four tabs fit the sidebar without their counts: they show when it's wider.
-      + `<div class="sb-tabs${GH.on && hxOn() ? ' four' : ''}" role="tablist">${tab('chains', 'Chains', m.chains.length)}${tab('files', 'Files', m.files.length)}${GH.on ? tab('comments', 'Threads', openThreads) : ''}${hxOn() ? tab('commits', 'Commits', HISTORY.commits.length) : ''}</div></div>`;
+      + `<div class="sb-tabs${threadsOn && hxOn() ? ' four' : ''}" role="tablist">${tab('chains', 'Chains', m.chains.length)}${tab('files', 'Files', m.files.length)}${threadsOn ? tab('comments', 'Threads', openThreads) : ''}${hxOn() ? tab('commits', 'Commits', HISTORY.commits.length) : ''}</div></div>`;
     // Rows that stay at the top with the tabs, over a line: the views beside the list.
     let pin = '';
     const top = h;
@@ -4482,9 +4847,15 @@
       const topH = (side.querySelector('.sb-top') || {}).offsetHeight || 0;
       if (cur.offsetTop < side.scrollTop + topH || cur.offsetTop > side.scrollTop + side.clientHeight - 40) side.scrollTop = cur.offsetTop - topH - (side.clientHeight - topH) / 3;
     }
-    if (GH.on) {
+    viewer.classList.toggle('local', localMode());
+    if (GH.on || NT.on) {
       main.appendChild(addBtn);
       addBtn.classList.remove('on');
+      if (NT.reveal != null) {
+        const el = main.querySelector(`[data-note="${NT.reveal}"]`);
+        if (el) { placeRow(el, headH() + 40); el.classList.add('flash-th'); }
+        NT.reveal = null;
+      }
       if (GH.reveal) {
         const el = [...main.querySelectorAll('[data-thread]')].find((x) => x.dataset.thread === GH.reveal);
         if (el) { placeRow(el, headH() + 40); el.classList.add('flash-th'); }
@@ -4717,7 +5088,7 @@
   }
   // c: a comment on the line you're on.
   function commentHere() {
-    if (!canCommentLines()) { if (GH.on) toast(GH.stale ? 'GitHub has newer commits: refresh to comment on lines.' : 'Comments aren’t loaded yet.'); return; }
+    if (!canCommentLines()) { if (localMode()) toast('The notes aren’t loaded yet.'); else if (GH.on) toast(GH.stale ? 'GitHub has newer commits: refresh to comment on lines.' : 'Comments aren’t loaded yet.'); return; }
     const el = currentMark();
     let row = el && !el.matches('.hh') ? rowOf(el) : null;
     if (!row) { const ref = readY(); row = [...main.querySelectorAll('.code[data-p] .ln[data-c], .code[data-p] .sl')].find((r) => r.getBoundingClientRect().bottom > ref) || null; }
@@ -5084,6 +5455,16 @@
         out.threads.push({ score: r.score + (t.resolved ? -100 : 50), icon: ICON.comment, html: matched(where, r.at) + `<span class="own">${matched(label.slice(where.length), r.at, where.length)}</span>`, hint: `${c ? c.author.login : ''}${t.resolved ? ' · resolved' : ''}`, go: () => openThread(t.id) });
       });
     }
+    if (on('threads') && NT.data) {
+      NT.data.notes.forEach((n) => {
+        const where = `N${n.n} ${fileName(n.path)}:${n.file ? 'file' : n.line}`;
+        const text = n.comments[0].body.replace(/```[\s\S]*?```/g, '[code]').replace(/[#>*_`]/g, '').replace(/\s+/g, ' ').trim();
+        const label = `${where} ${trunc(text, 70)}`;
+        const r = fuzzy(label, q);
+        if (!r) return;
+        out.threads.push({ score: r.score + (n.resolved ? -100 : 60), icon: ICON.comment, html: matched(where, r.at) + `<span class="own">${matched(label.slice(where.length), r.at, where.length)}</span>`, hint: `note${n.resolved ? ' · resolved' : ''}`, go: () => openNote(n.n) });
+      });
+    }
     return out;
   }
   function palSymbols(q) {
@@ -5138,7 +5519,7 @@
     PAL.input.setAttribute('aria-activedescendant', PAL.items.length ? 'pal-' + PAL.active : '');
   }
   function palScope(step) {
-    const usable = SCOPES.filter((k) => (k !== 'symbols' || CONFIG.served) && (k !== 'threads' || GH.on));
+    const usable = SCOPES.filter((k) => (k !== 'symbols' || CONFIG.served) && (k !== 'threads' || GH.on || NT.on));
     PAL.scope = usable[(usable.indexOf(PAL.scope) + step + usable.length) % usable.length];
     PAL.active = 0;
     palDraw();
@@ -5201,9 +5582,9 @@
 
   // ---------- events
   // A comment's text, or why it can't be sent yet.
-  const bodyOf = (key) => { const b = (drafts.get(key) || '').trim(); if (!b) { GH.errors.set(key, 'Write something first.'); render(); } return b; };
+  const bodyOf = (key) => { const b = (drafts.get(key) || '').trim(); if (!b) { GH.errors.set(key, 'Write something first.'); NT.errors.set(key, 'Write something first.'); render(); } return b; };
   // Whether a composer may close: an unsent comment is only dropped when the user says so.
-  const letGo = (key, original) => { const t = drafts.get(key) || ''; if (t.trim() && t !== original && !confirm('Discard this unsent comment?')) return false; setDraft(key, ''); GH.preview.delete(key); GH.errors.delete(key); return true; };
+  const letGo = (key, original) => { const t = drafts.get(key) || ''; if (t.trim() && t !== original && !confirm('Discard this unsent comment?')) return false; setDraft(key, ''); GH.preview.delete(key); GH.errors.delete(key); NT.errors.delete(key); return true; };
   const findComment = (id) => { const d = GH.data; if (!d) return null; for (const t of d.threads) { const c = t.comments.find((x) => x.id === id); if (c) return c; } return d.comments.find((x) => x.id === id) || (d.pr.id === id ? d.pr : null); };
   const GH_ACTS = new Set(['conversation', 'thread-open', 'thread-toggle', 'resolved-toggle', 'away-toggle', 'review-toggle', 'file-comment', 'file-cancel', 'compose-cancel', 'reply-open', 'reply-cancel', 'edit-open', 'edit-cancel', 'cmp-pane', 'cmp-suggest', 'react-open']);
   function ghClick(act, d) {
@@ -5229,7 +5610,7 @@
     }
     if (act === 'edit-cancel') { const c = findComment(d.key.slice('edit:'.length)); if (letGo(d.key, c && c.body)) { GH.editing = null; render(); } return; }
     if (act === 'cmp-pane') {
-      if (d.pane === 'preview') { GH.preview.add(d.key); ghPreview(d.key); } else { GH.preview.delete(d.key); GH.focus = d.key; }
+      if (d.pane === 'preview') { GH.preview.add(d.key); if (!d.local) ghPreview(d.key); } else { GH.preview.delete(d.key); GH.focus = d.key; }
       return render();
     }
     if (act === 'cmp-suggest') {
@@ -5295,11 +5676,135 @@
       return ghAct('review', { action: 'discard' }, () => { GH.reviewOpen = false; toast('Pending review discarded'); });
     }
   }
+  // A note's lines, from the comment being written: on one side. A range across both sides (a
+  // removed line to an added one) keeps the lines of the side it ends on.
+  function noteDraft(c) {
+    if (c.startLine == null || c.startSide === c.side) return { path: c.path, side: c.side, line: c.line, startLine: c.startLine != null ? c.startLine : undefined };
+    const f = M().files.find((x) => x.p === c.path);
+    const h = f && c.hi != null ? f.hunks[c.hi] : null;
+    const nums = [];
+    if (h) for (let i = c.r0; i <= c.r1; i++) { const r = h.meta[i]; const v = c.side === 'LEFT' ? (r.t !== '+' ? r.o : null) : (r.t !== '-' ? r.n : null); if (v != null) nums.push(v); }
+    return { path: c.path, side: c.side, line: c.line, startLine: nums.length > 1 ? Math.min(...nums) : undefined };
+  }
+  // What a note just written does: kept, and sent to the watching agent or held.
+  function noteSaved(what) {
+    const a = agentsNow()[0];
+    return `${what || 'Note'} saved${NT.data && !NT.data.live ? ', held until you send it' : a ? `, sent to ${a.name}` : ''}`;
+  }
+  function ntCopied(ns) {
+    api('notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'copied', ns }) }).then(okJson).then((j) => { ntSet(j); render(); }).catch(() => {});
+  }
+  // A note, from the Threads tab or Ctrl K: its file, opened at its lines, and the note pulsing.
+  function openNote(n) {
+    const note = NT.byN.get(n);
+    if (!note) return;
+    NT.opened.add(n);
+    state.peek = null;
+    if (!M().files.some((f) => f.p === note.path) && !M().generated.some((f) => f.p === note.path)) return toast(`${note.path} isn’t in this review`);
+    state.view = { kind: 'file', path: note.path };
+    const r = !note.file && note.line != null ? rowAt(note.path, note.side, note.line) : null;
+    if (r) { const k = 'file|' + note.path + '#' + r.hi + ':0'; state.collapsed.delete(k); state.expanded.add(k); } else NT.folded.delete(note.path);
+    NT.reveal = n;
+    render({ top: true });
+  }
+  // Notes: where comments go, writing and answering notes, and the two ways out (copy, post).
+  function ntClick(act, d) {
+    const n = d.n != null ? Number(d.n) : null, note = n != null ? NT.byN.get(n) : null;
+    if (act === 'nt-mode') { if (NT.data && d.mode !== (localMode() ? 'local' : 'github')) ntSettings({ mode: d.mode }); return; }
+    if (act === 'nt-add') {
+      const c = state.compose;
+      if (!d.file && !c) return;
+      const body = bodyOf(d.key);
+      if (!body) return;
+      const at = d.file ? { path: GH.fileCompose, file: true } : noteDraft(c);
+      return ntAct(d.key, { action: 'add', body, ...at }, () => {
+        setDraft(d.key, ''); GH.preview.delete(d.key);
+        if (d.file) GH.fileCompose = null; else state.compose = null;
+        toast(noteSaved());
+      });
+    }
+    if (act === 'nt-quote') {
+      // A reply to a GitHub thread, in local mode: a note on its lines that quotes it.
+      const t = GH.data && GH.data.threads.find((x) => x.id === d.thread);
+      if (!t) return;
+      const body = bodyOf(d.key);
+      if (!body) return;
+      const c0 = t.comments[0];
+      const at = t.file || t.at == null ? { path: t.path, file: true } : { path: t.path, side: t.side, line: t.at, startLine: t.from != null && t.from !== t.at ? t.from : undefined };
+      return ntAct(d.key, { action: 'add', body, ...at, quote: { thread: t.id, author: c0 ? c0.author.login : '', body: c0 ? c0.body : '', url: c0 ? c0.url : '' } }, () => {
+        setDraft(d.key, ''); GH.preview.delete(d.key); GH.replying.delete(t.id);
+        toast(noteSaved());
+      });
+    }
+    if (act === 'nt-reply-open') { NT.replying.add(n); GH.focus = 'nreply:' + n; return render(); }
+    if (act === 'nt-reply-cancel') { if (letGo(d.key)) { NT.replying.delete(Number(d.key.slice('nreply:'.length))); render(); } return; }
+    if (act === 'nt-reply') {
+      const body = bodyOf(d.key);
+      if (!body) return;
+      return ntAct(d.key, { action: 'reply', n, body }, () => { setDraft(d.key, ''); GH.preview.delete(d.key); NT.replying.delete(n); toast(noteSaved('Reply')); });
+    }
+    if (act === 'nt-edit-open') {
+      const c = note && note.comments.find((x) => x.id === d.id);
+      if (!c) return;
+      NT.editing = n + ':' + d.id;
+      if (!drafts.has('nedit:' + NT.editing)) setDraft('nedit:' + NT.editing, c.body);
+      GH.focus = 'nedit:' + NT.editing;
+      return render();
+    }
+    if (act === 'nt-edit-cancel') {
+      const [nn, id] = d.key.slice('nedit:'.length).split(':');
+      const owner = NT.byN.get(Number(nn)), c = owner && owner.comments.find((x) => x.id === id);
+      if (letGo(d.key, c && c.body)) { NT.editing = null; render(); }
+      return;
+    }
+    if (act === 'nt-edit') {
+      const body = bodyOf(d.key);
+      if (!body) return;
+      return ntAct(d.key, { action: 'edit', n, id: d.id, body }, () => { setDraft(d.key, ''); GH.preview.delete(d.key); NT.editing = null; });
+    }
+    if (act === 'nt-delete') {
+      if (!note) return;
+      const lead = note.comments[0].id === d.id, more = note.comments.length - 1;
+      if (!confirm(lead ? `Delete N${n}${more ? ` and its ${more} repl${more === 1 ? 'y' : 'ies'}` : ''}? This can’t be undone.` : 'Delete this reply?')) return;
+      return ntAct('del:' + n + ':' + d.id, { action: 'delete', n, id: lead ? undefined : d.id }, () => toast(lead ? `N${n} deleted` : 'Reply deleted'));
+    }
+    if (act === 'nt-resolve') { if (note) ntAct('res:' + n, { action: 'resolve', n, resolved: !note.resolved }); return; }
+    if (act === 'nt-fold') { NT.opened.has(n) ? NT.opened.delete(n) : NT.opened.add(n); return render(); }
+    if (act === 'nt-was') { NT.was.has(n) ? NT.was.delete(n) : NT.was.add(n); return render(); }
+    if (act === 'nt-away') { NT.folded.has(d.p) ? NT.folded.delete(d.p) : NT.folded.add(d.p); return render(); }
+    if (act === 'nt-resolved-toggle') { NT.showResolved = !NT.showResolved; return renderSide(); }
+    if (act === 'nt-open') return openNote(n);
+    if (act === 'nt-copy1') {
+      if (note) copyText(ntExport([note]), `N${n} copied for your agent`).then((ok) => { if (ok && !note.copied) ntCopied([n]); });
+      return;
+    }
+    if (act === 'nt-copy') {
+      const list = ntScoped(NT.data ? NT.data.scope : 'open');
+      if (list.length) copyText(ntExport(list), `${list.length} note${list.length === 1 ? '' : 's'} copied for your agent`).then((ok) => { if (ok) ntCopied(list.map((x) => x.n)); });
+      return;
+    }
+    if (act === 'nt-post' || act === 'nt-post1') {
+      const list = act === 'nt-post1' ? (note ? [note] : []) : NT.data.notes.filter((x) => !x.resolved && !x.gone);
+      if (!list.length) return;
+      if (act === 'nt-post' && !confirm(`Post your ${list.length} open note${list.length === 1 ? '' : 's'} to GitHub? ${list.length === 1 ? 'It becomes a thread' : 'Each becomes a thread'} of your pending review, and leaves the notes.`)) return;
+      return ntAct(act === 'nt-post' ? 'post' : 'post:' + n, { action: 'post', ns: list.map((x) => x.n) }, () => toast(`${list.length === 1 ? `N${list[0].n} is` : `${list.length} notes are`} in your pending review on GitHub`));
+    }
+    if (act === 'nt-send') {
+      const k = NT.data ? NT.data.held : 0, a = agentsNow()[0];
+      return ntAct('send', { action: 'send' }, () => toast(`${k} held comment${k === 1 ? '' : 's'} sent${a ? ` to ${a.name}` : ''}`));
+    }
+  }
   // The review's popover closes on a click outside it (what's typed in it stays as a draft).
   document.addEventListener('click', (e) => { if (GH.reviewOpen && !e.target.closest('.vw-review, [data-act="review-toggle"]') && document.contains(e.target)) { GH.reviewOpen = false; render(); } });
   viewer.addEventListener('input', (e) => {
     const k = e.target.dataset && e.target.dataset.draft;
-    if (k != null) { setDraft(k, e.target.value); if (GH.on) mentionUpdate(e.target); }
+    // @ and # come from GitHub: not for notes.
+    if (k != null) { setDraft(k, e.target.value); if (GH.on && !/^n(reply|edit):/.test(k) && !(localMode() && /^(new|file|reply):/.test(k))) mentionUpdate(e.target); }
+    if (e.target.matches && e.target.matches('[data-nt-opening]')) {
+      NT.opening = e.target.value;
+      clearTimeout(NT.openingTimer);
+      NT.openingTimer = setTimeout(() => { NT.openingTimer = null; ntSettings({ opening: NT.opening }); }, 600);
+    }
   });
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],[data-detail],.ref');
@@ -5512,8 +6017,19 @@
     }
     if (act === 'minimap') { UI.minimap = !UI.minimap; saveUI(); return mini.update(); }
     if (act === 'side-toggle') return toggleSide();
+    if (act === 'threads-fold') {
+      const folded = new Set(Array.isArray(UI.foldedThreads) ? UI.foldedThreads : []);
+      folded.has(d.key) ? folded.delete(d.key) : folded.add(d.key);
+      UI.foldedThreads = [...folded];
+      saveUI();
+      renderSide();
+      const again = side.querySelector(`[data-act="threads-fold"][data-key="${d.key}"]`);
+      if (again) again.focus();
+      return;
+    }
     if (act === 'refresh') return startRefresh();
     if (act === 'reload') return reloadHere();
+    if (act && act.startsWith('nt-')) return ntClick(act, d);
     if (act && (act.startsWith('gh-') || GH_ACTS.has(act))) return ghClick(act, d);
     if (act === 'reset') {
       const n = rev().size;
@@ -5680,6 +6196,8 @@
   });
   viewer.addEventListener('change', (e) => {
     if (e.target.name === 'rv-event') GH.event = e.target.value;
+    if (e.target.name === 'nt-scope') ntSettings({ scope: e.target.value });
+    if (e.target.name === 'nt-live') ntSettings({ live: e.target.checked });
   });
 
   // ---------- panels: the sidebar's width (drag its edge, or use ← and → on it); a double-click
@@ -5928,6 +6446,14 @@
   if (CONFIG.served) {
     setInterval(() => { if (document.visibilityState === 'visible') freshCheck(); }, 120000);
     setTimeout(freshCheck, 5000);
+  }
+  if (NT.on) {
+    // The page comes with the notes; untangle says when they change (an agent answered).
+    if (CONFIG.notes) ntSet(CONFIG.notes); else ntLoad();
+    addEventListener('untangle:push', (e) => { const p = e.detail || {}; if ('notes' in p && (p.notes == null || !NT.data || p.notes !== NT.data.rev)) ntLoad(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ntLoad(); });
+    // While an agent holds the review, its commits show within seconds.
+    setInterval(() => { if (document.visibilityState === 'visible' && agentsNow().length) { freshCheck(); renderAgent(); } }, 5000);
   }
   if (GH.on) {
     ghLoad(true);

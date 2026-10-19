@@ -1,5 +1,6 @@
 // The local web server: the review page, its progress while it's built, and the page's API.
-// Every request needs the token from the printed URL (kept in a cookie after the first visit).
+// Every request needs the token from the printed URL (kept in a cookie after the first visit), or
+// for untangle's own commands, from the run file (in a header).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -13,10 +14,11 @@ export interface Api {
   /** Static files the page loads (the highlighter, the fonts), by name. */
   asset(name: string): { type: string; body: Buffer } | null;
   /**
-   * The page's API: api/<route>, with the query and the body (JSON) of the request, and the head
-   * commit of the review the page shows (when it says).
+   * The page's API: api/<route>, with the query and the body (JSON) of the request, the head
+   * commit of the review the page shows (when it says), and a signal that aborts when the asker
+   * goes before the answer.
    */
-  call(route: string, method: string, query: URLSearchParams, body: unknown, head: string | null): Promise<{ status?: number; data: unknown }>;
+  call(route: string, method: string, query: URLSearchParams, body: unknown, head: string | null, signal: AbortSignal): Promise<{ status?: number; data: unknown }>;
 }
 
 /** The build's progress, and a way to wait for its next change. */
@@ -39,6 +41,8 @@ export interface ServerOptions {
 }
 
 const MAX_BODY = 32 << 20;
+// Calls that wait for news as long as it takes: they don't keep untangle from stopping.
+const WAITING = new Set(['api/notes/watch']);
 // How long the progress page's question waits for a change before it's answered anyway.
 const STATUS_WAIT = 15_000;
 // How often a page's presence socket hears from the server, so nothing between them drops it as idle.
@@ -186,9 +190,21 @@ export class ReviewServer {
 
   private authorized(req: http.IncomingMessage): boolean {
     const jar = Object.fromEntries((req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).filter((kv) => kv.length === 2));
-    const got = Buffer.from(String(jar[this.cookie] || ''));
+    const header = req.headers['x-untangle-token'];
+    const got = Buffer.from(String(typeof header === 'string' ? header : jar[this.cookie] || ''));
     const want = Buffer.from(this.token);
     return got.length === want.length && crypto.timingSafeEqual(got, want);
+  }
+
+  /** How many pages are open now. */
+  get pageCount(): number {
+    return this.pages.size;
+  }
+
+  /** Tells every open page something, over its presence socket (a JSON text frame). */
+  broadcast(data: unknown): void {
+    const frame = wsText(JSON.stringify(data));
+    for (const socket of this.sockets) if (!socket.destroyed) socket.write(frame);
   }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -257,19 +273,35 @@ export class ReviewServer {
         this.presence(said.id, said.open, said.asleep === true);
         return this.json(res, 200, { pages: this.pages.size });
       }
-      this.calls++;
+      const counted = !WAITING.has(route);
+      if (counted) this.calls++;
+      // The asker gone before the answer: a wait for news stops.
+      const gone = new AbortController();
+      res.on('close', () => { if (!res.writableFinished) gone.abort(); });
       try {
         const head = req.headers['x-untangle-head'];
-        const out = await this.api.call(route.slice(4), req.method || 'GET', url.searchParams, body, typeof head === 'string' ? head : null);
+        const out = await this.api.call(route.slice(4), req.method || 'GET', url.searchParams, body, typeof head === 'string' ? head : null, gone.signal);
+        if (res.destroyed) return;
         return this.json(res, out.status ?? 200, out.data);
       } catch (e) {
         return this.json(res, 500, { error: (e as Error).message });
       } finally {
-        this.calls--;
+        if (counted) this.calls--;
       }
     }
     return this.send(res, 404, 'text/plain', 'Not found');
   }
+}
+
+/** A WebSocket text frame from the server (unmasked). */
+function wsText(text: string): Buffer {
+  const payload = Buffer.from(text, 'utf8');
+  const n = payload.length;
+  let head: Buffer;
+  if (n < 126) head = Buffer.from([0x81, n]);
+  else if (n < 65536) head = Buffer.from([0x81, 126, n >> 8, n & 255]);
+  else { head = Buffer.alloc(10); head[0] = 0x81; head[1] = 127; head.writeBigUInt64BE(BigInt(n), 2); }
+  return Buffer.concat([head, payload]);
 }
 
 /** The opcode and size of the WebSocket frame at the start of `buf`, once it has all arrived. */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseArgs, UsageError, type Options } from '../../dist/args.js';
+import { duration, parseArgs, parseCommand, UsageError, type Options } from '../../dist/args.js';
 
 function shown(options: Options): string {
   return [
@@ -144,4 +144,79 @@ describe('Given -version, ', () => {
       assert.equal(parseArgs(['-version']).version, true);
     },
   );
+});
+
+describe('Given the agent’s commands, ', () => {
+  it(
+    'when watch is given its flags, the review’s and a pull request, '
+    + 'then its own flags are read and the review’s are kept for the review it starts.',
+    () => {
+      const c = parseCommand(['watch', '-agent', 'Codex', '-timeout', '9m', '-base', 'main', '-no-open', 'https://github.com/acme/app/pull/7']);
+      assert.deepEqual(c.cmd === 'watch' && [c.opts.target, c.given, c.agent, c.timeout, c.forward], ['https://github.com/acme/app/pull/7', true, 'Codex', 540_000, ['-base=main', '-no-open']]);
+    },
+  );
+
+  it(
+    'when watch is given nothing, '
+    + 'then it watches the current directory, as long as it takes.',
+    () => {
+      const c = parseCommand(['watch']);
+      assert.deepEqual(c.cmd === 'watch' && [c.opts.target, c.given, c.agent, c.timeout, c.forward], ['.', false, null, 0, []]);
+    },
+  );
+
+  it(
+    'when reply’s text starts with a dash, '
+    + 'then the text is the rest of the line, after the note.',
+    () => {
+      assert.deepEqual(parseCommand(['reply', '-resolve', 'N2', '-1', 'is', 'the', 'sentinel']), { cmd: 'reply', review: null, agent: null, resolve: true, note: 2, text: '-1 is the sentinel' });
+    },
+  );
+
+  it(
+    'when reply names no note, '
+    + 'then it is refused.',
+    () => {
+      assert.throws(() => parseCommand(['reply', 'soon']), (error: unknown) => error instanceof UsageError && error.message === 'soon is not a note: say which, as N2 or 2');
+    },
+  );
+
+  it(
+    'when reply has no text and doesn’t resolve, '
+    + 'then it is refused.',
+    () => {
+      assert.throws(() => parseCommand(['reply', '2']), (error: unknown) => error instanceof UsageError && error.message === 'what to answer? untangle reply <N> <text>, or -resolve alone');
+    },
+  );
+
+  it(
+    'when notes and stop are given a review, '
+    + 'then they are about it.',
+    () => {
+      assert.deepEqual([parseCommand(['notes', '-all', '-review', '../app']), parseCommand(['stop'])], [{ cmd: 'notes', review: '../app', all: true }, { cmd: 'stop', review: null }]);
+    },
+  );
+
+  it(
+    'when a directory is named like a command, '
+    + 'then ./ reaches it as a review.',
+    () => {
+      const c = parseCommand(['./watch']);
+      assert.deepEqual(c.cmd === 'review' && c.opts.target, './watch');
+    },
+  );
+
+  it(
+    'when watch is given a timeout that isn’t a duration, '
+    + 'then it is refused.',
+    () => {
+      assert.throws(() => parseCommand(['watch', '-timeout', 'ten']), (error: unknown) => error instanceof UsageError && error.message === 'invalid value "ten" for flag -timeout: parse error');
+    },
+  );
+});
+
+describe('Given durations as Go writes them, ', () => {
+  it('when they are read, then each is its milliseconds.', () => {
+    assert.deepEqual(['0', '300ms', '90s', '1h30m', '1.5m'].map(duration), [0, 300, 90_000, 5_400_000, 90_000]);
+  });
 });
