@@ -85,9 +85,12 @@ export async function extract(diff: Diff, head: string, base: string, progress: 
           const [line, col] = position.split(':').map(Number);
           if (!lines.has(line)) continue;
           const [target, targetLine, targetCol] = reference.target;
-          collector.add(file.p, line, col, reference.length, { path: target, line: targetLine, col: targetCol });
+          // An import's URI names a file and uses nothing in it: the page can go there, but it ties
+          // no change to another, nor calls anything from a test.
+          const uri = reference.kind === 'uri';
+          collector.add(file.p, line, col, reference.length, { path: target, line: targetLine, col: targetCol }, !uri);
 
-          if (current && TEST_FILE.test(file.p) && added.has(`${file.p}:${line}`)) {
+          if (current && TEST_FILE.test(file.p) && added.has(`${file.p}:${line}`) && !uri) {
             const key = nodeKey(reference.target);
             if (key && !added.has(`${target.slice(head.length + 1)}:${targetLine + 1}`)) seeds.set(key, reference.target);
           }

@@ -97,6 +97,40 @@ class Combined extends Base with First, Second {
   });
 });
 
+describe('Given a library that imports one file and exports another by its package, ', { skip }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-analyzer-'));
+  const file = path.join(root, 'lib/all.dart');
+  let analyzer: Analyzer;
+  let facts: FileFacts;
+
+  before(() => {
+    fs.mkdirSync(path.join(root, 'lib/src'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.dart_tool'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'pubspec.yaml'), 'name: example\nenvironment:\n  sdk: ">=3.12.0 <4.0.0"\n');
+    fs.writeFileSync(path.join(root, '.dart_tool/package_config.json'), JSON.stringify({ configVersion: 2, packages: [{ name: 'example', rootUri: '../', packageUri: 'lib/', languageVersion: '3.12' }] }));
+    fs.writeFileSync(path.join(root, 'lib/src/a.dart'), 'int a() => 1;\n');
+    fs.writeFileSync(path.join(root, 'lib/src/b.dart'), 'int b() => 2;\n');
+    fs.writeFileSync(file, "import 'src/a.dart';\nexport 'package:example/src/b.dart' show b;\nimport 'src/generated/missing.dart';\n\nint all() => a();\n");
+  });
+
+  after(async () => {
+    await analyzer?.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  describe('when the production extractor resolves the file, ', () => {
+    before(async () => {
+      analyzer = await Analyzer.start([file]);
+      facts = await analyzer.file(file);
+    });
+
+    it('then each URI refers to the top of the file it names, and one naming a missing file to nothing.', () => {
+      const uris = ['1:7', '2:7', '3:7'].map((at) => facts.references[at]).map((r) => r && `${r.kind} ${path.relative(root, r.target[0])}:${r.target[1]}:${r.target[2]}`);
+      assert.deepEqual(uris, ['uri lib/src/a.dart:0:0', 'uri lib/src/b.dart:0:0', undefined]);
+    });
+  });
+});
+
 describe('Given independent callbacks whose parameters feed nested functions, ', { skip }, () => {
   const source = `void run(void Function(int) body) => body(1);
 

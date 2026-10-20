@@ -52,7 +52,7 @@ export interface Structure {
 
 export interface FileFacts extends Structure {
   path: string;
-  references: Record<string, { length: number; target: Location }>;
+  references: Record<string, { length: number; target: Location; kind: string }>;
   unresolved: Record<string, number>;
   calls: Record<string, Location[]>;
   supers: Record<string, Location>;

@@ -118,6 +118,14 @@ class Facts extends GeneralizingAstVisitor<void> {
     };
   }
 
+  // An import's or export's URI goes to the file it names, when the file is there: a generated
+  // file can be missing from the checkout, though the analyzer still gives it a library.
+  void uri(UriBasedDirective node, LibraryElement? library) {
+    final file = library?.firstFragment.source.fullName;
+    if (file == null || !File(file).existsSync()) return;
+    reference(node.uri.offset, node.uri.length, library, 'uri');
+  }
+
   void call(Element? element) {
     final target = location(element);
     if (target == null || callableOwners.isEmpty) return;
@@ -249,6 +257,10 @@ class Facts extends GeneralizingAstVisitor<void> {
       reference(node.name.offset, node.name.length, node.element, 'type');
     } else if (node is ImportPrefixReference) {
       reference(node.name.offset, node.name.length, node.element, 'prefix');
+    } else if (node is ImportDirective) {
+      uri(node, node.libraryImport?.importedLibrary);
+    } else if (node is ExportDirective) {
+      uri(node, node.libraryExport?.exportedLibrary);
     } else if (node is NamedArgument) {
       reference(
         node.name.offset,

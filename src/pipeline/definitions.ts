@@ -64,7 +64,8 @@ export async function definitions(server: DartServer, root: string, positions: P
 /** Builds the compact peek index from resolved facts without retaining the analyzer AST. */
 export function definitionCollector(root: string): {
   data: Definitions;
-  add(p: string, line: number, col: number, len: number, res: Location | null): void;
+  /** `linked`: whether it ties the change it's in to its target's (raw), besides the page's peek. */
+  add(p: string, line: number, col: number, len: number, res: Location | null, linked?: boolean): void;
 } {
   const models = new ModelDefinitions(root);
   const targets: Target[] = [], index = new Map<string, number>(), files = new Map<string, string[] | null>();
@@ -82,7 +83,7 @@ export function definitionCollector(root: string): {
   const defs: Definitions['defs'] = {}, raw: RawDefinitions = {};
   return {
     data: { targets, defs, raw },
-    add(p, line, col, len, res) {
+    add(p, line, col, len, res, linked = true) {
       const original = res;
       res = models.resolve(path.join(root, p), line - 1, col, res) || res;
       if (!res) return;
@@ -97,7 +98,7 @@ export function definitionCollector(root: string): {
         targets.push({ p: p2, w, l: res.line + 1, c: res.col, s: start + 1, code: src.slice(start, Math.min(src.length, res.line + 8)) });
       }
       ((defs[p] ??= {})[line] ??= []).push([col, len, index.get(key)!]);
-      if (original) raw[`${p}:${line}:${col}`] = [original.path, original.line, original.col];
+      if (original && linked) raw[`${p}:${line}:${col}`] = [original.path, original.line, original.col];
     },
   };
 }

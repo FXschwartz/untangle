@@ -918,6 +918,10 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 @keyframes flashpk { 0% { background: rgba(233, 180, 76, .2); } 100% { background: rgba(255, 255, 255, .05); } }
 /* A name asked about from inside a peek, while the language server answers. */
 .ref.asking { cursor: progress; text-decoration: underline dotted; text-underline-offset: 3px; }
+/* An import's URI is one link over its string's tokens: each underlines itself, in its own color. */
+.ref.uri:hover, .ref.uri.asking { text-decoration: none; }
+.ref.uri:hover > span { text-decoration: underline; text-decoration-color: currentColor; text-underline-offset: 3px; }
+.ref.uri.asking > span { text-decoration: underline dotted; text-underline-offset: 3px; }
 .pk-ln.add { background: var(--add); }
 /* A move's lines, in the peek of its other copy: tinted as moved lines are. */
 .pk-ln.mvr { background: var(--mv); }

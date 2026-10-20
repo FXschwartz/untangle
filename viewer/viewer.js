@@ -511,6 +511,16 @@
     const colors = opts.colors || lineColors(text, f.p);
     const live = CONFIG.served ? opts.live || (opts.refs && opts.n != null ? { side: 'head', p: f.p, line: opts.n } : opts.refs && opts.o != null ? { side: 'base', p: f.p, line: opts.o } : null) : null;
     const nextCode = (i) => { for (let j = i + 1; j < toks.length; j++) if (toks[j].k !== 'ws') return toks[j]; return null; };
+    const refAttrs = (ti, col, title) => ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}"${opts.n != null ? ` data-n="${opts.n}" title="${title}"` : ` data-o="${opts.o}" title="${title} (old side)"`}`;
+    const liveAttrs = (col, title) => ` data-ls="${live.side || ''}" data-lp="${esc(live.p || '')}" data-lx="${live.ext != null ? live.ext : ''}" data-ll="${live.line}" data-lc="${col}" title="${title}"`;
+    // An import's or export's URI, one link around its string's tokens to the file it names.
+    const uri = f.lang === 'dart' && (defs || live) ? uriOf(toks) : null;
+    let uriOpen = '';
+    if (uri) {
+      const col = toks[uri[0]].c, ti = defs ? defs.get(col) : undefined;
+      if (ti !== undefined) uriOpen = `<span class="ref uri"${refAttrs(ti, col, 'Peek the file')}>`;
+      else if (live) uriOpen = `<span class="ref live uri"${liveAttrs(col + toks[uri[0]].t.length, 'Go to the file')}>`;
+    }
     return toks.map((tk, i) => {
       if (tk.k === 'ws') return esc(tk.t);
       let cls = 't-' + tk.k, attrs = '';
@@ -526,11 +536,23 @@
       if (tk.k === 'id' || tk.k === 'ty' || tk.k === 'ann') {
         const col = tk.k === 'ann' ? tk.c + 1 : tk.c;
         const ti = defs ? defs.get(col) : undefined;
-        if (ti !== undefined) { cls += ' ref'; attrs += opts.n != null ? ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-n="${opts.n}" title="Peek definition"` : ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}" data-o="${opts.o}" title="Peek definition (old side)"`; }
-        else if (live) { cls += ' ref live'; attrs += ` data-ls="${live.side || ''}" data-lp="${esc(live.p || '')}" data-lx="${live.ext != null ? live.ext : ''}" data-ll="${live.line}" data-lc="${col}" title="Go to definition"`; }
+        if (ti !== undefined) { cls += ' ref'; attrs += refAttrs(ti, col, 'Peek definition'); }
+        else if (live) { cls += ' ref live'; attrs += liveAttrs(col, 'Go to definition'); }
       }
-      return `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
+      const span = `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
+      return !uriOpen ? span : i === uri[0] ? uriOpen + span : i === uri[1] ? span + '</span>' : span;
     }).join('');
+  }
+  // An import's or export's URI: the indexes of its string's opening and closing quotes.
+  function uriOf(toks) {
+    const code = [];
+    for (let i = 0; i < toks.length && code.length < 2; i++) if (toks[i].k !== 'ws') code.push(i);
+    if (code.length < 2 || (toks[code[0]].t !== 'import' && toks[code[0]].t !== 'export')) return null;
+    const open = code[1];
+    if (toks[open].k !== 'str' || !/^r?['"]$/.test(toks[open].t)) return null;
+    const q = toks[open].t.slice(-1);
+    for (let j = open + 1; j < toks.length; j++) if (toks[j].k === 'str' && toks[j].t === q) return [open, j];
+    return null;
   }
   function badgesHtml(f, b, ri, n) {
     let h = '';
