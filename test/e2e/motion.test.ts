@@ -140,8 +140,12 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
       await page!.click('[data-act="whole"]');
       await page!.until(`(document.querySelector('.code[data-p="lib/far.dart"]')?.textContent || '').includes('// pad 40')`);
       await page!.eval(`document.querySelector('#vw-main').scrollTop = 0`);
-      await page!.click('[data-act="nav"][data-step="1"]');
-      await page!.wheel('#vw-main', -300);
+      // The wheel turns as the glide starts: a glide lasts a quarter of a second, too short to
+      // reach with input from outside the page when many browsers run at once.
+      await page!.eval(`(() => {
+        document.querySelector('[data-act="nav"][data-step="1"]').click();
+        document.querySelector('#vw-main').dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
+      })()`);
       // Long enough for the glide to have landed, had it gone on.
       await new Promise((done) => setTimeout(done, 600));
       const tickTop = Number(await page!.eval(`document.querySelector('.code[data-p="lib/far.dart"] .tick')?.getBoundingClientRect().top ?? -1`));
