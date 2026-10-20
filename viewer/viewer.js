@@ -3501,8 +3501,12 @@
     const top = box.top + hh;
     const m = M();
     const byPath = m.byPath || (m.byPath = new Map(m.files.map((f) => [f.p, f])));
+    // Only a test's outline or code has groups to pin, so the line is looked for (a hit test, slow
+    // in a long chain) only under one of them.
+    const tests = paneQuery('tests', () => [...main.querySelectorAll('.ol-sec[data-olf], .code[data-p]')].filter((el) => el.matches('.ol-sec') || olOf(byPath.get(el.dataset.p))));
+    const under = tests.some((el) => { const r = el.getBoundingClientRect(); return r.top <= top + 3 && r.bottom > top + 3; });
     let row = null;
-    for (const x of [box.left + 36, box.left + box.width / 3]) {
+    for (const x of under ? [box.left + 36, box.left + box.width / 3] : []) {
       const el = [...document.elementsFromPoint(x, top + 3)].find((e) => !e.closest('.ol-pinw, .fv-head'));
       row = el && el.closest && el.closest('.ol-row[data-ol], .ln, .sl');
       if (row) break;
@@ -3563,8 +3567,7 @@
   function hereNode(c) {
     const ref = readY();
     let at = null;
-    for (const el of main.querySelectorAll('.sec[id^="sec-"], .ol-row[data-mark]')) {
-      if (el.closest('.gd')) continue;
+    for (const el of paneQuery('members', () => [...main.querySelectorAll('.sec[id^="sec-"], .ol-row[data-mark]')].filter((x) => !x.closest('.gd')))) {
       if (el.getBoundingClientRect().top > ref) break;
       at = el;
     }
@@ -4987,8 +4990,15 @@
   // Scrolls a row (or a section) to y below the pane's top, smoothly, then pulses it. Its place is
   // measured again each frame, so it lands right while what's above it still moves.
   let glide = 0;
-  function glideTo(el, y, delay, after) {
+  // A wheel stops a glide. It's listened to only while one runs: with a wheel listener anywhere in
+  // the page, the browser sends every wheel to the main thread, where a long chain makes each one
+  // cost a hit test.
+  function stopGlide() {
     cancelAnimationFrame(glide);
+    main.removeEventListener('wheel', stopGlide);
+  }
+  function glideTo(el, y, delay, after) {
+    stopGlide();
     const done = after || (() => flashRow(el));
     if (!moving()) { placeRow(el, y); done(); return; }
     const target = () => main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top - y;
@@ -4997,12 +5007,13 @@
     if (Math.abs(far) > span) main.scrollTop = target() - Math.sign(far) * span;
     const from = main.scrollTop, t0 = performance.now() + (delay || 0);
     const step = (now) => {
-      if (!el.isConnected) return;
+      if (!el.isConnected) return stopGlide();
       const p = Math.min(1, Math.max(0, (now - t0) / 260));
       main.scrollTop = from + (target() - from) * easeOut(p);
       if (p < 1) glide = requestAnimationFrame(step);
-      else { placeRow(el, y); done(); }
+      else { stopGlide(); placeRow(el, y); done(); }
     };
+    main.addEventListener('wheel', stopGlide, { passive: true });
     glide = requestAnimationFrame(step);
   }
   // Lands an element at y below the pane's top after a short glide over the last stretch: enough
@@ -5015,8 +5026,7 @@
     if (Math.abs(d) > LAND) main.scrollTop += d - Math.sign(d) * LAND;
     glideTo(el, y, 0, () => {});
   }
-  main.addEventListener('wheel', () => cancelAnimationFrame(glide), { passive: true });
-  main.addEventListener('pointerdown', () => cancelAnimationFrame(glide));
+  main.addEventListener('pointerdown', stopGlide);
 
   // The open commit's row and details on screen, scrolling no more than that takes.
   function revealDetail() {
@@ -5185,10 +5195,21 @@
   // ones to review, counted from the one they last went to while it's on screen, else from the
   // top of the screen, wrapping around at either end.
   let navAt = null;
+  // What a query of the pane finds, kept until the pane's DOM changes: scrolling asks some every
+  // frame, and in a long chain each walks thousands of rows. Changes not yet delivered count, so a
+  // query right after a render finds the new rows.
+  const paneFound = new Map();
+  const paneChanges = new MutationObserver(() => paneFound.clear());
+  paneChanges.observe(main, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id', 'data-block', 'data-nav', 'data-mark', 'data-unit', 'data-p', 'data-olf', 'data-ol'] });
+  function paneQuery(key, find) {
+    if (paneChanges.takeRecords().length) paneFound.clear();
+    if (!paneFound.has(key)) paneFound.set(key, find());
+    return paneFound.get(key);
+  }
   const rowOf = (el) => el.closest('.ln, .sl, .hh, .ol-row');
   const markId = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
   // A chain shows other chains' changes in its context lines: j, k and the pill skip them.
-  const changeMarks = (open) => {
+  const changeMarks = (open) => paneQuery(open ? 'marks open' : 'marks', () => {
     const seen = new Set();
     return [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav], .ol-row[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav], .ol-row[data-mark]')].filter((el) => {
       if (open && el.closest('.other')) return false;
@@ -5199,7 +5220,7 @@
       seen.add(key);
       return true;
     });
-  };
+  });
   // Where a change is put when you go to it: a little below the header.
   const readY = () => main.getBoundingClientRect().top + headH() + 48;
   const follows = (a, b) => { const p = a.compareDocumentPosition(b); return !!(p & Node.DOCUMENT_POSITION_FOLLOWING) && !(p & Node.DOCUMENT_POSITION_CONTAINED_BY); };
@@ -6535,11 +6556,12 @@
   const mini = (() => {
     const cv = $('#vw-mini');
     const SCALE = 2 / 20.625;
-    let rows = [], stale = true, raf = 0, drag = null, hover = false, settle = 0;
+    let rows = [], stale = true, raf = 0, drag = null, hover = false, settle = 0, measured = 0;
     const on = () => !!cv && UI.minimap && window.innerWidth > 960 && !!main.querySelector('.code');
     // Where each row is in the pane, and what it is.
     function build() {
       stale = false;
+      measured = main.scrollHeight;
       rows = [];
       const top = main.getBoundingClientRect().top - main.scrollTop;
       main.querySelectorAll('.ln, .sl, .hh, .th, .peek, .sec-h, .sym-h, .sec-file, .inst-file, .strip, .graph-box, .focus-bar').forEach((el) => {
@@ -6627,14 +6649,18 @@
       const stop = () => { if (drag) { drag = null; schedule(); } };
       cv.addEventListener('pointerup', stop);
       cv.addEventListener('pointercancel', stop);
-      cv.addEventListener('pointerleave', () => { if (hover) { hover = false; schedule(); } });
-      cv.addEventListener('wheel', (e) => { main.scrollTop += e.deltaY; }, { passive: true });
+      // A wheel over the minimap scrolls the code. It's listened to only while the pointer is over
+      // it, for the reason a glide listens only while it runs (see stopGlide).
+      const wheel = (e) => { main.scrollTop += e.deltaY; };
+      cv.addEventListener('pointerenter', () => cv.addEventListener('wheel', wheel, { passive: true }));
+      cv.addEventListener('pointerleave', () => { cv.removeEventListener('wheel', wheel); if (hover) { hover = false; schedule(); } });
     }
     return {
       // The view changed: its rows are measured again.
       update() { stale = true; schedule(); },
-      // Scrolled: drawn again at once, and measured again once rows drawn on the way have settled.
-      scrolled() { schedule(); clearTimeout(settle); settle = setTimeout(() => { stale = true; schedule(); }, 250); },
+      // Scrolled: drawn again at once, and measured again once rows drawn on the way have settled,
+      // when they changed the pane's height (measuring a long chain takes a while).
+      scrolled() { schedule(); clearTimeout(settle); settle = setTimeout(() => { if (main.scrollHeight !== measured) { stale = true; schedule(); } }, 250); },
     };
   })();
 

@@ -65,6 +65,8 @@ export interface Browser {
   /** Clicks at a fraction of the element's box, 0 to 1 from the top left. */
   clickRatio(selector: string, xRatio: number, yRatio: number): Promise<void>;
   hover(selector: string, opts?: { scroll?: boolean }): Promise<void>;
+  /** Moves the pointer to the element's center and, two frames later, turns the wheel `dy` pixels there. */
+  wheel(selector: string, dy: number): Promise<void>;
   type(text: string): Promise<void>;
   key(key: string, opts?: { shift?: boolean; ctrl?: boolean }): Promise<void>;
   setViewport(width: number, height: number): Promise<void>;
@@ -377,6 +379,15 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     async hover(selector: string, opts: { scroll?: boolean } = {}) {
       const box = await boxOf(selector, opts.scroll !== false);
       await at(box.left + box.width / 2, box.top + box.height / 2, 'mouseMoved', 0, 0);
+    },
+    async wheel(selector: string, dy: number) {
+      // Measured once, not settled: the wheel turns while the page may still be moving.
+      const point = await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`) as { x: number; y: number } | null;
+      if (!point) throw new Error(`no element matches ${selector}`);
+      await at(point.x, point.y, 'mouseMoved', 0, 0);
+      // A wheel listener the page adds as the pointer arrives reaches the compositor with a frame.
+      await evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+      await session('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX: 0, deltaY: dy, pointerType: 'mouse' });
     },
     async type(text: string) {
       await session('Input.insertText', { text });

@@ -15,6 +15,8 @@ const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example
 const pads = Array.from({ length: 80 }, (_, index) => `// pad ${index + 1}`);
 const beforeNotes = ['// start', ...pads, ''].join('\n');
 const afterNotes = ['// changed', ...pads, ''].join('\n');
+// A change with a hundred lines above it and more below, so a glide to it can land it at the top.
+const far = (word: string) => [...pads, ...pads.slice(0, 20), `void mid() {\n  print('${word}');\n}`, ...pads.slice(0, 60), ''].join('\n');
 
 describe('Given a served review with motion left on, ', { skip, timeout: 180_000 }, () => {
   let repo: TempRepo | undefined;
@@ -30,10 +32,12 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
     repo.write('pubspec.yaml', pubspec);
     repo.write('lib/notes.dart', beforeNotes);
     repo.write('lib/end.dart', ['// top', ...pads, "void tail() {\n  print('a');\n}\n"].join('\n'));
+    repo.write('lib/far.dart', far('a'));
     repo.commit({ subject: 'Start', author, committer: author });
     repo.branch('feature');
     repo.write('lib/notes.dart', afterNotes);
     repo.write('lib/end.dart', ['// top', ...pads, "void tail() {\n  print('b');\n}\n"].join('\n'));
+    repo.write('lib/far.dart', far('b'));
     repo.commit({ subject: 'Change', author: later, committer: later });
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
     run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache });
@@ -119,6 +123,33 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
 
     it('then the page glides to that change.', () => {
       assert.equal(landed, 'glided');
+    });
+  });
+
+  describe('when the wheel turns while the page glides to a change, ', () => {
+    let stopped: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile('lib/far.dart');
+      // The whole file, so the change is far below the top.
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
+      await page!.click('[data-act="whole"]');
+      await page!.until(`(document.querySelector('.code[data-p="lib/far.dart"]')?.textContent || '').includes('// pad 40')`);
+      await page!.eval(`document.querySelector('#vw-main').scrollTop = 0`);
+      await page!.click('[data-act="nav"][data-step="1"]');
+      await page!.wheel('#vw-main', -300);
+      // Long enough for the glide to have landed, had it gone on.
+      await new Promise((done) => setTimeout(done, 600));
+      const tickTop = Number(await page!.eval(`document.querySelector('.code[data-p="lib/far.dart"] .tick')?.getBoundingClientRect().top ?? -1`));
+      stopped = tickTop > 400 ? 'stopped' : `tick at ${tickTop}`;
+    });
+
+    it('then the page stops gliding, short of the change.', () => {
+      assert.equal(stopped, 'stopped');
     });
   });
   describe('when a peek is closed, ', () => {

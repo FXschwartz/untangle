@@ -912,6 +912,30 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  describe('when the wheel turns over the minimap, ', () => {
+    let moved: string;
+
+    before(async () => {
+      await fresh();
+      await rest(page!);
+      await openFile(page!, 'lib/notes.dart');
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
+      await page!.click('[data-act="whole"]');
+      await page!.until(`(document.querySelector('.code[data-p="lib/notes.dart"]')?.textContent || '').includes('// pad 44')`);
+      await page!.until(`document.querySelector('#vw-mini') && !document.querySelector('#vw-mini').hidden`);
+      const beforeScroll = Number(await page!.eval(`document.querySelector('#vw-main').scrollTop`));
+      await page!.wheel('#vw-mini', 200);
+      await page!.until(`document.querySelector('#vw-main').scrollTop > ${beforeScroll}`);
+      const afterScroll = Number(await page!.eval(`document.querySelector('#vw-main').scrollTop`));
+      moved = afterScroll > beforeScroll ? 'moved' : `${beforeScroll} ${afterScroll}`;
+    });
+
+    it('then the code scrolls.', () => {
+      assert.equal(moved, 'moved');
+    });
+  });
+
   describe('when the language server\'s dot is shown, ', () => {
     let popover: string;
 
