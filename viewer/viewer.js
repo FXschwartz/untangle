@@ -506,8 +506,10 @@
   // highlighted), live ({ side, p, ext, line }: any other name asks the server where it's defined),
   // find (a query, marked wherever it matches).
   function codeHtml(f, text, ranges, opts) {
-    const toks = C.tokenize(text, f.lang);
-    const marks = ranges && opts.emphasis ? new Map(ranges.map(([s, , id]) => [s, id])) : null;
+    const toks = C.tokenize(text, f.lang, { interpolations: true });
+    // The changes' tokens, as the analysis split the line: a name in a string's interpolation is
+    // a token here, inside the string's word there.
+    const markAt = ranges && opts.emphasis ? (c) => { const r = ranges.find(([s, e]) => s <= c && c < e); return r && r[2]; } : null;
     const defs = !opts.refs ? null : opts.n != null ? lineDefs(f.p, opts.n) : opts.o != null ? oldLineDefs(f.p, opts.o) : null;
     const colors = opts.colors || lineColors(text, f.p);
     const live = CONFIG.served ? opts.live || (opts.refs && opts.n != null ? { side: 'head', p: f.p, line: opts.n } : opts.refs && opts.o != null ? { side: 'base', p: f.p, line: opts.o } : null) : null;
@@ -528,7 +530,8 @@
       if (tk.k === 'ws') return show(tk);
       let cls = 't-' + tk.k, attrs = '';
       if (tk.k === 'id') { const nx = nextCode(i); if (nx && (nx.t === '(' || nx.t === '<')) cls = 't-fn'; }
-      if (marks && marks.has(tk.c)) cls += rev().has(marks.get(tk.c)) ? ' rv' : ' ch';
+      const mark = markAt && markAt(tk.c);
+      if (mark != null) cls += rev().has(mark) ? ' rv' : ' ch';
       if (colors) {
         const c = colorAt(colors, tk.c);
         // Grammars leave plain names (variables, properties, parameters) in the default color;

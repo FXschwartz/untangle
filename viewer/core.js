@@ -24,10 +24,59 @@
 
   const OPS = ['>>>=', '...', '??=', '>>=', '<<=', '=>', '??', '?.', '..', '==', '!=', '<=', '>=', '&&', '||', '++', '--', '+=', '-=', '*=', '/=', '<<', '::'];
 
-  function tokenize(line, lang) {
+  // Where braces opening at k close (the index after the "}"), past strings inside them.
+  function braceEnd(line, k) {
+    let depth = 0;
+    for (let j = k; j < line.length; j++) {
+      if (line[j] === '{') depth++;
+      else if (line[j] === '}' && --depth === 0) return j + 1;
+      else if (line[j] === "'" || line[j] === '"') j = stringEnd(line, j) - 1;
+    }
+    return line.length;
+  }
+  // Where a string opening at j ends (the index after its quote), past interpolations in it.
+  function stringEnd(line, j) {
+    for (let x = j + 1; x < line.length; x++) {
+      if (line[x] === '\\') x++;
+      else if (line[x] === '$' && line[x + 1] === '{') x = braceEnd(line, x + 1) - 1;
+      else if (line[x] === line[j]) return x + 1;
+    }
+    return line.length;
+  }
+  // A Dart string's text between from and to, its interpolations as code: "$name", whose name is
+  // a token of its own, and "${expression}", whose expression is tokenized as code.
+  function interpolated(line, from, to, out, opts) {
+    let text = from;
+    for (let j = from; j < to; j++) {
+      if (line[j] === '\\') { j++; continue; }
+      if (line[j] !== '$') continue;
+      const name = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(j + 1, to));
+      if (!name && line[j + 1] !== '{') continue;
+      words(line.slice(text, j), 'str', text, out);
+      if (name) {
+        const w = name[0];
+        out.push({ t: '$', k: 'op', c: j }, { t: w, k: DART_KW.has(w) ? 'kw' : /^_?[A-Z]/.test(w) ? 'ty' : 'id', c: j + 1 });
+        text = j + 1 + w.length;
+      } else {
+        const end = Math.min(braceEnd(line, j + 1), to);
+        const closed = line[end - 1] === '}' && end - 1 >= j + 2;
+        out.push({ t: '${', k: 'op', c: j });
+        tokenize(line.slice(j + 2, closed ? end - 1 : end), 'dart', opts).forEach((tk) => out.push({ ...tk, c: tk.c + j + 2 }));
+        if (closed) out.push({ t: '}', k: 'op', c: end - 1 });
+        text = end;
+      }
+      j = text - 1;
+    }
+    words(line.slice(text, to), 'str', text, out);
+  }
+
+  // A line as tokens. opts.interpolations: a Dart string's interpolations are code (the page
+  // shows them so); left out, a string is words, as changes are matched.
+  function tokenize(line, lang, opts) {
     const out = [];
     let i = 0;
     const n = line.length;
+    const interp = lang === 'dart' && !!(opts && opts.interpolations);
     const lineComment = lang === 'dart' || lang === 'json' ? '//' : lang === 'sql' ? '--' : null;
     while (i < n) {
       const ch = line[i];
@@ -56,16 +105,18 @@
       }
       if (ch === "'" || ch === '"' || (ch === 'r' && (line[i + 1] === "'" || line[i + 1] === '"'))) {
         const start = i;
+        const code = interp && ch !== 'r';
         let j = ch === 'r' ? i + 1 : i;
         const q = line[j];
         j++;
-        while (j < n && line[j] !== q) j += line[j] === '\\' && ch !== 'r' ? 2 : 1;
+        while (j < n && line[j] !== q) j = code && line[j] === '$' && line[j + 1] === '{' ? braceEnd(line, j + 1) : j + (line[j] === '\\' && ch !== 'r' ? 2 : 1);
         j = Math.min(n, j + 1);
         out.push({ t: line[start] === 'r' ? 'r' + q : q, k: 'str', c: start });
         const bodyStart = start + (ch === 'r' ? 2 : 1);
         const closed = j <= n && line[j - 1] === q && j - 1 >= bodyStart;
         const bodyEnd = closed ? j - 1 : j;
-        words(line.slice(bodyStart, bodyEnd), 'str', bodyStart, out);
+        if (code) interpolated(line, bodyStart, bodyEnd, out, opts);
+        else words(line.slice(bodyStart, bodyEnd), 'str', bodyStart, out);
         if (closed) out.push({ t: q, k: 'str', c: j - 1 });
         i = j;
         continue;

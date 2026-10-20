@@ -12,7 +12,7 @@ export interface Token {
 
 declare global {
   var ReviewCore: {
-    tokenize(line: string, lang: string): Token[];
+    tokenize(line: string, lang: string, opts?: { interpolations?: boolean }): Token[];
     langOf(path: string): string;
     globToRegExp(pattern: string): RegExp;
   };
