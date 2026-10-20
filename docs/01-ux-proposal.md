@@ -387,7 +387,8 @@ and reviewing a test starts there: the code is there to confirm it.
    opens that chain at the row. Filters keep one kind, each with its count (one with none is
    off); Sentences shows each test as its whole
    sentence, a renamed group's changed words on the first test it heads. Files that change no
-   sentence come last, in one row that opens.
+   sentence come last, in one row that opens (open already when they're all there is); a file's
+   name opens its diff.
 8. **Pinned groups.** Over a test file's code, in any view, and over an outline, the groups of
    the line at the top of the view whose own lines have scrolled away stay pinned under the
    header, with the test's title when the line is in its body.

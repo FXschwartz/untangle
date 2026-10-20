@@ -3258,7 +3258,7 @@
       const key = f.p + '#edited', open = state.olUnfold.has(key);
       const edits = sc.edited.flatMap((n) => sc.st.get(n).own).concat(sc.outside);
       const marks = olFileMarks(sc), st = stats(marks);
-      h += `<div class="ol-file fold${open ? ' open' : ''}${st.total && !st.open ? ' done' : ''}" data-act="ol-unfold" data-key="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(fileName(f.p))}</span><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span>${olFileTickHtml(sc, marks, st)}</div>`;
+      h += `<div class="ol-file fold${open ? ' open' : ''}${st.total && !st.open ? ' done' : ''}" data-act="ol-unfold" data-key="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span>${olFileTickHtml(sc, marks, st)}</div>`;
       if (open) h += olEditedRowsHtml(sc, o) + (sc.outside.length ? olOutsideHtml(sc) : '');
       return h + '</section>';
     }
@@ -3774,11 +3774,12 @@
     });
     if (!scopes.length) return h + '<div class="empty">No test file changed in this comparison.</div>';
     const body = said.map((sc) => olFileHtml(sc, { chips: true, sentences: mode === 'sentences', filter, settle: true })).join('');
-    h += body || `<div class="empty">No ${filter} sentences in this comparison.</div>`;
+    h += body || `<div class="empty">No ${filter === 'all' ? 'sentence changes' : filter + ' sentences'} in this comparison.</div>`;
     if (filter === 'all' && code.length) {
-      const open = state.olUnfold.has('tests:code');
+      // Folded under the sentences; open when it's all there is (a click folds it).
+      const key = said.length ? 'tests:code' : 'tests:code:shut', open = said.length ? state.olUnfold.has(key) : !state.olUnfold.has(key);
       const calls = code.reduce((x, sc) => x + sc.edited.length, 0);
-      h += `<div class="ol-sect">Code under sentences that stay</div><div class="ol-fold cf" data-act="ol-unfold" data-key="tests:code" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>${plural(code.length, 'file')} change no sentence${calls ? `: ${plural(calls, 'call')} with edited setup or bodies` : ''}</div>`;
+      h += `<div class="ol-sect">Code under sentences that stay</div><div class="ol-fold cf" data-act="ol-unfold" data-key="${key}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>${plural(code.length, 'file')} change${code.length === 1 ? 's' : ''} no sentence${calls ? `: ${plural(calls, 'call')} with edited setup or bodies` : ''}</div>`;
       if (open) h += code.map((sc) => olFileHtml(sc, {})).join('');
     }
     return h;

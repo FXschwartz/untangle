@@ -322,6 +322,27 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     });
   });
 
+  describe('when the Tests view is opened, ', () => {
+    let shown = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file.fold')`);
+      shown = await read(page!, `[...document.querySelectorAll('#vw-main .empty, #vw-main .ol-sect, #vw-main .ol-fold, #vw-main .ol-file')].map((el) => el.matches('.ol-file') ? el.querySelector('.nm').textContent + ' · ' + el.querySelector('.n').textContent : el.textContent.trim() + (el.matches('.ol-fold') ? (el.getAttribute('aria-expanded') === 'true' ? ' (open)' : ' (folded)') : '')).join('\\n')`);
+    });
+
+    it('then it says no sentence changes, and the files whose tests change only code show already, as they\'re all there is.', () => {
+      assert.equal(shown, [
+        'No sentence changes in this comparison.',
+        'Code under sentences that stay',
+        '1 file changes no sentence: 1 call with edited setup or bodies (open)',
+        'app_test.dart · 1 call edited · +3 −3',
+      ].join('\n'));
+    });
+  });
+
   describe('when the test file is marked from its line in the Tests view, ', () => {
     let line = '';
     let rows = '';
@@ -330,13 +351,11 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
       await rest(page!);
       await page!.click('[data-tab="chains"]');
       await page!.click('[data-act="tests-open"]');
-      await page!.until(`!!document.querySelector('#vw-main [data-key="tests:code"]')`);
-      await page!.click('#vw-main [data-key="tests:code"]');
       await page!.until(`!!document.querySelector('#vw-main .ol-file.fold .ol-tick')`);
       await page!.click('#vw-main .ol-file.fold .ol-tick');
       await page!.until(`!!document.querySelector('#vw-main .ol-file.fold.done')`);
       line = await read(page!, `(() => { const el = document.querySelector('#vw-main .ol-file.fold'); return [el.querySelector('.nm').textContent, el.querySelector('.n').textContent, el.getAttribute('aria-expanded') === 'true' ? 'open' : 'folded', el.querySelector('.ol-tick').title].join(' · '); })()`);
-      await page!.click('#vw-main .ol-file.fold');
+      await page!.click('#vw-main .ol-file.fold .car');
       await page!.until(`!!document.querySelector('#vw-main .ol-row')`);
       rows = await read(page!, `[...document.querySelectorAll('#vw-main .ol-row')].map((el) => '  '.repeat(Number(el.style.getPropertyValue('--d')) + 1) + el.querySelector('.ol-tt').textContent.trim() + (el.classList.contains('done') ? ' (reviewed)' : '')).join('\\n')`);
       await page!.click('#vw-main .ol-file.fold .ol-tick');
@@ -349,6 +368,31 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
 
     it('then the call whose body it edited reads reviewed once it unfolds.', () => {
       assert.equal(rows, ['  names', '    one (reviewed)'].join('\n'));
+    });
+  });
+
+  describe('when that file’s name is clicked in the Tests view, ', () => {
+    let opened = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file.fold .nm')`);
+      await page!.click('#vw-main .ol-file.fold .nm');
+      await page!.until(`!document.querySelector('#vw-main .ol-file') && !!document.querySelector('#vw-main .code[data-p="test/app_test.dart"] .ln')`);
+      opened = await read(page!, `[...document.querySelectorAll('#vw-main .code[data-p="test/app_test.dart"] .ln.add, #vw-main .code[data-p="test/app_test.dart"] .ln.del')].map((row) => (row.matches('.add') ? '+ ' : '- ') + row.querySelector('.tx').textContent.trim()).join('\\n')`);
+    });
+
+    it('then the file opens on its diff.', () => {
+      assert.equal(opened, [
+        '- void helper(String name) {',
+        '- print(name);',
+        '+ void helper(String title) {',
+        '+ print(title);',
+        "- helper('a');",
+        "+ helper('b');",
+      ].join('\n'));
     });
   });
 
