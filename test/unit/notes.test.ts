@@ -291,6 +291,30 @@ describe('Given notes an agent watches, ', () => {
     ].join('\n'));
   });
 
+  it('when you answer in a thread and resolve its note, or reopen a note and answer in it, then the thread says so.', async () => {
+    notes.reply('Claude', 2, 'Flushed on every path.', true);
+    await notes.act({ action: 'reply', n: 1, body: 'Leave it as it is.' });
+    await notes.act({ action: 'resolve', n: 1, resolved: true });
+    await notes.act({ action: 'resolve', n: 2, resolved: false });
+    await notes.act({ action: 'reply', n: 2, body: 'Not yet: the error path skips it.' });
+    const got = await notes.watch('Claude', { timeout: 5_000 });
+    assert.ok('text' in got);
+    assert.deepEqual([got.notes, got.replies], [0, 2]);
+    assert.equal(got.text.slice(got.text.indexOf('\n\n') + 2), [
+      'N1 · lib/app.dart:3 · replies in its thread · resolved by you',
+      '> Why a local?',
+      'You: Keep the doc comment.',
+      'You: Leave it as it is.',
+      '',
+      'N2 · lib/app.dart:4 · replies in its thread · reopened by you',
+      '> Flush after it, always.',
+      'Claude: Done in abc1234.',
+      'Claude: Flushed on every path.',
+      'You: Not yet: the error path skips it.',
+      '',
+    ].join('\n'));
+  });
+
   it('when live review is off, then a new note waits, held, until you send it.', async () => {
     await notes.act({ action: 'settings', live: false });
     await notes.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line: 2, body: 'Name it person?' });

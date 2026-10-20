@@ -675,20 +675,24 @@ export class Notes {
       else if (note.comments.slice(1).some(fresh)) threads.push(note);
     });
     const told = new Set([...notes, ...threads].map((x) => x.n));
+    // A thread told in full shows its edits, and says itself who last resolved or reopened its note.
+    const states = new Map<number, string>();
     this.data.events.filter((e) => e.seq > seen && e.by !== agent).forEach((e) => {
       const note = this.data.notes.find((x) => x.n === e.n);
       if (e.type === 'delete' || e.type === 'post') { if (e.sent != null && e.sent <= seen) lines.push(`N${e.n} · ${e.type === 'post' ? 'posted to GitHub: it left the notes.' : `${e.by ?? 'you'} deleted it.`}`); return; }
-      if (!note || told.has(note.n) || !knew(note)) return;
-      if (e.type === 'edit') { const c = note.comments.find((x) => x.id === e.id); if (c) lines.push(`N${note.n} · ${this.where(note)} · ${e.by ?? 'you'} edited ${c === note.comments[0] ? 'the note' : 'a reply'}:\n${c.body}`); return; }
-      lines.push(`N${note.n} · ${this.where(note)} · ${e.type === 'resolve' ? `resolved by ${e.by ?? 'you'}` : `reopened by ${e.by ?? 'you'}`}.`);
+      if (!note || !knew(note)) return;
+      if (e.type === 'edit') { const c = told.has(note.n) ? null : note.comments.find((x) => x.id === e.id); if (c) lines.push(`N${note.n} · ${this.where(note)} · ${e.by ?? 'you'} edited ${c === note.comments[0] ? 'the note' : 'a reply'}:\n${c.body}`); return; }
+      const state = `${e.type === 'resolve' ? 'resolved' : 'reopened'} by ${e.by ?? 'you'}`;
+      if (told.has(note.n)) states.set(note.n, state);
+      else lines.push(`N${note.n} · ${this.where(note)} · ${state}.`);
     });
     const replies = threads.reduce((k, note) => k + note.comments.slice(1).filter(fresh).length, 0);
-    return { notes, threads, lines, replies, count: notes.length + replies + lines.length };
+    return { notes, threads, lines, states, replies, count: notes.length + replies + lines.length };
   }
 
-  private threadText(note: Note): string {
+  private threadText(note: Note, state?: string): string {
     const [first, ...rest] = note.comments;
-    return [`N${note.n} · ${this.where(note)} · ${rest.length === 1 ? 'a reply' : 'replies'} in its thread`, ...(first.by ? `${first.by}: ${first.body}` : first.body).split('\n').map((l) => '> ' + l), ...rest.map((c) => `${c.by ?? 'You'}: ${c.body}`)].join('\n') + '\n';
+    return [`N${note.n} · ${this.where(note)} · ${rest.length === 1 ? 'a reply' : 'replies'} in its thread${state ? ` · ${state}` : ''}`, ...(first.by ? `${first.by}: ${first.body}` : first.body).split('\n').map((l) => '> ' + l), ...rest.map((c) => `${c.by ?? 'You'}: ${c.body}`)].join('\n') + '\n';
   }
 
   /**
@@ -715,7 +719,7 @@ export class Notes {
         if (opening) parts.push(opening + '\n');
         parts.push(...notes.map((n) => this.noteText(n)));
       }
-      parts.push(...u.threads.map((n) => this.threadText(n)), ...u.lines.map((l) => l + '\n'));
+      parts.push(...u.threads.map((n) => this.threadText(n, u.states.get(n.n))), ...u.lines.map((l) => l + '\n'));
       text = `untangle: ${and([notes.length && plural(notes.length, 'note', 'notes'), replies && plural(replies, 'reply', 'replies'), u.lines.length && plural(u.lines.length, 'change', 'changes')])} you haven’t read, ${at}\n\n${parts.join('\n')}`;
     }
     const first = !a.told;
