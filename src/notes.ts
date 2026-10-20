@@ -670,6 +670,7 @@ export class Notes {
     const fresh = (c: NoteComment) => c.sent != null && c.sent > seen && c.by !== agent;
     const knew = (note: Note) => note.comments[0].sent != null && note.comments[0].sent <= seen;
     const notes: Note[] = [], threads: Note[] = [], lines: string[] = [];
+    let closed = 0;
     this.data.notes.forEach((note) => {
       if (fresh(note.comments[0])) notes.push(note);
       else if (note.comments.slice(1).some(fresh)) threads.push(note);
@@ -684,10 +685,11 @@ export class Notes {
       if (e.type === 'edit') { const c = told.has(note.n) ? null : note.comments.find((x) => x.id === e.id); if (c) lines.push(`N${note.n} · ${this.where(note)} · ${e.by ?? 'you'} edited ${c === note.comments[0] ? 'the note' : 'a reply'}:\n${c.body}`); return; }
       const state = `${e.type === 'resolve' ? 'resolved' : 'reopened'} by ${e.by ?? 'you'}`;
       if (told.has(note.n)) states.set(note.n, state);
-      else lines.push(`N${note.n} · ${this.where(note)} · ${state}.`);
+      else { lines.push(`N${note.n} · ${this.where(note)} · ${state}.`); if (e.type === 'resolve') closed++; }
     });
     const replies = threads.reduce((k, note) => k + note.comments.slice(1).filter(fresh).length, 0);
-    return { notes, threads, lines, states, replies, count: notes.length + replies + lines.length };
+    // A note resolved only ends the talk on it: it comes with the next news, and wakes no one.
+    return { notes, threads, lines, states, replies, count: notes.length + replies + lines.length - closed };
   }
 
   private threadText(note: Note, state?: string): string {

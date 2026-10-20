@@ -315,6 +315,25 @@ describe('Given notes an agent watches, ', () => {
     ].join('\n'));
   });
 
+  it('when you resolve a note and nothing else, then no watch wakes for it, and the next news brings it.', async () => {
+    await notes.act({ action: 'resolve', n: 2, resolved: true });
+    const quiet = await notes.watch('Claude', { timeout: 300 });
+    await notes.act({ action: 'reply', n: 1, body: 'Thanks.' });
+    const got = await notes.watch('Claude', { timeout: 5_000 });
+    assert.ok('text' in got);
+    assert.deepEqual(quiet, { idle: true, first: false });
+    assert.equal(got.text.slice(got.text.indexOf('\n\n') + 2), [
+      'N1 · lib/app.dart:3 · replies in its thread',
+      '> Why a local?',
+      'You: Keep the doc comment.',
+      'You: Leave it as it is.',
+      'You: Thanks.',
+      '',
+      'N2 · lib/app.dart:4 · resolved by you.',
+      '',
+    ].join('\n'));
+  });
+
   it('when live review is off, then a new note waits, held, until you send it.', async () => {
     await notes.act({ action: 'settings', live: false });
     await notes.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line: 2, body: 'Name it person?' });
