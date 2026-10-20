@@ -38,7 +38,7 @@ function greeting() {
 
 function context(repo: TempRepo, base: string, head: string, posted: Post[] = []): NotesContext {
   return {
-    repo: repo.dir, base, head, name: 'acme/app#7', branch: 'feature',
+    repo: repo.dir, base, head, name: 'acme/app#7', branch: 'feature', checkout: null,
     change: (p, side, line) => (p === 'lib/app.dart' && side === 'RIGHT' && line === 3 ? { name: 'Greet by name', sha: head } : null),
     post: async (x) => { posted.push(x); return { posted: posted.length }; },
   };
@@ -609,5 +609,36 @@ describe('Given where comments go, before you choose, ', () => {
     await started.act({ action: 'settings', mode: 'github' });
     assert.deepEqual([before, started.view().mode], [['local', null, 'local'], 'github']);
     [started, plain, noted].forEach((n) => n.close());
+  });
+});
+
+describe('Given a note on a pull request reviewed from its link, ', () => {
+  let g: ReturnType<typeof greeting>;
+  let dir = '';
+  let notes: InstanceType<typeof Notes>;
+  const checkout = '/cache/worktrees/github.com/acme/app/0123456789ab';
+
+  before(() => {
+    g = greeting();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-notes-'));
+    notes = new Notes(path.join(dir, 'feature.json'), () => {});
+    notes.attach({ ...context(g.repo, g.base, g.head), checkout });
+  });
+
+  after(() => {
+    notes.close();
+    g.repo.remove();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('when a watch brings it, or the notes are printed, then they say where untangle checked the head out, to read its code there.', async () => {
+    await add(notes, 3, 'Why a local?');
+    const got = await notes.watch('Claude', { timeout: 5_000 });
+    assert.ok('text' in got);
+    const there = ` That commit is checked out at ${checkout}: read and search its code there, and change nothing (untangle uses it).`;
+    assert.deepEqual([got.text.split('\n')[0], notes.exportText('open').split('\n')[0]], [
+      `untangle: 1 note you haven’t read, on acme/app#7 at ${short(g.head)}. Line numbers are on that commit.${there}`,
+      `My review notes on acme/app#7 (branch feature, at ${short(g.head)}). Line numbers are on that commit.${there}`,
+    ]);
   });
 });

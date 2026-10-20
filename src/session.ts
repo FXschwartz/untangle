@@ -187,10 +187,10 @@ export class ReviewSession {
   }
 
   /** What the notes need of this review: its commits, the change of each line, and GitHub to post to. */
-  notesContext(name: string, branch: string | null): NotesContext {
+  notesContext(name: string, branch: string | null, checkout: string | null): NotesContext {
     const gh = this.github;
     return {
-      repo: this.target.repo, base: this.target.baseSha, head: this.target.headSha, name, branch,
+      repo: this.target.repo, base: this.target.baseSha, head: this.target.headSha, name, branch, checkout,
       change: (p, side, line) => this.changeAt(p, side, line),
       post: gh ? (x: Post) => gh.act('thread' in x
         ? { action: 'reply', mode: 'review', thread: x.thread, body: x.body }

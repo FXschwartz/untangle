@@ -22,7 +22,9 @@ write notes too, with \`untangle note\`, and the user answers in their threads.
 ## Start
 
 Run \`untangle watch\` in the repository, or \`untangle watch <pr-url>\` for a pull request. It
-starts the review if it isn't running and opens its page.
+starts the review if it isn't running and opens its page. For a pull request, untangle clones its
+repository, and the watch says where the head is checked out: read and search the code there
+(\`rg\`, \`git log\`) rather than through \`gh api\`, and change nothing in it.
 
 - Claude: run it in the background (the Bash tool's \`run_in_background\`). It ends when there are
   notes or replies you haven't read and prints them, and its end wakes you.

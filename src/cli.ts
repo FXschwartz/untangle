@@ -9,7 +9,7 @@ import path from 'node:path';
 import * as agent from './agent.js';
 import { noteUsage, notesUsage, parseCommand, replyUsage, skillUsage, stopUsage, usage, UsageError, watchUsage, type Options } from './args.js';
 import { buildReview, buildSteps, type ReviewData } from './build.js';
-import { reviewDir } from './cache.js';
+import { reviewDir, worktreeDir } from './cache.js';
 import { chatFrom } from './chats.js';
 import { readHistory } from './history.js';
 import { gitMaybe } from './exec.js';
@@ -184,7 +184,7 @@ async function review(opts: Options): Promise<number> {
       const book: Notes = new Notes(file, () => server?.broadcast({ notes: book.revision }), undefined, byAgent);
       notes = book;
     }
-    notes.attach(s.notesContext(t.pr ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}` : t.repoKey.startsWith('local/') ? path.basename(t.repo) : n.repoName, t.pr ? t.pr.headRefName : n.branch));
+    notes.attach(s.notesContext(t.pr ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}` : t.repoKey.startsWith('local/') ? path.basename(t.repo) : n.repoName, t.pr ? t.pr.headRefName : n.branch, byUrl ? worktreeDir(t.repoKey, t.headSha) : null));
     if (run) writeRun(run = { ...run, repoKey: t.repoKey, branch: t.pr ? t.pr.headRefName : n.branch, title: n.title, head: t.headSha });
   };
 

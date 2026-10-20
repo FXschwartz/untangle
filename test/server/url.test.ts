@@ -8,7 +8,7 @@ import { jsonScript, reviewClient, waitForReview, type ReviewClient } from '../h
 import { stubGh, type GhStub } from '../helpers/gh.ts';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
-import { startUntangle, type UntangleRun } from '../helpers/run.ts';
+import { startUntangle, untangleCommand, type UntangleRun } from '../helpers/run.ts';
 import { slowGit, type SlowGit } from '../helpers/slow-git.ts';
 
 const ada: Person = { name: 'Ada Review', email: 'ada@example.com', date: '2020-06-01T00:00:00Z' };
@@ -187,6 +187,24 @@ describe('Given a served review of a pull request, ', () => {
     gh?.remove();
     sample?.remove();
     if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when a note is written and the agent prints the notes, ', () => {
+    let header = '';
+
+    before(async () => {
+      const client = reviewClient(run!.url);
+      await client.open();
+      const added = await client.call('notes', { method: 'POST', head: sample!.head, body: { action: 'add', path: 'lib/a.dart', side: 'RIGHT', line: 2, body: 'Why hello?' } });
+      assert.equal(added.status, 200);
+      const r = await untangleCommand(['notes', '-review', 'https://github.com/acme/sample/pull/7'], { cacheDir: cache, gh: gh!, cwd: os.tmpdir(), env: sample!.env });
+      header = r.out.split('\n')[0];
+    });
+
+    it('then they say where untangle checked the head out, to read its code there.', () => {
+      const checkout = path.join(cache, 'worktrees', 'github.com', 'acme', 'sample', sample!.head.slice(0, 12));
+      assert.equal(header, `My review notes on acme/sample#7 (branch feature, at ${sample!.head.slice(0, 7)}). Line numbers are on that commit. That commit is checked out at ${checkout}: read and search its code there, and change nothing (untangle uses it).`);
+    });
   });
 
   describe('when the pull request gains a commit, ', () => {

@@ -84,6 +84,8 @@ export interface NotesContext {
   /** owner/repo#168, or the repository's name. */
   name: string;
   branch: string | null;
+  /** The head's checkout untangle made, reviewing a pull request from its link: an agent reads the code there. */
+  checkout: string | null;
   /** The change a line is in: its chain's name and the commit that started it. */
   change(path: string, side: Side, line: number): { name: string; sha: string | null } | null;
   /** Posts into the pending review on GitHub: a thread on lines or a file, or a reply. Null without GitHub. */
@@ -431,7 +433,14 @@ export class Notes {
   header(): string {
     const ctx = this.ctx;
     if (!ctx) return 'My review notes.';
-    return `My review notes on ${ctx.name}${ctx.branch ? ` (branch ${ctx.branch}, at ${short(ctx.head)})` : ` (at ${short(ctx.head)})`}. Line numbers are on that commit.`;
+    return `My review notes on ${ctx.name}${ctx.branch ? ` (branch ${ctx.branch}, at ${short(ctx.head)})` : ` (at ${short(ctx.head)})`}. Line numbers are on that commit.${this.checkedOut()}`;
+  }
+
+  // Where that commit's code is, when untangle cloned it for a pull request's link: an agent with
+  // no copy of the repository reads and searches it there, instead of through GitHub.
+  private checkedOut(): string {
+    const at = this.ctx?.checkout;
+    return at ? ` That commit is checked out at ${at}: read and search its code there, and change nothing (untangle uses it).` : '';
   }
 
   /** One note for the agent: where it is, the change it's in, its code and its thread. */
@@ -706,7 +715,7 @@ export class Notes {
     const a = this.data.agents[agent];
     const ctx = this.ctx!;
     const opening = this.data.opening.trim();
-    const at = `on ${ctx.name} at ${short(ctx.head)}. Line numbers are on that commit.`;
+    const at = `on ${ctx.name} at ${short(ctx.head)}. Line numbers are on that commit.${this.checkedOut()}`;
     let text: string, notes: Note[], replies = 0, read: Note[];
     if (h.fresh) {
       notes = read = this.data.notes.filter((n) => !n.resolved);
