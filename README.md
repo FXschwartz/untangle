@@ -129,25 +129,34 @@ replaced.
 
 ### Review with your agent
 
-When an agent wrote the code, the review is a conversation with the agent. Set *Comments go to* to
-*Local notes* in the Review button's menu (the default without a pull request), and comments stay
-on your machine, numbered N1, N2…, in orchid under their lines. Ask the agent for a review and it
-runs [`untangle watch`](#with-a-coding-agent): the review opens (in Orca's browser inside Orca),
-your notes reach the agent as you write them, and its answers land in their threads, as comments
-on a Claude artifact do. Any agent that runs commands can, on any pull request or branch.
+When an agent wrote the code, the review is a conversation with the agent. Comments go to *Local
+notes*, set in the Review button's menu: they stay on your machine, numbered N1, N2…, in orchid
+under their lines. Ask for the review in the agent's chat, "review this in untangle", and the
+[untangle skill](#with-a-coding-agent) does the rest: the review opens (in Orca's browser inside
+Orca), your notes reach the agent as you write them, and its answers land in their threads, as
+comments on a Claude artifact do. It works with Claude and Codex, and with any agent that runs
+commands, on any pull request or branch. Ask it to review the change too, and it writes notes of
+its own, threads for you to answer.
+
+The review belongs to its page, and the chat holds it. The label in the bar says where that chat
+is: listening, working on N1–N3, a line from untangle waiting for its turn, not listening, or
+left. When Claude's chat sits idle with nothing listening, its menu offers *Wake Claude*, which
+types the line into its terminal in Orca. Another chat of the same agent that asks for the review
+takes it over, with every open note.
 
 When the agent commits, the page offers to refresh, and each note follows its lines: one whose
 lines changed says so, and keeps the lines it was written on. The agent can resolve what it fixed,
 and the note says who did. *Copy for agent* puts the notes on your clipboard as a prompt, for an
-agent you talk to in a chat, and *Post to GitHub* turns the open ones into your pending review.
+agent you talk to in a chat, and *Post to GitHub* turns your open ones into your pending review.
 
-![Notes on #168's sync_streams.dart: Claude Code watching, its answers in the threads, a note changed since the head it was written on, and one it resolved](docs/images/notes.png)
+![Notes on #168's sync_streams.dart: Claude listening, its answers in the threads, a note changed since the head it was written on, and one it resolved](docs/images/notes.png)
 
 The menu keeps the line every copy opens with, and which notes it takes. *Live review* sends your
 notes and replies as you write them; turned off, they wait until you send them, like a pending
-review.
+review. Comments start as notes when an agent's chat started the review, or when it has notes
+already; else, on a pull request, they go to GitHub.
 
-![The Notes menu: Comments go to Local notes, Claude Code watching, Live review, the line for the agent, and Copy for agent](docs/images/notes-menu.png)
+![The Notes menu: Comments go to Local notes, Claude listening, Live review, the line for the agent, and Copy for agent](docs/images/notes-menu.png)
 
 ### And more
 
@@ -220,7 +229,7 @@ and `untangle` stops.
 ```
 untangle [flags] [directory]
 untangle [flags] <pr-url>
-untangle watch | reply | notes | stop ...
+untangle watch | reply | note | notes | stop | skill ...
 ```
 
 ### What it reviews
@@ -265,7 +274,17 @@ adapters:
 
 ### With a coding agent
 
-Ask your agent for an untangle review of its branch, and to answer your notes there. It runs:
+Install the untangle skill once, and ask for a review in the agent's chat:
+
+```sh
+untangle skill -install
+```
+
+It puts the skill where each agent on your machine reads skills: `~/.claude/skills` for Claude
+(`/untangle`), and `~/.agents/skills` for Codex (`$untangle`), one file when one folder links to
+the other. For Codex it adds `~/.codex/rules/untangle.rules`, a rule that runs `untangle` outside
+Codex's sandbox, which can't write untangle's cache or serve its page. `untangle skill` prints the
+skill, for any other agent. Then "review this in untangle" is enough, and the agent runs:
 
 ```sh
 untangle watch [directory | pr-url]
@@ -273,8 +292,12 @@ untangle watch [directory | pr-url]
 
 `watch` starts the review if it isn't running and opens its page, then waits for the notes and
 replies the agent hasn't read, prints them and exits. Exiting is what wakes an agent that runs it
-in the background, as Claude Code does; others run it again after each answer (`-timeout 9m` keeps
-it under a command's time limit). Its first output tells the agent how to go on:
+in the background, as Claude does; others run it again after each answer (`-timeout 9m` keeps it
+under a command's time limit). Codex can't be woken that way, so its watch returns at once, and a
+few seconds after your last note or reply untangle puts one line in its chat with `codex queue`:
+"untangle: 2 new notes on the review of #168. Run untangle watch to read them." A busy Codex reads
+it when its turn ends. The review starts outside the agent's processes, so stopping a watch, or
+ending the chat, never closes the page. Its first output tells the agent how to go on:
 
 ````
 $ untangle watch
@@ -290,22 +313,31 @@ In the change "Store the clock inside the write's savepoint in caller-owned tran
 Two waits of ten seconds each, for a round that never leaves memory. Would two seconds do, so a hung test fails fast?
 …
 untangle: you hold this code review. The person reviewing writes notes on the code in its page (http://127.0.0.1:7778/?token=…), and your answers show under them at once.
-untangle: each untangle watch waits for the notes and replies you haven’t read, prints them and exits: run it again after each answer, in the background if you can.
+untangle: each untangle watch waits for the notes and replies you haven’t read, prints them and exits: run it again after each answer, in the background.
 untangle: answer in a note’s thread with untangle reply N2 'your answer'; add -resolve once you’ve made the change. Commit as you go: the page shows your commits, and the notes follow their lines.
 untangle: untangle notes prints the open notes again; untangle stop closes the review.
 ````
 
-| Command                     |                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------- |
-| `untangle reply <N> <text>` | answer in note N's thread; `-resolve` resolves it too, once it's done           |
-| `untangle notes`            | print the open notes, as *Copy for agent* gives them (`-all`: the resolved too) |
-| `untangle stop`             | close the review; a waiting `watch` says so and exits                           |
+| Command                                         |                                                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `untangle reply <N> <text>`                     | answer in note N's thread; `-resolve` resolves it too, once it's done                                    |
+| `untangle note <path>[:<line>[-<line>]] <text>` | write a note of its own, on the review's lines or a whole file (`-removed`: on lines the change removed) |
+| `untangle notes`                                | print the open notes, as *Copy for agent* gives them (`-all`: the resolved too)                          |
+| `untangle stop`                                 | close the review; a waiting `watch` says so and exits                                                    |
+| `untangle skill`                                | print the skill; `-install` puts it where Claude and Codex read skills                                   |
 
 Each run of `watch` returns only what that agent hasn't read, a few seconds after the last note,
-so a burst arrives together. While an agent watches, untangle looks for its commits every few
-seconds instead of every two minutes. An answer is signed with the agent's name: `-agent <name>`,
-or Claude Code and Gemini CLI, known from their environment. The commands reach the review through
-a file in the cache that holds its port and token, so only your own processes can.
+so a burst arrives together. While an agent holds the review, untangle looks for its commits every
+few seconds instead of every two minutes. An answer is signed with the agent's name: `-agent
+<name>`, or Claude, Codex and Gemini CLI, known from their environment. The commands reach the
+review through a file in the cache that holds its port and token, so only your own processes can.
+
+A watch from Claude or Codex also says which chat it runs in, and the review keeps to one chat per
+agent: a watch from another chat takes the review over, the first chat's watch says so, and the
+new chat gets every open note with its thread. The label reads the chat's own state: whether a
+watch waits in it, whether Claude's session or Codex's thread is in a turn, and whether the agent
+still runs. When the chat ends, the label says the agent left, and what you write waits for the
+next chat that runs `watch`.
 
 ### Keys
 
@@ -389,7 +421,7 @@ plus every change you marked, so `git diff untangle/pr-<number> HEAD` shows what
   - `reviews/`: per pair of commits, the analyzer's facts, the review, and marks on parts of a
   change.
   - `notes/`: your notes, per review like its branch (`notes/github.com/<owner>/<repo>/pr-<number>.json`),
-  with what each agent has read.
+  with what each agent has read, and the chat that holds the review for it.
   - `run/`: how to reach each review running now (its port and token), for `untangle watch`,
   `reply`, `notes` and `stop`.
 
