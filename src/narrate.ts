@@ -75,12 +75,16 @@ export class Narrator implements Progress {
     this.drawn = false;
   }
 
-  // The running step, redrawn in place on a terminal.
+  // The running step, redrawn in place on a terminal. Its detail is cut to fit the row: `\r` goes
+  // back only to the start of the row it's on, so a line that wraps leaves a row behind each redraw.
   private draw() {
     if (!this.tty || !this.current) return;
     const { step, start } = this.current;
-    const line = `  ${this.c('2', '…')} ${step.label.padEnd(16)} ${this.c('2', `${Math.round((Date.now() - start) / 1000)} s${step.detail ? '  ' + step.detail : ''}`)}`;
-    process.stderr.write('\r\x1b[K' + line.slice(0, (process.stderr.columns || 100) + 20));
+    const elapsed = `${Math.round((Date.now() - start) / 1000)} s`;
+    // The row but its last column, where some terminals already wrap.
+    const room = (process.stderr.columns || 100) - 1 - `  … ${step.label.padEnd(16)} ${elapsed}  `.length;
+    const detail = step.detail && room > 0 ? '  ' + fit(step.detail, room) : '';
+    process.stderr.write(`\r\x1b[K  ${this.c('2', '…')} ${step.label.padEnd(16)} ${this.c('2', elapsed + detail)}`);
     this.drawn = true;
   }
 
@@ -196,5 +200,16 @@ export class Narrator implements Progress {
     this.write(`  ${this.c('31', 'error:')} ${message}`);
   }
 }
+
+// Text cut to a width with an ellipsis. After a colon a detail names a path, whose end names the
+// file, so there its start goes instead.
+const fit = (text: string, width: number): string => {
+  const chars = [...text];
+  if (chars.length <= width) return text;
+  const colon = text.indexOf(': ');
+  const kept = colon < 0 ? 0 : [...text.slice(0, colon + 2)].length;
+  if (kept && kept < width) return chars.slice(0, kept).join('') + '…' + chars.slice(chars.length - (width - kept - 1)).join('');
+  return chars.slice(0, width - 1).join('') + '…';
+};
 
 export const seconds = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`);

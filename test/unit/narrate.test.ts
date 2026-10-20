@@ -3,10 +3,12 @@ import { spawnSync } from 'node:child_process';
 import { after, before, describe, it, mock } from 'node:test';
 import { Narrator } from '../../dist/narrate.js';
 
-function running(terminal: boolean) {
+// stderr's width is set even when none is given, so the tests don't depend on the terminal they run in.
+function running(terminal: boolean, columns?: number) {
   mock.timers.enable({ apis: ['Date', 'setInterval'], now: 1000 });
-  const descriptor = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+  const descriptors = { isTTY: Object.getOwnPropertyDescriptor(process.stderr, 'isTTY'), columns: Object.getOwnPropertyDescriptor(process.stderr, 'columns') };
   Object.defineProperty(process.stderr, 'isTTY', { value: terminal, configurable: true });
+  Object.defineProperty(process.stderr, 'columns', { value: columns, configurable: true, writable: true });
   let output = '';
   mock.method(process.stderr, 'write', (chunk: string) => { output += chunk; return true; });
   const narrator = new Narrator({ quiet: false, verbose: false, color: false });
@@ -19,8 +21,10 @@ function running(terminal: boolean) {
       narrator.finish();
       mock.reset();
       mock.timers.reset();
-      if (descriptor) Object.defineProperty(process.stderr, 'isTTY', descriptor);
-      else Reflect.deleteProperty(process.stderr, 'isTTY');
+      for (const [key, descriptor] of Object.entries(descriptors)) {
+        if (descriptor) Object.defineProperty(process.stderr, key, descriptor);
+        else Reflect.deleteProperty(process.stderr, key);
+      }
     },
   };
 }
@@ -49,6 +53,41 @@ describe('Given a running step on a terminal, ', () => {
 
     it('then the terminal redraws with the elapsed second.', () => {
       assert.equal(output, '\r\x1b[K  … language server  1 s');
+    });
+  });
+});
+
+describe('Given a running step on a terminal 72 columns wide, ', () => {
+  let run: Running;
+
+  before(() => { run = running(true, 72); });
+  after(() => run.remove());
+
+  describe('when it reads a file whose path is longer than the row has room for, ', () => {
+    let output = '';
+
+    before(() => {
+      const start = run.output().length;
+      run.narrator.detail('Dart files 3 of 105: packages/shop_server/lib/src/generated/protocol.dart', [3, 105]);
+      output = run.output().slice(start);
+    });
+
+    it('then the line fills the row but its last column, keeping the count and the end of the path.', () => {
+      assert.equal(output, '\r\x1b[K  … language server  0 s  Dart files 3 of 105: …generated/protocol.dart');
+    });
+  });
+
+  describe('when it says something longer that names no path, ', () => {
+    let output = '';
+
+    before(() => {
+      const start = run.output().length;
+      run.narrator.detail('cloning acme-industries/shop-platform-monorepo (blobs on demand)');
+      output = run.output().slice(start);
+    });
+
+    it('then the line fills the row but its last column, keeping the start.', () => {
+      assert.equal(output, '\r\x1b[K  … language server  0 s  cloning acme-industries/shop-platform-monore…');
     });
   });
 });
