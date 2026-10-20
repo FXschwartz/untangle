@@ -31,9 +31,22 @@ export interface LiveTarget {
   code: string[];
 }
 
+/** A line that uses a name, as the page lists it. */
+export interface LiveUsage {
+  side: Side | null;
+  p: string;
+  ext?: number;
+  w: LiveTarget['w'];
+  /** Line (1-based) and column of the line's first use, and the line. */
+  l: number;
+  c: number;
+  text: string;
+}
+
 const MAX_FILE = 4 << 20;
 const SEARCH_MAX = 500;
 const SYMBOLS_MAX = 200;
+const USAGES_MAX = 300;
 
 export class LiveSession {
   private server: DartServer | null = null;
@@ -126,7 +139,6 @@ export class LiveSession {
   }
 
   private async describe(loc: Location): Promise<LiveTarget> {
-    const { headDir, baseDir } = await this.checkouts();
     let lines: string[] = [];
     try {
       lines = fs.readFileSync(loc.path, 'utf8').split('\n');
@@ -136,14 +148,60 @@ export class LiveSession {
     let start = loc.line;
     while (start > 0 && start > loc.line - 6 && /^(\/\/\/|@|#)/.test((lines[start - 1] || '').trim())) start--;
     const snippet = { l: loc.line + 1, c: loc.col, s: start + 1, code: lines.slice(start, Math.min(lines.length, loc.line + 12)).map((x) => x.slice(0, 400)) };
+    return { ...(await this.place(loc.path)), ...snippet };
+  }
+
+  /** A file as the page names it: by its path at a side of the review, or outside the repository. */
+  private async place(abs: string): Promise<Pick<LiveTarget, 'side' | 'p' | 'ext' | 'abs' | 'w'>> {
+    const { headDir, baseDir } = await this.checkouts();
     for (const [side, root] of [['head', headDir], ['base', baseDir]] as const) {
-      if (loc.path.startsWith(root + '/')) return { side, p: loc.path.slice(root.length + 1), abs: loc.path, w: 'repo', ...snippet };
+      if (abs.startsWith(root + '/')) return { side, p: abs.slice(root.length + 1), abs, w: 'repo' };
     }
-    const pub = loc.path.indexOf('/.pub-cache/');
-    const sdk = /\/(?:dart-sdk|pkg\/sky_engine)\/lib\/(.+)$/.exec(loc.path);
-    const [p, w] = pub >= 0 ? [loc.path.slice(pub + 12).split('/').slice(2).join('/'), 'package' as const]
-      : sdk ? ['dart:' + sdk[1], 'sdk' as const] : [path.basename(loc.path), 'other' as const];
-    return { side: null, p, ext: this.externalId(loc.path), abs: loc.path, w, ...snippet };
+    const pub = abs.indexOf('/.pub-cache/');
+    const sdk = /\/(?:dart-sdk|pkg\/sky_engine)\/lib\/(.+)$/.exec(abs);
+    const [p, w] = pub >= 0 ? [abs.slice(pub + 12).split('/').slice(2).join('/'), 'package' as const]
+      : sdk ? ['dart:' + sdk[1], 'sdk' as const] : [path.basename(abs), 'other' as const];
+    return { side: null, p, ext: this.externalId(abs), abs, w };
+  }
+
+  /**
+   * The lines that use the name at a position, from the language server: it finds them in the
+   * packages it has loaded, so the packages of the review's files at that side load first. A
+   * name in a file outside the repository is looked up from the head.
+   */
+  async usages(where: { side?: string; p?: string; ext?: number }, line: number, col: number, files: string[]): Promise<{ usages: LiveUsage[]; truncated: boolean }> {
+    const file = await this.resolve(where);
+    if (!file) throw new Error('not a file of this review');
+    const server = await this.ensure();
+    const side: Side = where.side === 'base' ? 'base' : 'head';
+    const roots = await this.checkouts();
+    const root = side === 'head' ? roots.headDir : roots.baseDir;
+    await server.loadAll(files.filter((p) => p.endsWith('.dart')).map((p) => path.join(root, p)).filter((f) => fs.existsSync(f)));
+    const found = await server.references(file, line - 1, col, where.ext == null);
+    const texts = new Map<string, string[]>();
+    const textOf = (abs: string, at: number) => {
+      if (!texts.has(abs)) {
+        try {
+          texts.set(abs, fs.readFileSync(abs, 'utf8').split('\n'));
+        } catch {
+          texts.set(abs, []);
+        }
+      }
+      return (texts.get(abs)![at] || '').replace(/\r$/, '').slice(0, 400);
+    };
+    // One row a line, at its first use; the review's side first, then files outside the repository.
+    const seen = new Set<string>();
+    const out: LiveUsage[] = [];
+    for (const loc of found.sort((a, b) => a.line - b.line || a.col - b.col)) {
+      const key = loc.path + ':' + loc.line;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const at = await this.place(loc.path);
+      if (at.side && at.side !== side) continue;
+      out.push({ side: at.side, p: at.p, ...(at.ext != null ? { ext: at.ext } : {}), w: at.w, l: loc.line + 1, c: loc.col, text: textOf(loc.path, loc.line) });
+    }
+    out.sort((a, b) => Number(!a.side) - Number(!b.side) || (a.p < b.p ? -1 : a.p > b.p ? 1 : 0) || a.l - b.l);
+    return { usages: out.slice(0, USAGES_MAX), truncated: out.length > USAGES_MAX };
   }
 
   /**

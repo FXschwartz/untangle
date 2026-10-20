@@ -333,10 +333,10 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       const box = await boxOf(selector, opts.scroll !== false);
       await clickAt(box.left + box.width / 2, box.top + box.height / 2, (opts.ctrl ? 2 : 0) | (opts.meta ? 4 : 0) | (opts.shift ? 8 : 0), 1);
     },
-    async clickIn(selector: string, name: string, line: string) {
+    async clickIn(selector: string, name: string, line: string, opts: { ctrl?: boolean } = {}) {
       const find = `[...document.querySelectorAll(${JSON.stringify(selector)})].find((node) => (node.textContent || '') === ${JSON.stringify(name)} && (node.closest('.ln, .sl, .pk-ln')?.textContent || '').includes(${JSON.stringify(line)}))`;
       const box = await settledBox(find, true, `${selector} named ${name} on a line with ${line}`);
-      await clickAt(box.left + box.width / 2, box.top + box.height / 2, 0, 1);
+      await clickAt(box.left + box.width / 2, box.top + box.height / 2, opts.ctrl ? 2 : 0, 1);
     },
     async shiftClick(selector: string) {
       const box = await boxOf(selector, true);

@@ -1142,21 +1142,60 @@
   }
   main.addEventListener('scroll', (e) => { if (e.target.matches && e.target.matches('.pk-code')) savePeekScroll(); }, true);
 
+  const placeWords = (t) => (t.side === 'base' ? `old side · ${(CONFIG.base || '').slice(0, 7)}` : t.side === 'head' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : t.w === 'package' ? 'package' : 'outside the repo');
+  const peekBack = (p) => (p.back && p.back.length ? '<button type="button" class="btn xs" data-act="peek-back">Back</button>' : '');
   // A definition asked live, with the same code viewport and navigation as a saved one.
   function livePeekHtml(p) {
     const L = p.live;
-    const back = p.back && p.back.length ? '<button type="button" class="btn xs" data-act="peek-back">Back</button>' : '';
+    const back = peekBack(p);
     const close = '<button type="button" class="pk-x" data-act="close-peek">Close</button>';
     if (L.status === 'loading') return `<div class="pk-h"><b>Definition</b><span class="pk-src">looking it up…</span><span class="sp"></span>${back}${close}</div>${PEEK_WAIT}`;
     if (L.status !== 'ok') return `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(L.error || 'The language server knows no definition for this name.')}</span><span class="sp"></span>${back}${close}</div>`;
     const t = L.target;
-    const where = t.side === 'base' ? `old side · ${(CONFIG.base || '').slice(0, 7)}` : t.side === 'head' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : t.w === 'package' ? 'package' : 'outside the repo';
+    const where = placeWords(t);
     let h = `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>${back}`
       + sourceButton({ side: t.side, p: t.side ? t.p : null, ext: t.ext, line: t.l, label: t.w !== 'repo' ? t.p : null, where }, 'Open file', 'btn xs')
       + editorHtml({ side: t.side, p: t.p, abs: t.abs, line: t.l, col: t.c }) + close + '</div>'
       + peekCodeHtml(t);
     if (t.side === 'head' && M().head.has(t.p + ':' + t.l)) h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
     return h;
+  }
+  // The lines that use a name, asked live where it's declared: as with changed usages, the one
+  // picked shows above the list.
+  const USES_WAIT = `<div class="pk-wait pk-few" aria-busy="true" aria-label="Looking them up">${'<i class="pk-sk"></i>'.repeat(4)}</div>`;
+  function usesPeekHtml(p) {
+    const U = p.uses;
+    const back = peekBack(p);
+    const close = '<button type="button" class="pk-x" data-act="close-peek">Close</button>';
+    const name = `<span class="pk-loc">${esc(U.name)}</span>`;
+    if (U.status === 'loading') return `<div class="pk-h"><b>Usages</b>${name}<span class="pk-src">looking them up…</span><span class="sp"></span>${back}${close}</div>${USES_WAIT}`;
+    if (U.status !== 'ok') return `<div class="pk-h"><b>Usages</b><span class="pk-loc">${esc(U.error)}</span><span class="sp"></span>${back}${close}</div>`;
+    const n = U.list.length;
+    const scope = 'in the packages this review changes';
+    if (!n) return `<div class="pk-h"><b>No usages</b>${name}<span class="pk-src">${scope}</span><span class="sp"></span>${back}${close}</div>`;
+    const sel = p.sel != null ? U.list[p.sel] : null;
+    let h = '';
+    if (sel) {
+      h += `<div class="pk-h"><b>Usage ${p.sel + 1} of ${n}</b><span class="pk-loc">${esc(sel.p)}:${sel.l}</span><span class="pk-src">${placeWords(sel)}</span><span class="sp"></span>${back}`
+        + `<button type="button" class="btn xs primary" data-act="peek-go">Go to it</button>${close}</div>`
+        + peekCodeHtml({ side: sel.side, p: sel.p, ext: sel.ext, l: sel.l, s: sel.l, code: [sel.text] }, null, sel.side === 'head');
+    }
+    h += `<div class="pk-h${sel ? ' pk-h2' : ''}"><b>${U.truncated ? 'The first ' : ''}${n} usage${n === 1 ? '' : 's'}</b>${name}<span class="pk-src">${scope}</span><span class="pk-hint">Click one to show it above, again to go to it</span><span class="sp"></span>${sel ? '' : back + close}</div><div class="pk-list">`;
+    const names = shortNames(U.list.map((u) => u.p));
+    U.list.forEach((u, i) => {
+      h += `<button type="button" class="pk-use" data-act="peek-use" data-i="${i}" aria-current="${p.sel === i}" title="${p.sel === i ? 'Go to it' : 'Show it above'}"><span class="pk-up">${esc(names.get(u.p))}:${u.l}</span><code>${codeHtml({ p: u.p, lang: C.langOf(u.p) }, u.text.trim(), null, {})}</code></button>`;
+    });
+    return h + '</div>';
+  }
+  // Each path as its file's name, with as many of its folders as tell it from the others there.
+  function shortNames(paths) {
+    const all = [...new Set(paths)].map((p) => p.split('/'));
+    const tail = (parts, k) => parts.slice(-k).join('/');
+    return new Map(all.map((parts) => {
+      let k = 1;
+      while (k < parts.length && all.some((o) => o !== parts && tail(o, k) === tail(parts, k))) k++;
+      return [parts.join('/'), tail(parts, k)];
+    }));
   }
   // A test file's outline under one commit: the changes in it that commit started, as its chain
   // holds them. None when the file isn't a test or nothing the commit started is left.
@@ -1209,6 +1248,7 @@
   function peekHtml(p) {
     if (p.history) return '<div class="peek" role="region" aria-label="Peek">' + historyPeekHtml(p) + '</div>';
     if (p.ext) return '<div class="peek" role="region" aria-label="Peek">' + extPeekHtml(p) + '</div>';
+    if (p.uses) return '<div class="peek" role="region" aria-label="Peek">' + usesPeekHtml(p) + '</div>';
     if (p.live) return '<div class="peek" role="region" aria-label="Peek">' + livePeekHtml(p) + '</div>';
     if (p.moveOf) return '<div class="peek" role="region" aria-label="Peek">' + movePeekHtml(p) + '</div>';
     let h = '<div class="peek" role="region" aria-label="Peek">';
@@ -1726,16 +1766,68 @@
   // A name clicked anywhere without an answer computed ahead: ask the server. The peek opens
   // under the line; clicked inside a peek, the peek moves to the new definition (Back returns).
   const anchorOf = (p) => ({ path: p.path, n: p.n, old: p.old, o: p.o, col: p.col, src: p.src, moveOf: p.moveOf });
-  // Where a name is defined, asked of the language server: { q, status: 'ok', target }, or
-  // status 'none' or 'error'.
-  function askDefinition(q) {
+  // A question to the language server about the name at a position.
+  function askAt(route, q) {
     const params = new URLSearchParams({ l: String(q.l), c: String(q.c) });
     if (q.side) params.set('side', q.side);
     if (q.p) params.set('p', q.p);
     if (q.ext != null) params.set('ext', String(q.ext));
-    return api('definition?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
+    return api(route + '?' + params).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }));
+  }
+  // Where a name is defined, asked of the language server: { q, status: 'ok', target }, or
+  // status 'none' or 'error'.
+  function askDefinition(q) {
+    return askAt('definition', q)
       .then((j) => (j.target ? { q, status: 'ok', target: j.target } : { q, status: 'none' }))
       .catch((e) => ({ q, status: 'error', error: e.message }));
+  }
+  // The lines that use a name, asked of the language server: { q, status: 'ok', list, truncated },
+  // or status 'error'.
+  function askUsages(q) {
+    return askAt('usages', q)
+      .then((j) => ({ q, status: 'ok', list: j.usages, truncated: j.truncated }))
+      .catch((e) => ({ q, status: 'error', error: e.message }));
+  }
+  // Whether the language server's definition of a name is that name itself: it was clicked where
+  // it's declared.
+  const declares = (q, t) => !!t && (t.side || null) === (q.side || null) && (t.side ? t.p === q.p : t.ext === q.ext) && t.l === q.l && t.c === q.c;
+  // The same for a definition answered ahead of time, which keeps no column: it's on the name's own
+  // line, and the name is the line's first that leads there (a parameter's uses can share its line).
+  function declaredHere(el) {
+    const d = el.dataset, old = d.o !== undefined, line = Number(old ? d.o : d.n), ti = Number(d.ti);
+    const t = (old ? DEFS_OLD[state.compare] : defsNow()).targets[ti];
+    if (!t || t.w !== 'repo' || t.p !== d.path || t.l !== line) return false;
+    const cols = [...((old ? oldLineDefs(d.path, line) : lineDefs(d.path, line)) || [])].filter(([, x]) => x === ti).map(([c]) => c);
+    return Math.min(...cols) === Number(d.col);
+  }
+  // A name clicked where it's declared shows the lines that use it, in a peek like the changed
+  // usages': one picked shows above the list, and picked again opens. Clicked inside a peek, it
+  // takes that peek's place (Back returns).
+  function showUsages(q, el) {
+    const cur = el.closest('.peek') && state.peek;
+    let peek;
+    if (cur) peek = { ...anchorOf(cur), back: [...(cur.back || []), cur] };
+    else if (state.view.kind === 'source') peek = { src: { key: srcKey(state.view), line: q.l } };
+    else if (q.side === 'base') peek = { old: true, path: q.p, o: q.l, col: q.c };
+    else peek = { path: q.p, n: q.l, col: q.c };
+    state.peek = peek;
+    fillUsages(peek, q, el);
+    if (cur) updatePeek(); else render();
+  }
+  // The same for a name whose definition was answered ahead; clicked again, the peek closes.
+  function refUsages(el) {
+    const d = el.dataset, old = d.o !== undefined;
+    const q = { side: old ? 'base' : 'head', p: d.path, ext: null, l: Number(old ? d.o : d.n), c: Number(d.col) };
+    const U = state.peek && !state.peek.back && state.peek.uses;
+    if (U && U.q.side === q.side && U.q.p === q.p && U.q.l === q.l && U.q.c === q.c) { state.peek = null; return render(); }
+    showUsages(q, el);
+  }
+  function fillUsages(peek, q, el) {
+    const name = el.textContent.replace(/^@/, '');
+    delete peek.live;
+    peek.uses = { q, name, status: 'loading' };
+    peek.sel = null;
+    askUsages(q).then((answer) => { peek.uses = { ...answer, name }; if (state.peek === peek) updatePeek(); });
   }
   // The definition a peek shows, to tell whether a name in it leads back there.
   function shownTarget(p) {
@@ -1753,6 +1845,7 @@
       if (state.view !== view) return;
       if (live.status !== 'ok') return toast(live.status === 'none' ? 'No definition found for this name.' : live.error);
       const t = live.target;
+      if (declares(q, t)) return showUsages(q, el);
       openSource({ side: t.side, p: t.side ? t.p : null, ext: t.ext, line: t.l, label: t.p, where: t.w });
     });
   }
@@ -1763,13 +1856,15 @@
     const sameQ = (x) => x && x.side === q.side && x.p === q.p && x.ext === q.ext && x.l === q.l && x.c === q.c;
     if (el.closest('.peek') && state.peek) {
       // Asked from inside the peek: it stays as it is while the language server answers, then shows
-      // the new definition in its place (Back returns), or stays when it already shows that one.
+      // the new definition in its place (Back returns), or stays when it already shows that one. A
+      // name where it's declared shows its usages instead.
       const cur = state.peek;
       el.classList.add('asking');
       askDefinition(q).then((live) => {
         el.classList.remove('asking');
         if (state.peek !== cur) return;
         if (live.status !== 'ok') return toast(live.status === 'none' ? 'The language server knows no definition for this name.' : live.error);
+        if (declares(q, live.target)) return cur.uses && sameQ(cur.uses.q) ? undefined : showUsages(q, el);
         if (sameTarget(shownTarget(cur), live.target)) {
           const hit = main.querySelector(PEEK + ' .pk-ln.hit');
           if (hit) { hit.classList.remove('flash'); void hit.offsetWidth; hit.classList.add('flash'); }
@@ -1780,14 +1875,19 @@
       });
       return;
     }
-    if (state.peek && state.peek.live && sameQ(state.peek.live.q) && !(state.peek.back || []).length) { state.peek = null; return render(); }
+    const shown = state.peek && (state.peek.live || state.peek.uses);
+    if (shown && sameQ(shown.q) && !(state.peek.back || []).length) { state.peek = null; return render(); }
     let peek;
     if (state.view.kind === 'source') peek = { src: { key: srcKey(state.view), line: q.l }, live: { q, status: 'loading' } };
     else if (q.side === 'base') peek = { old: true, path: q.p, o: q.l, col: q.c, live: { q, status: 'loading' } };
     else peek = { path: q.p, n: q.l, col: q.c, live: { q, status: 'loading' } };
     state.peek = peek;
     render();
-    askDefinition(q).then((live) => { peek.live = live; if (state.peek === peek) updatePeek(); });
+    askDefinition(q).then((live) => {
+      if (live.status === 'ok' && declares(q, live.target)) fillUsages(peek, q, el);
+      else peek.live = live;
+      if (state.peek === peek) updatePeek();
+    });
   }
 
   // ---------- GitHub: the pull request's conversation
@@ -6182,9 +6282,12 @@
       return goNode(node);
     }
     if (d.map !== undefined && !d.act) { state.view = { kind: 'map', family: d.map === '' ? null : Number(d.map) }; state.peek = null; state.focus = null; return render({ top: true }); }
+    // A name with its definition answered ahead, where it's declared: where it's used instead.
+    const declared = CONFIG.served && t.classList.contains('ref') && !t.classList.contains('live') && declaredHere(t);
     if (t.classList.contains('ref') && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       if (t.classList.contains('live')) return liveLookup(t, true);
+      if (declared) return refUsages(t);
       const old = d.o !== undefined;
       const target = (old ? DEFS_OLD[state.compare] : defsNow()).targets[Number(d.ti)];
       if (target.w === 'repo' && (CONFIG.served || M().files.some((f) => f.p === target.p))) {
@@ -6193,6 +6296,7 @@
       if (CONFIG.served) return jumpToDefinition({ side: old ? 'base' : 'head', p: d.path, l: Number(old ? d.o : d.n), c: Number(d.col) }, t);
     }
     if (t.classList.contains('live')) return liveLookup(t);
+    if (declared) return refUsages(t);
     if (t.classList.contains('ref') && d.o !== undefined) {
       const path = d.path, o = Number(d.o), col = Number(d.col);
       const same = state.peek && state.peek.old && state.peek.path === path && state.peek.o === o && state.peek.col === col;
@@ -6387,6 +6491,13 @@
       api('open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ side: d.side || undefined, p: d.p || undefined, ext: d.ext !== '' ? Number(d.ext) : undefined, l: Number(d.line) || 1, c: Number(d.col) || 0 }) })
         .then((r) => r.json()).then((j) => { if (j.error) alert(j.error); }).catch(() => {});
       return;
+    }
+    if ((act === 'peek-use' || act === 'peek-go') && state.peek && state.peek.uses) {
+      const u = (state.peek.uses.list || [])[act === 'peek-go' ? state.peek.sel : Number(d.i)];
+      if (!u) return;
+      if (act === 'peek-go' || state.peek.sel === Number(d.i)) return openSource({ side: u.side, p: u.side ? u.p : null, ext: u.ext, line: u.l, label: u.p, where: u.w === 'sdk' ? 'Dart SDK' : u.w === 'package' ? 'package' : '' });
+      state.peek.sel = Number(d.i);
+      return refreshPeek(t, `[data-act="peek-use"][data-i="${d.i}"]`);
     }
     if (act === 'peek-use' || act === 'peek-go') {
       const list = (state.peek && REFS[state.compare][state.peek.usageKey]) || [];
