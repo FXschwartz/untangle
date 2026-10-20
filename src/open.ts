@@ -34,18 +34,39 @@ function command(url: string): { cmd: string; args: string[]; cwd?: string } | n
   return has('xdg-open') ? { cmd: 'xdg-open', args: [url] } : null;
 }
 
-// Inside Orca, its CLI opens a tab in Orca's browser, in the terminal's worktree.
-function inOrca(url: string): Promise<boolean> {
-  const cli = process.env.ORCA_CLI_COMMAND;
-  if (!cli || !has(cli)) return Promise.resolve(false);
-  const args = ['tab', 'create', '--url', url];
-  if (process.env.ORCA_WORKTREE_ID) args.push('--worktree', 'id:' + process.env.ORCA_WORKTREE_ID);
+// Orca's CLI: what it printed, or null when it failed.
+function orca(cli: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(cli, args, { stdio: 'ignore' });
-    const timer = setTimeout(() => { child.kill(); resolve(false); }, 20_000);
-    child.on('error', () => { clearTimeout(timer); resolve(false); });
-    child.on('exit', (code) => { clearTimeout(timer); resolve(code === 0); });
+    let out = '';
+    const child = spawn(cli, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    child.stdout.on('data', (chunk) => { out += chunk; });
+    const timer = setTimeout(() => { child.kill(); resolve(null); }, 20_000);
+    child.on('error', () => { clearTimeout(timer); resolve(null); });
+    child.on('close', (code) => { clearTimeout(timer); resolve(code === 0 ? out : null); });
   });
+}
+
+const pageOf = (json: string): string | null => {
+  try {
+    const id = JSON.parse(json)?.result?.browserPageId;
+    return typeof id === 'string' && id ? id : null;
+  } catch {
+    return null;
+  }
+};
+
+// Inside Orca, its CLI opens a tab in Orca's browser, in the terminal's worktree. Orca opens it
+// behind the tab in front, so it's then brought to the front of that worktree: on screen when the
+// worktree is, and waiting there when another is.
+async function inOrca(url: string): Promise<boolean> {
+  const cli = process.env.ORCA_CLI_COMMAND;
+  if (!cli || !has(cli)) return false;
+  const worktree = process.env.ORCA_WORKTREE_ID ? ['--worktree', 'id:' + process.env.ORCA_WORKTREE_ID] : [];
+  const created = await orca(cli, ['tab', 'create', '--url', url, ...worktree, '--json']);
+  if (created == null) return false;
+  const page = pageOf(created);
+  if (page) await orca(cli, ['tab', 'switch', '--page', page, ...worktree, '--focus']);
+  return true;
 }
 
 function launch(c: { cmd: string; args: string[]; cwd?: string }): boolean {

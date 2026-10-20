@@ -14,6 +14,17 @@ function script(file: string, log: string): void {
   fs.writeFileSync(file, `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join('\\n') + '\\n');\n`, { mode: 0o755 });
 }
 
+// Orca's CLI, as far as untangle uses it: it notes each call, one per line, and the tab it creates is page-7.
+function orcaScript(file: string, log: string): void {
+  const created = JSON.stringify({ id: '1', ok: true, result: { browserPageId: 'page-7' } });
+  fs.writeFileSync(file, `#!/usr/bin/env node
+import fs from 'node:fs';
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+if (args[0] === 'tab' && args[1] === 'create') process.stdout.write(${JSON.stringify(created)} + '\\n');
+`, { mode: 0o755 });
+}
+
 function packageRepo(): TempRepo {
   const repo = TempRepo.create();
   repo.write('pubspec.yaml', pubspec);
@@ -107,7 +118,7 @@ describe('Given a repository, in an Orca terminal whose CLI is a stub, ', () => 
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-orca-'));
     log = path.join(dir, 'opened.txt');
     stub = path.join(dir, 'orca');
-    script(stub, log);
+    orcaScript(stub, log);
     repo = packageRepo();
     gh = stubGh();
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
@@ -122,7 +133,7 @@ describe('Given a repository, in an Orca terminal whose CLI is a stub, ', () => 
 
   describe('when it is reviewed without -no-open, ', () => {
     let run: UntangleRun | undefined;
-    let recorded = '';
+    let calls: string[][] = [];
     let others = '';
 
     before(async () => {
@@ -135,9 +146,9 @@ describe('Given a repository, in an Orca terminal whose CLI is a stub, ', () => 
         args: ['-verbose'],
         env: { ORCA_CLI_COMMAND: stub, ORCA_WORKTREE_ID: 'wt-9' },
       });
-      recorded = await opened(log);
       // Only once untangle has heard back from Orca: stopping it sooner can end the stub first.
       await said(run, 'opened in Orca’s browser');
+      calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
       others = browsersOpened();
     });
 
@@ -146,7 +157,11 @@ describe('Given a repository, in an Orca terminal whose CLI is a stub, ', () => 
     });
 
     it('then Orca is asked for a tab in this worktree.', () => {
-      assert.equal(recorded, `tab\ncreate\n--url\n${run!.url}\n--worktree\nid:wt-9`);
+      assert.deepEqual(calls[0], ['tab', 'create', '--url', run!.url, '--worktree', 'id:wt-9', '--json']);
+    });
+
+    it('then Orca is asked to bring that tab to the front of the worktree, and for nothing else.', () => {
+      assert.deepEqual(calls.slice(1), [['tab', 'switch', '--page', 'page-7', '--worktree', 'id:wt-9', '--focus']]);
     });
 
     it('then no other browser is opened.', () => {

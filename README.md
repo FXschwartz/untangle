@@ -224,8 +224,8 @@ cache first; the next pull request of the same repository only fetches.
 ### Where it opens
 
 `untangle` serves the review on `127.0.0.1` and opens it. When it runs in an Orca terminal, the
-review opens in Orca's browser; otherwise it opens in your default browser. `BROWSER` overrides
-both. The link carries a token, as Jupyter's does.
+review opens in Orca's browser, in front of that worktree's tabs; otherwise it opens in your
+default browser. `BROWSER` overrides both. The link carries a token, as Jupyter's does.
 
 Closing the review's page stops `untangle` five seconds later, so you can launch, review, close
 and move on. A reload keeps it serving, and so does `-autoclose=false`.
