@@ -2056,6 +2056,16 @@
     const a = agentFirst(), live = !NT.data || NT.data.live;
     return `<span class="cmp-dest local"><i></i><b>Saved locally${!live ? ', held until you send it' : a && a.state !== 'deaf' && a.state !== 'left' ? `, sent to ${esc(a.name)}` : ''}</b></span>`;
   }
+  // A text box for writing grows with what's in it, up to most of the window, and scrolls past that.
+  function fitBox(ta) {
+    const keep = main.scrollTop, max = Math.round(innerHeight * 0.6);
+    ta.style.height = 'auto';
+    const want = ta.scrollHeight;
+    ta.style.height = `${Math.min(want, max)}px`;
+    ta.style.overflowY = want > max ? 'auto' : 'hidden';
+    if (main.scrollTop !== keep) main.scrollTop = keep;
+  }
+  const fitBoxes = (el) => el.querySelectorAll('.cmp-ta, .rv-ta').forEach(fitBox);
   // A text box for markdown: Write and Preview, an error, and its buttons ([label, attrs, primary]).
   // A note's (o.local) previews here and sends to untangle; o.dest says where it sends.
   function composerHtml(key, o) {
@@ -2501,6 +2511,7 @@
     const sel = !ae ? null : ae.name ? `[name="${ae.name}"]${ae.type === 'radio' ? `[value="${ae.value}"]` : ''}` : ae.matches('[data-nt-opening]') ? '[data-nt-opening]' : ae.dataset.act && ae.dataset.draft == null ? `[data-act="${ae.dataset.act}"]${ae.dataset.mode ? `[data-mode="${ae.dataset.mode}"]` : ''}` : null;
     const caret = ae && ae.matches('[data-nt-opening]') ? [ae.selectionStart, ae.selectionEnd, ae.scrollTop] : null;
     el.innerHTML = h;
+    fitBoxes(el);
     const again = sel && el.querySelector(sel);
     if (again) {
       again.focus({ preventScroll: true });
@@ -4996,6 +5007,7 @@
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
     }
+    fitBoxes(main);
     const fvHead = main.querySelector('.fv-head');
     if (fvHead) fvHead.insertAdjacentHTML('afterend', '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>' + (gdHas() ? '<div class="gd-w"><div class="gd" role="dialog" aria-label="The chain’s graph" hidden></div></div>' : ''));
     restorePeekScroll();
@@ -5466,6 +5478,7 @@
     if (!it || !ta) return;
     const token = MN.kind + it.value + ' ', end = ta.selectionStart;
     ta.value = ta.value.slice(0, MN.start) + token + ta.value.slice(end);
+    fitBox(ta);
     const caret = MN.start + token.length;
     ta.setSelectionRange(caret, caret);
     setDraft(ta.dataset.draft, ta.value);
@@ -5499,7 +5512,7 @@
   });
   viewer.addEventListener('click', (e) => { if (e.target.dataset && e.target.dataset.draft != null) mentionUpdate(e.target); });
   viewer.addEventListener('focusout', (e) => { if (e.target === MN.ta) setTimeout(() => { if (document.activeElement !== MN.ta) mentionClose(); }, 0); });
-  window.addEventListener('resize', () => { if (MN.ta) mentionDraw(); });
+  window.addEventListener('resize', () => { fitBoxes(viewer); if (MN.ta) mentionDraw(); });
   main.addEventListener('scroll', () => { if (MN.ta) mentionDraw(); }, { passive: true });
 
   // ---------- refreshing in place
@@ -5997,6 +6010,7 @@
   // So does an agent's menu.
   document.addEventListener('click', (e) => { if (NT.agentOpen && !e.target.closest('.vw-agent-w') && document.contains(e.target)) { NT.agentOpen = null; renderAgent(); } });
   viewer.addEventListener('input', (e) => {
+    if (e.target.matches && e.target.matches('.cmp-ta, .rv-ta')) fitBox(e.target);
     const k = e.target.dataset && e.target.dataset.draft;
     // @ and # come from GitHub: not for notes.
     if (k != null) { setDraft(k, e.target.value); if (GH.on && !/^n(reply|edit):/.test(k) && !(localMode() && /^(new|file|reply):/.test(k))) mentionUpdate(e.target); }
