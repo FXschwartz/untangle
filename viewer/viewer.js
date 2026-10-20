@@ -503,7 +503,8 @@
   }
   // A line of code as tokens. opts: emphasis (mark changed tokens), refs with n or o (definitions
   // answered ahead of time on that line), colors (the line's Shiki colors, else the line alone is
-  // highlighted), live ({ side, p, ext, line }: any other name asks the server where it's defined).
+  // highlighted), live ({ side, p, ext, line }: any other name asks the server where it's defined),
+  // find (a query, marked wherever it matches).
   function codeHtml(f, text, ranges, opts) {
     const toks = C.tokenize(text, f.lang);
     const marks = ranges && opts.emphasis ? new Map(ranges.map(([s, , id]) => [s, id])) : null;
@@ -511,6 +512,8 @@
     const colors = opts.colors || lineColors(text, f.p);
     const live = CONFIG.served ? opts.live || (opts.refs && opts.n != null ? { side: 'head', p: f.p, line: opts.n } : opts.refs && opts.o != null ? { side: 'base', p: f.p, line: opts.o } : null) : null;
     const nextCode = (i) => { for (let j = i + 1; j < toks.length; j++) if (toks[j].k !== 'ws') return toks[j]; return null; };
+    const found = opts.find ? matchesOf(text, opts.find) : null;
+    const show = (tk) => (found ? markIn(tk.t, tk.c, found) : esc(tk.t));
     const refAttrs = (ti, col, title) => ` data-ti="${ti}" data-col="${col}" data-path="${esc(f.p)}"${opts.n != null ? ` data-n="${opts.n}" title="${title}"` : ` data-o="${opts.o}" title="${title} (old side)"`}`;
     const liveAttrs = (col, title) => ` data-ls="${live.side || ''}" data-lp="${esc(live.p || '')}" data-lx="${live.ext != null ? live.ext : ''}" data-ll="${live.line}" data-lc="${col}" title="${title}"`;
     // An import's or export's URI, one link around its string's tokens to the file it names.
@@ -522,7 +525,7 @@
       else if (live) uriOpen = `<span class="ref live uri"${liveAttrs(col + toks[uri[0]].t.length, 'Go to the file')}>`;
     }
     return toks.map((tk, i) => {
-      if (tk.k === 'ws') return esc(tk.t);
+      if (tk.k === 'ws') return show(tk);
       let cls = 't-' + tk.k, attrs = '';
       if (tk.k === 'id') { const nx = nextCode(i); if (nx && (nx.t === '(' || nx.t === '<')) cls = 't-fn'; }
       if (marks && marks.has(tk.c)) cls += rev().has(marks.get(tk.c)) ? ' rv' : ' ch';
@@ -539,9 +542,27 @@
         if (ti !== undefined) { cls += ' ref'; attrs += refAttrs(ti, col, 'Peek definition'); }
         else if (live) { cls += ' ref live'; attrs += liveAttrs(col, 'Go to definition'); }
       }
-      const span = `<span class="${cls}"${attrs}>${esc(tk.t)}</span>`;
+      const span = `<span class="${cls}"${attrs}>${show(tk)}</span>`;
       return !uriOpen ? span : i === uri[0] ? uriOpen + span : i === uri[1] ? span + '</span>' : span;
     }).join('');
+  }
+  // Where a query matches a line, as [start, end) columns: case-insensitive when it's lower case.
+  function matchesOf(text, q) {
+    const hay = q === q.toLowerCase() ? text.toLowerCase() : text;
+    const out = [];
+    for (let i = q ? hay.indexOf(q) : -1; i >= 0; i = hay.indexOf(q, i + q.length)) out.push([i, i + q.length]);
+    return out;
+  }
+  // A token's text, at column c, with the matches in it marked: a match across tokens is marked in each.
+  function markIn(t, c, found) {
+    let out = '', at = 0;
+    for (const [s, e] of found) {
+      const a = Math.max(0, s - c), b = Math.min(t.length, e - c);
+      if (a >= b) continue;
+      out += esc(t.slice(at, a)) + '<mark>' + esc(t.slice(a, b)) + '</mark>';
+      at = b;
+    }
+    return out + esc(t.slice(at));
   }
   // An import's or export's URI: the indexes of its string's opening and closing quotes.
   function uriOf(toks) {
@@ -3979,12 +4000,12 @@
     const b = (k, label, title) => `<button type="button" data-scope="${k}" aria-pressed="${state.search.scope === k}" title="${esc(title)}">${label}</button>`;
     return `<span class="mini-seg" role="group" aria-label="Search in">${b('unreviewed', 'To review', 'Changed lines not reviewed yet')}${b('all', 'All changes', 'Every changed line')}${CONFIG.served ? b('repo-head', 'Repository', 'Every file, after these changes') + b('repo-base', 'Before', 'Every file, before these changes') : ''}</span>`;
   }
-  // Marks every place the query appears in a line (case-insensitive when the query is lower case).
-  function markAll(text, q) {
-    const hay = q === q.toLowerCase() ? text.toLowerCase() : text;
-    let out = '', at = 0, i;
-    while (q && (i = hay.indexOf(q, at)) >= 0) { out += esc(text.slice(at, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>'; at = i + q.length; }
-    return out + esc(text.slice(at));
+  // A result's colors, highlighted once: a search can find hundreds of lines.
+  const resultColors = new WeakMap();
+  function colorsOfResult(x) {
+    if (!shikiOn) return null;
+    if (!resultColors.has(x)) resultColors.set(x, lineColors(x.text, x.p));
+    return resultColors.get(x);
   }
   function renderRepoSearch(side, q) {
     const r = repoSearch(side, q);
@@ -4003,7 +4024,11 @@
     let last = null;
     list.forEach((x) => {
       if (x.p !== last) { h += `<div class="inst-file">${sourceButton({ side, p: x.p }, esc(x.p), 'linkish')}${x.generated ? ' <span class="gen-tag">generated</span>' : ''}</div>`; last = x.p; }
-      h += `<div class="ln ctx${C.langOf(x.p) === 'md' ? ' md' : ''}"><span class="g"></span><span class="no wide">${sourceButton({ side, p: x.p, line: x.l }, String(x.l), 'linkish')}</span><span class="sg"></span><span class="tx">${markAll(x.text, q)}</span></div>`;
+      // Each line highlighted as the file's code, with names that ask the language server where
+      // they're defined; a peek opens under its line.
+      const file = { p: x.p, lang: C.langOf(x.p) };
+      h += `<div class="ln ctx${file.lang === 'md' ? ' md' : ''}"><span class="g"></span><span class="no wide">${sourceButton({ side, p: x.p, line: x.l }, String(x.l), 'linkish')}</span><span class="sg"></span><span class="tx">${codeHtml(file, x.text, null, { colors: colorsOfResult(x), live: { side, p: x.p, line: x.l }, find: q })}</span></div>`
+        + (side === 'base' ? peekAfterOld(file, x.l) : peekAfter(file, x.l));
     });
     if (r.truncated) h += `<div class="empty">The first ${r.results.length} matches. Make the search more precise for the rest.</div>`;
     return h + '</div>';

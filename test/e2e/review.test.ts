@@ -1064,6 +1064,28 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  describe('when a name in the repository\'s search results is clicked, ', () => {
+    let seen: string;
+
+    before(async () => {
+      await rest(page!);
+      await jump(page!, 'ada');
+      await page!.until(`[...document.querySelectorAll('.pal-r')].some((el) => (el.textContent || '').includes('The repository'))`);
+      const id = await read(page!, `[...document.querySelectorAll('.pal-r')].find((el) => (el.textContent || '').includes('The repository'))?.id ?? ''`);
+      await page!.click(`#${id}`);
+      await page!.until(`!!document.querySelector('.code .ln .ref.live[data-ll="6"]')`);
+      const lines = await read(page!, `[...document.querySelectorAll('.code .ln .tx')].map((tx) => [...tx.querySelectorAll('span')].some((s) => /\\bk\\d+\\b/.test(s.className)) ? 'colored' : 'plain').join(' ')`);
+      const mark = await read(page!, `document.querySelector('.code .ln .tx mark')?.textContent ?? ''`);
+      await page!.click('.code .ln .ref.live[data-ll="6"]');
+      await page!.until(`!!document.querySelector('.peek .pk-loc')`, 30_000);
+      seen = [lines, mark, await read(page!, `document.querySelector('.peek .pk-loc').textContent`)].join('\n');
+    });
+
+    it('then its lines read as code with the query marked, and the name peeks at its definition.', () => {
+      assert.equal(seen, 'colored colored\nada\nlib/app.dart:1');
+    });
+  });
+
   describe('when the repository is searched before these changes, ', () => {
     let found: string;
 
