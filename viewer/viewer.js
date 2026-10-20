@@ -117,20 +117,41 @@
     }
   } catch (e) { /* storage unavailable */ }
   // Marks go to the server (a moment after the last change, or as the page goes away), or else
-  // to this browser.
-  let saveTimer = null, pendingSave = null;
-  function flushSave() {
-    if (pendingSave == null) return;
+  // to this browser. Only a save as the page may go away asks the browser to finish it after the
+  // page is gone, and only when it fits the 64 KB the browser takes that way: it refuses a bigger
+  // one whole, and a big review's marks are more.
+  const KEEPALIVE_MAX = 60_000;
+  let saveTimer = null, pendingSave = null, retryTimer = null, retryIn = 0, unsavedWhy = '';
+  function unsaved(why) {
+    unsavedWhy = why;
+    viewer.classList.toggle('unsaved', !!why);
+    const el = viewer.querySelector('.t-unsaved');
+    if (el) el.title = why;
+  }
+  function flushSave(leaving) {
+    if (pendingSave == null) return Promise.resolve();
     const data = pendingSave;
     pendingSave = null;
     clearTimeout(saveTimer);
-    api('state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: data, keepalive: true })
-      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; }))
-      .then((j) => {
-        viewer.classList.remove('unsaved');
-        if (j.snapshot && (!CONFIG.snapshot || j.snapshot.commit !== CONFIG.snapshot.commit)) { CONFIG.snapshot = j.snapshot; renderSide(); }
-      })
-      .catch(() => viewer.classList.add('unsaved'));
+    clearTimeout(retryTimer);
+    const keepalive = leaving === true && new TextEncoder().encode(data).length <= KEEPALIVE_MAX;
+    return api('state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: data, keepalive })
+      .then((r) => r.json().catch(() => ({})).then((j) => ({ r, j })), () => ({ r: null, j: {} }))
+      .then(({ r, j }) => {
+        if (r && r.ok) {
+          retryIn = 0;
+          unsaved('');
+          if (j.snapshot && (!CONFIG.snapshot || j.snapshot.commit !== CONFIG.snapshot.commit)) { CONFIG.snapshot = j.snapshot; renderSide(); }
+          return;
+        }
+        unsaved(!r ? 'untangle doesn’t answer: is it still running?' : r.status === 403 ? 'This page is from another run of untangle: open the link it printed.' : j.error || `untangle couldn’t save them (${r.status}).`);
+        // A save that didn't get there goes again a little later, unless a newer one is on its way.
+        if ((!r || r.status >= 500) && pendingSave == null) {
+          pendingSave = data;
+          retryIn = Math.min(60_000, retryIn ? retryIn * 2 : 5_000);
+          retryTimer = setTimeout(flushSave, retryIn);
+        }
+      });
   }
   function save() {
     const data = JSON.stringify({ rev: Object.fromEntries(Object.entries(state.rev).map(([k, v]) => [k, [...v]])), cmarks: [...state.cmarks], layout: state.layout, showReviewedDiff: state.showReviewedDiff });
@@ -142,14 +163,14 @@
     }
     try { localStorage.setItem(STORE, data); } catch (e) { /* storage unavailable */ }
   }
-  window.addEventListener('pagehide', flushSave);
+  window.addEventListener('pagehide', () => flushSave(true));
   // This browser's layout: the sidebar's width and whether it shows, the minimap, a commit's files
   // as a tree or a list, and the Threads tab's folded sections.
   const UI_KEY = 'untangle:ui';
   const UI = { side: 272, sideOff: false, minimap: true, filesList: false, foldedThreads: [] };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(true); });
 
   // ---------- model
   const models = {};
@@ -5057,7 +5078,7 @@
     const h = (CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`)
       + (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
       + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="menu" data-menu="lens" aria-haspopup="dialog" aria-expanded="${MENU.open === 'lens'}" title="${state.lens ? `Only these changes count: ${esc(lensLabel())}. Pick others, or all of them` : 'Changes from every commit: pick some to review only theirs'}"><span>${state.lens ? esc(lensLabel()) : esc(head)}</span>${ICON.chevronDown}</button>` : esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
-      + '<span class="t-unsaved" title="untangle doesn’t answer: is it still running?">Marks not saved</span>';
+      + `<span class="t-unsaved" title="${esc(unsavedWhy)}">Marks not saved</span>`;
     if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
   }
   function openFile(path, line) {
@@ -5512,8 +5533,8 @@
     const v = state.view;
     const r = { tab: state.tab, kind: v.kind, path: v.path || null, chain: v.kind === 'chain' && M().chains[v.id] ? M().chains[v.id].name : null, from: CONFIG.head || null, lens: state.lens ? { ...state.lens } : null };
     try { sessionStorage.setItem(RESUME, JSON.stringify(r)); } catch (e) { /* storage unavailable */ }
-    flushSave();
-    location.reload();
+    // The last marks get there first (a big review's are too big to finish after the page is gone).
+    Promise.race([flushSave(true), new Promise((done) => setTimeout(done, 2000))]).then(() => location.reload());
   }
   function renderFresh() {
     const el = $('#vw-fresh');
