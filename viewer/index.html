@@ -163,11 +163,31 @@ a.t-pr:hover { text-decoration: underline; text-decoration-color: var(--text-3);
 .lsp-row { display: flex; justify-content: space-between; gap: 12px; }
 .lsp-row b { color: var(--text); font: 500 12px/1.45 var(--code); }
 .vw-review { position: relative; flex: none; }
-/* An agent holding the review (untangle watch): watching, or working on the notes it took. */
-.vw-agent { display: inline-flex; align-items: center; gap: 7px; flex: none; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--local-soft); color: var(--local-ink); font: 600 12px/1 var(--ui); white-space: nowrap; cursor: default; }
-.vw-agent[hidden] { display: none; }
-.vw-agent .dot, .rv-agent .dot { background: var(--local); }
-.vw-agent .dot.watching, .rv-agent .dot.watching { animation: pulse 1.8s ease-in-out infinite; }
+/* The agents holding the review: each one's label says where its chat is (listening, working on
+   notes, a line waiting for its turn, not listening, or gone), and opens a menu. */
+.vw-agents { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.vw-agents[hidden] { display: none; }
+.vw-agent-w { position: relative; flex: none; }
+.vw-agent { appearance: none; border: 0; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 8px 0 10px; border-radius: 999px; background: var(--local-soft); color: var(--local-ink); font: 600 12px/1 var(--ui); white-space: nowrap; cursor: pointer; }
+.vw-agent svg { width: 12px; height: 12px; opacity: .7; }
+.vw-agent .dot, .rv-agent .dot, .ag-pop h4 .dot { background: var(--local); }
+.st-listening .dot { animation: pulse 1.8s ease-in-out infinite; }
+.st-working .dot { width: 9px; height: 9px; background: none; border: 1.5px solid var(--local); border-right-color: transparent; animation: spin .9s linear infinite; }
+.st-queued .dot { background: none; box-shadow: inset 0 0 0 1.5px var(--local); }
+.vw-agent.st-deaf { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--hair-2); }
+.st-deaf .dot { background: none; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.vw-agent.st-left { background: var(--raised); color: var(--text-3); }
+.st-left .dot { background: var(--text-4); }
+/* An agent's menu: where its chat is, what reaches it, and Wake while nothing listens there. */
+.ag-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; display: grid; gap: 10px; width: min(360px, calc(100vw - 32px)); padding: 14px; border-radius: 12px; background: var(--raised); box-shadow: var(--float); color: var(--text-2); font: 400 12.5px/1.5 var(--ui); white-space: normal; text-align: left; }
+.ag-pop h4 { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--text); font: 600 13px/1.3 var(--ui); }
+.ag-pop p { margin: 0; }
+.ag-pop code { padding: .1em .3em; border-radius: 4px; background: var(--hover); color: var(--text); font: 500 11.5px var(--code); }
+.ag-pop .ag-who { color: var(--text-3); font: 500 11.5px/1.45 var(--code); }
+.ag-line { padding: 8px 10px; border-radius: 8px; background: var(--sheet); color: var(--text); font: 400 11.5px/1.5 var(--code); box-shadow: inset 2px 0 0 var(--local); overflow-wrap: anywhere; }
+.ag-line small { display: block; margin-bottom: 5px; color: var(--text-3); font: 600 10px/1 var(--ui); letter-spacing: .07em; text-transform: uppercase; }
+.ag-pop .cmp-err { margin: 0; }
+.ag-pop .rv-f .btn:not(.primary) { background: var(--hover); }
 .vw-review[hidden] { display: none; }
 .vw-body { display: grid; grid-template-columns: var(--side-w) 0 minmax(0, 1fr); min-height: 0; }
 .vw.side-off .vw-body { grid-template-columns: 0 0 minmax(0, 1fr); }
@@ -1051,6 +1071,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 .cm-tag.since, .cm-tag.held { color: var(--accent-ink); background: var(--accent-soft); }
 .cm-tag code { font-size: 10.5px; color: inherit; }
 .cm-st { font-size: 11.5px; color: var(--text-3); }
+.cm-st.warn { color: var(--local-ink); }
 .th-tools { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .th-tools .btn { background: var(--hover); color: var(--text-2); }
 .th-tools .btn:hover { background: #2A2A31; color: var(--text); }
@@ -1226,7 +1247,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
         <span class="lsp-row"><span>Language server’s CPU</span><b data-m="lspCpu">…</b></span>
       </span>
     </div>
-    <div class="vw-agent" id="vw-agent" role="status" hidden></div>
+    <div class="vw-agents" id="vw-agent" hidden></div>
     <div class="vw-review" id="vw-review" hidden></div>
   </header>
   <div class="vw-body">

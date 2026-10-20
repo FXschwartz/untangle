@@ -4,6 +4,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { TempRepo, type Person } from '../helpers/repo.ts';
+import type { Bell, Chat } from '../../dist/chats.js';
 import type { NotesContext, Post } from '../../dist/notes.js';
 
 // A burst of notes reaches an agent this long after the last one.
@@ -246,8 +247,8 @@ describe('Given notes an agent watches, ', () => {
   });
 
   it('when two notes come in a burst, then the waiting watch gets both at once, with the opening line, and says how to go on the first time.', async () => {
-    const waiting = notes.watch('Claude Code', { timeout: 10_000 });
-    assert.deepEqual(notes.agents().map((a) => [a.name, a.state]), [['Claude Code', 'watching']]);
+    const waiting = notes.watch('Claude', { timeout: 10_000 });
+    assert.deepEqual(notes.agents().map((a) => [a.name, a.state]), [['Claude', 'listening']]);
     await notes.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line: 3, body: 'Why a local?' });
     await new Promise((r) => setTimeout(r, 60));
     await notes.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line: 4, body: 'Flush after it.' });
@@ -258,16 +259,16 @@ describe('Given notes an agent watches, ', () => {
     assert.match(got.text, /\nN1 · lib\/app\.dart:3\n[\s\S]*\nN2 · lib\/app\.dart:4\n/);
   });
 
-  it('when the page lists the notes, then the agent read them, and works on them.', () => {
+  it('when the page lists the notes, then the agent read them, and works on them until it answers.', () => {
     const view = notes.view();
-    assert.deepEqual([view.notes.map((n) => n.status), view.agents.map((a) => [a.name, a.state])], [[{ read: 'Claude Code' }, { read: 'Claude Code' }], [['Claude Code', 'working']]]);
+    assert.deepEqual([view.notes.map((n) => n.status), view.agents.map((a) => [a.name, a.state, a.on])], [[{ read: 'Claude' }, { read: 'Claude' }], [['Claude', 'working', [1, 2]]]]);
   });
 
   it('when the agent answers and resolves a note, then the page shows its answer and who resolved it, and its own watch doesn’t get them back.', async () => {
-    notes.reply('Claude Code', 2, 'Done in abc1234.', true);
+    notes.reply('Claude', 2, 'Done in abc1234.', true);
     const n2 = notes.view().notes[1];
-    assert.deepEqual([n2.comments.map((c) => [c.by, c.body]), n2.resolved?.by], [[[null, 'Flush after it.'], ['Claude Code', 'Done in abc1234.']], 'Claude Code']);
-    const again = await notes.watch('Claude Code', { timeout: 300 });
+    assert.deepEqual([n2.comments.map((c) => [c.by, c.body]), n2.resolved?.by], [[[null, 'Flush after it.'], ['Claude', 'Done in abc1234.']], 'Claude']);
+    const again = await notes.watch('Claude', { timeout: 300 });
     assert.deepEqual(again, { idle: true, first: false });
   });
 
@@ -275,7 +276,7 @@ describe('Given notes an agent watches, ', () => {
     await notes.act({ action: 'reply', n: 1, body: 'Keep the doc comment.' });
     await notes.act({ action: 'resolve', n: 2, resolved: false });
     await notes.act({ action: 'edit', n: 2, id: notes.view().notes[1].comments[0].id, body: 'Flush after it, always.' });
-    const got = await notes.watch('Claude Code', { timeout: 5_000 });
+    const got = await notes.watch('Claude', { timeout: 5_000 });
     assert.ok('text' in got);
     assert.equal(got.text.slice(got.text.indexOf('\n\n') + 2), [
       'N1 · lib/app.dart:3 · a reply in its thread',
@@ -294,9 +295,9 @@ describe('Given notes an agent watches, ', () => {
     await notes.act({ action: 'settings', live: false });
     await notes.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line: 2, body: 'Name it person?' });
     assert.deepEqual([notes.view().held, notes.view().notes[2].status], [1, 'held']);
-    assert.deepEqual(await notes.watch('Claude Code', { timeout: 300 }), { idle: true, first: false });
+    assert.deepEqual(await notes.watch('Claude', { timeout: 300 }), { idle: true, first: false });
     await notes.act({ action: 'send' });
-    const got = await notes.watch('Claude Code', { timeout: 5_000 });
+    const got = await notes.watch('Claude', { timeout: 5_000 });
     assert.ok('text' in got && /\nN3 · lib\/app\.dart:2\n/.test(got.text));
     assert.equal(notes.view().held, 0);
   });
@@ -304,22 +305,266 @@ describe('Given notes an agent watches, ', () => {
   it('when another agent watches for the first time, then it gets every note, the first agent’s answer with them.', async () => {
     const got = await notes.watch('Codex', { timeout: 5_000 });
     assert.ok('text' in got);
-    assert.deepEqual([got.notes, got.first, /\nClaude Code: Done in abc1234\.\n/.test(got.text)], [3, true, true]);
+    assert.deepEqual([got.notes, got.first, /\nClaude: Done in abc1234\.\n/.test(got.text)], [3, true, true]);
   });
 
-  it('when the agent stops asking, then it is no longer watching, but still working on what it read.', async () => {
+  it('when the agent stops asking, then it is no longer listening, but still working on what it read.', async () => {
     const stop = new AbortController();
     const state = () => notes.agents().find((a) => a.name === 'Codex')?.state;
     void notes.watch('Codex', { timeout: 10_000, signal: stop.signal });
     const waiting = state();
     stop.abort();
-    assert.deepEqual([waiting, state()], ['watching', 'working']);
+    assert.deepEqual([waiting, state()], ['listening', 'working']);
   });
 
   it('when the review closes, then a waiting watch hears so.', async () => {
-    const waiting = notes.watch('Claude Code', { timeout: 10_000 });
+    const waiting = notes.watch('Claude', { timeout: 10_000 });
     notes.close();
     assert.deepEqual(await waiting, { closed: true });
     assert.ok(pushed > 0);
+  });
+});
+
+/** A stand-in for how untangle learns about chats and reaches them: each chat's state, and the lines it got. */
+function standIn() {
+  const chats = new Map<string, { alive?: boolean; busy?: { busy: boolean; since: number }; fails?: string }>();
+  const rung: Array<[string, string]> = [], woke: Array<[string, string]> = [];
+  const bell: Bell = {
+    alive: (c) => chats.get(c.id)?.alive ?? true,
+    busy: (c) => chats.get(c.id)?.busy ?? null,
+    ring: async (c, line) => { rung.push([c.id, line]); return chats.get(c.id)?.fails ?? null; },
+    wake: async (c, line) => { woke.push([c.id, line]); return null; },
+  };
+  return { chats, rung, woke, bell };
+}
+const claude = (id: string): Chat => ({ kind: 'claude', id, pid: 4242, started: null, home: '/nowhere', bin: null, orca: { cli: '/opt/orca/orca-ide', handle: `term_${id}`, pane: null } });
+const codex = (id: string): Chat => ({ kind: 'codex', id, pid: 4343, started: null, home: '/nowhere', bin: '/opt/codex/codex', orca: null });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const add = (notes: InstanceType<typeof Notes>, line: number, body: string) => notes.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line, body });
+
+describe('Given notes a Claude chat holds, in an Orca terminal, ', () => {
+  let g: ReturnType<typeof greeting>;
+  let dir = '';
+  let notes: InstanceType<typeof Notes>;
+  const s = standIn();
+
+  before(() => {
+    g = greeting();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-notes-'));
+    notes = new Notes(path.join(dir, 'feature.json'), () => {}, s.bell);
+    notes.attach(context(g.repo, g.base, g.head));
+  });
+
+  after(() => {
+    notes.close();
+    g.repo.remove();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('when its watch waits, then Claude is listening; when the watch brings a note, it works on it while its chat is busy.', async () => {
+    const waiting = notes.watch('Claude', { timeout: 10_000, chat: claude('a') });
+    const listening = notes.agents()[0].state;
+    await add(notes, 3, 'Why a local?');
+    const got = await waiting;
+    s.chats.set('a', { busy: { busy: true, since: Date.now() } });
+    const a = notes.agents()[0];
+    assert.deepEqual([listening, 'text' in got, a.state, a.on, a.kind, a.chat, a.orca], ['listening', true, 'working', [1], 'claude', 'a', true]);
+  });
+
+  it('when its turn ends without another watch, then Claude isn’t listening; once there’s news for it, the page can wake it with a line, and the note reaches nobody.', async () => {
+    s.chats.set('a', { busy: { busy: false, since: Date.now() } });
+    const deaf = notes.agents()[0];
+    await add(notes, 4, 'Flush after it.');
+    const a = notes.agents()[0];
+    assert.deepEqual([deaf.state, deaf.wake, a.state, a.wake, notes.view().notes[1].status], ['deaf', null, 'deaf', 'untangle: 1 new note on the review of #7. Run untangle watch to read it.', 'nobody']);
+  });
+
+  it('when the page wakes it, then the line is typed into its chat and the note waits for its turn, until a turn that doesn’t read it.', async () => {
+    await notes.wake('Claude');
+    const queued = notes.agents()[0];
+    s.chats.set('a', { busy: { busy: false, since: Date.now() + 5 } });
+    assert.deepEqual([s.woke, queued.state, queued.on, notes.agents()[0].state], [[['a', 'untangle: 1 new note on the review of #7. Run untangle watch to read it.']], 'queued', [2], 'deaf']);
+  });
+
+  it('when another Claude chat watches, then the first chat’s watch hears it was taken over, and the new one gets every open note with its thread, told how the review works.', async () => {
+    await notes.act({ action: 'reply', n: 1, body: 'Keep the doc comment.' });
+    await notes.watch('Claude', { timeout: 5_000, chat: claude('a') });
+    const first = notes.watch('Claude', { timeout: 10_000, chat: claude('a') });
+    const second = await notes.watch('Claude', { timeout: 10_000, chat: claude('b') });
+    assert.deepEqual(await first, { taken: true });
+    assert.ok('text' in second && second.first);
+    assert.equal(second.text.split('\n').slice(0, 5).join('\n'), [
+      `untangle: you hold this review now: another Claude chat held it. Here are its 2 open notes, on acme/app#7 at ${short(g.head)}. Line numbers are on that commit.`,
+      '',
+      'Discuss these with me before changing anything.',
+      '',
+      'N1 · lib/app.dart:3',
+    ].join('\n'));
+    assert.match(second.text, /\nWhy a local\?\nYou: Keep the doc comment\.\n\nN2 · lib\/app\.dart:4\n/);
+    assert.deepEqual([notes.agents()[0].chat, notes.reply('Claude', 2, 'From the old chat.', false, 'a').other], ['b', true]);
+  });
+
+  it('when the chat ends, then the page says Claude left, and a new note reaches nobody.', async () => {
+    s.chats.set('b', { alive: false });
+    await add(notes, 2, 'Name it person?');
+    assert.deepEqual([notes.agents()[0].state, notes.view().notes.at(-1)?.status], ['left', 'nobody']);
+  });
+});
+
+describe('Given notes a Codex chat holds, ', () => {
+  let g: ReturnType<typeof greeting>;
+  let dir = '';
+  let notes: InstanceType<typeof Notes>;
+  const s = standIn();
+  const watch = () => notes.watch('Codex', { timeout: 10_000, chat: codex('t'), brief: true });
+
+  before(() => {
+    g = greeting();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-notes-'));
+    notes = new Notes(path.join(dir, 'feature.json'), () => {}, s.bell);
+    notes.attach(context(g.repo, g.base, g.head));
+  });
+
+  after(() => {
+    notes.close();
+    g.repo.remove();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('when its watch finds nothing to read, then it returns at once, and Codex is listening.', async () => {
+    const t0 = Date.now();
+    const got = await watch();
+    assert.deepEqual([got, Date.now() - t0 < 1000, notes.agents()[0].state], [{ idle: true, first: true }, true, 'listening']);
+  });
+
+  it('when a burst of notes is written, then untangle puts one line in its chat a moment after the last, and the notes wait for its turn.', async () => {
+    await add(notes, 3, 'Why a local?');
+    await sleep(60);
+    await add(notes, 4, 'Flush after it.');
+    const early = s.rung.length;
+    await sleep(400);
+    const a = notes.agents()[0];
+    assert.deepEqual([early, s.rung, a.state, a.on, notes.view().notes.map((n) => n.status)], [0, [['t', 'untangle: 2 new notes on the review of #7. Run untangle watch to read them.']], 'queued', [1, 2], ['queued', 'queued']]);
+  });
+
+  it('when you reply while that line waits unread, then no second line goes.', async () => {
+    await notes.act({ action: 'reply', n: 1, body: 'And the doc comment?' });
+    await sleep(400);
+    assert.equal(s.rung.length, 1);
+  });
+
+  it('when its watch reads them, then it works on what it hasn’t answered, and listens again once it has.', async () => {
+    const got = await watch();
+    const working = notes.agents()[0];
+    notes.reply('Codex', 1, 'It names the greeting.', false);
+    const one = notes.agents()[0];
+    notes.reply('Codex', 2, 'Done.', true);
+    assert.ok('text' in got && /\nWhy a local\?\nYou: And the doc comment\?\n/.test(got.text));
+    assert.deepEqual([working.state, working.on, one.on, notes.agents()[0].state], ['working', [1, 2], [2], 'listening']);
+  });
+
+  it('when its log says its turn ended after the watch, then it listens, and works while a turn runs.', async () => {
+    await add(notes, 2, 'Name it person?');
+    await sleep(400);
+    await watch();
+    s.chats.set('t', { busy: { busy: true, since: Date.now() - 1000 } });
+    const busy = notes.agents()[0].state;
+    s.chats.set('t', { busy: { busy: false, since: Date.now() + 5 } });
+    assert.deepEqual([busy, notes.agents()[0].state], ['working', 'listening']);
+  });
+
+  it('when a line can’t reach its chat, then the page says why, and the next note tries again.', async () => {
+    const idle = s.chats.get('t')!;
+    s.chats.set('t', { ...idle, fails: 'no rollout found for thread id t' });
+    await add(notes, 1, 'A doc comment for the file?');
+    await sleep(400);
+    const failed = notes.agents()[0];
+    s.chats.set('t', idle);
+    await notes.act({ action: 'reply', n: 4, body: 'Or for the library?' });
+    await sleep(400);
+    assert.deepEqual([failed.state, failed.error, s.rung.length, notes.agents()[0].error], ['listening', 'untangle couldn’t put a line in Codex’s chat: no rollout found for thread id t', 4, null]);
+  });
+
+  it('when its chat ended, then untangle puts no line in it, and says Codex left.', async () => {
+    await watch();
+    s.chats.set('t', { alive: false });
+    await add(notes, 2, 'Or name it guest?');
+    await sleep(400);
+    assert.deepEqual([s.rung.length, notes.agents()[0].state], [4, 'left']);
+  });
+});
+
+describe('Given notes a review keeps, and an agent that reviews the change too, ', () => {
+  let g: ReturnType<typeof greeting>;
+  let dir = '';
+  let notes: InstanceType<typeof Notes>;
+
+  before(() => {
+    g = greeting();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-notes-'));
+    notes = new Notes(path.join(dir, 'feature.json'), () => {}, standIn().bell);
+    notes.attach(context(g.repo, g.base, g.head));
+  });
+
+  after(() => {
+    notes.close();
+    g.repo.remove();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('when the agent writes a note on lines, then it is a thread of its own on them, said to be its, with no read status.', () => {
+    const wrote = notes.write('Claude', { path: 'lib/app.dart', side: 'RIGHT', startLine: 3, line: 4, body: 'Print the message directly?' });
+    const n1 = notes.view().notes[0];
+    assert.deepEqual([wrote, n1.comments.map((c) => [c.by, c.body]), n1.status], [
+      { n: 1, where: 'lib/app.dart:3-4', head: short(g.head), code: ["  final message = 'Hello, $name!';", '  print(message);'], other: false },
+      [['Claude', 'Print the message directly?']],
+      null,
+    ]);
+    assert.match(n1.text, /\n```\nClaude: Print the message directly\?\n$/);
+  });
+
+  it('when the agent writes a note past the file’s end, then it hears how long the file is.', () => {
+    assert.throws(() => notes.write('Claude', { path: 'lib/app.dart', side: 'RIGHT', line: 40, body: 'Here?' }), (e: Error) => e.message === `lib/app.dart has 5 lines at ${short(g.head)}`);
+  });
+
+  it('when another agent watches, then the note comes as a new one, said to be the first agent’s.', async () => {
+    const got = await notes.watch('Codex', { timeout: 5_000 });
+    assert.ok('text' in got && /\nN1 · lib\/app\.dart:3-4\n[\s\S]*\nClaude: Print the message directly\?\n/.test(got.text));
+  });
+
+  it('when you answer in its thread, then the agent’s next watch brings your answer, and not its own note.', async () => {
+    await notes.act({ action: 'reply', n: 1, body: 'Yes, inline it.' });
+    const got = await notes.watch('Claude', { timeout: 5_000 });
+    assert.ok('text' in got);
+    assert.equal(got.text.slice(got.text.indexOf('\n\n') + 2), ['N1 · lib/app.dart:3-4 · a reply in its thread', '> Claude: Print the message directly?', 'You: Yes, inline it.', ''].join('\n'));
+  });
+});
+
+describe('Given where comments go, before you choose, ', () => {
+  let g: ReturnType<typeof greeting>;
+  let dir = '';
+  const book = (name: string, byAgent: boolean) => {
+    const notes = new Notes(path.join(dir, name), () => {}, standIn().bell, byAgent);
+    notes.attach(context(g.repo, g.base, g.head));
+    return notes;
+  };
+
+  before(() => {
+    g = greeting();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-notes-'));
+  });
+
+  after(() => {
+    g.repo.remove();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('when a review an agent’s session started, or one with notes, is opened, then comments go to notes; else to GitHub, until you choose.', async () => {
+    const started = book('agent.json', true), plain = book('plain.json', false), noted = book('noted.json', false);
+    await noted.act({ action: 'add', path: 'lib/app.dart', side: 'RIGHT', line: 3, body: 'Why a local?' });
+    const before = [started.view().mode, plain.view().mode, noted.view().mode];
+    await started.act({ action: 'settings', mode: 'github' });
+    assert.deepEqual([before, started.view().mode], [['local', null, 'local'], 'github']);
+    [started, plain, noted].forEach((n) => n.close());
   });
 });

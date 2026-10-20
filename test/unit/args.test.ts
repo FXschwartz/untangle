@@ -193,7 +193,43 @@ describe('Given the agent’s commands, ', () => {
     'when notes and stop are given a review, '
     + 'then they are about it.',
     () => {
-      assert.deepEqual([parseCommand(['notes', '-all', '-review', '../app']), parseCommand(['stop'])], [{ cmd: 'notes', review: '../app', all: true }, { cmd: 'stop', review: null }]);
+      assert.deepEqual([parseCommand(['notes', '-all', '-review', '../app']), parseCommand(['stop'])], [{ cmd: 'notes', review: '../app', agent: null, all: true }, { cmd: 'stop', review: null }]);
+    },
+  );
+
+  it(
+    'when note is given lines, a range of removed lines, or a file alone, '
+    + 'then it writes on them, the rest of the line its text.',
+    () => {
+      assert.deepEqual([parseCommand(['note', 'lib/a.dart:42', 'Why', 'here?']), parseCommand(['note', '-removed', '-agent', 'Codex', 'lib/a.dart:40-42', '-1', 'is', 'gone']), parseCommand(['note', 'lib/a.dart', 'A doc comment?'])], [
+        { cmd: 'note', review: null, agent: null, removed: false, path: 'lib/a.dart', line: 42, startLine: null, text: 'Why here?' },
+        { cmd: 'note', review: null, agent: 'Codex', removed: true, path: 'lib/a.dart', line: 42, startLine: 40, text: '-1 is gone' },
+        { cmd: 'note', review: null, agent: null, removed: false, path: 'lib/a.dart', line: null, startLine: null, text: 'A doc comment?' },
+      ]);
+    },
+  );
+
+  it(
+    'when note has no text, '
+    + 'then it asks what to write.',
+    () => {
+      assert.throws(() => parseCommand(['note', 'lib/a.dart:3']), (error: unknown) => error instanceof UsageError && error.message === 'what to write? untangle note <path>[:<line>[-<line>]] <text>');
+    },
+  );
+
+  it(
+    'when skill is given -install, or nothing, '
+    + 'then it installs the skill, or prints it.',
+    () => {
+      assert.deepEqual([parseCommand(['skill', '-install']), parseCommand(['skill'])], [{ cmd: 'skill', install: true }, { cmd: 'skill', install: false }]);
+    },
+  );
+
+  it(
+    'when skill is given an argument, '
+    + 'then it is refused.',
+    () => {
+      assert.throws(() => parseCommand(['skill', 'claude']), (error: unknown) => error instanceof UsageError && error.message === 'untangle skill takes no arguments (got claude)');
     },
   );
 

@@ -44,7 +44,8 @@ export function removeRun(pid: number): void {
   }
 }
 
-const alive = (pid: number) => {
+/** Whether a process runs. */
+export const pidAlive = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
@@ -65,7 +66,7 @@ export function listRuns(): RunInfo[] {
   for (const name of names) {
     const m = /^(\d+)\.json$/.exec(name);
     if (!m) continue;
-    if (!alive(Number(m[1]))) { removeRun(Number(m[1])); continue; }
+    if (!pidAlive(Number(m[1]))) { removeRun(Number(m[1])); continue; }
     try {
       out.push(JSON.parse(fs.readFileSync(path.join(runDir(), name), 'utf8')));
     } catch {

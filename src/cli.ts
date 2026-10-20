@@ -3,13 +3,14 @@
 //
 //   untangle [flags] [directory]
 //   untangle [flags] <pr-url>
-//   untangle watch | reply | notes | stop ...
+//   untangle watch | reply | note | notes | stop | skill ...
 import fs from 'node:fs';
 import path from 'node:path';
 import * as agent from './agent.js';
-import { notesUsage, parseCommand, replyUsage, stopUsage, usage, UsageError, watchUsage, type Options } from './args.js';
+import { noteUsage, notesUsage, parseCommand, replyUsage, skillUsage, stopUsage, usage, UsageError, watchUsage, type Options } from './args.js';
 import { buildReview, buildSteps, type ReviewData } from './build.js';
 import { reviewDir } from './cache.js';
+import { chatFrom } from './chats.js';
 import { readHistory } from './history.js';
 import { gitMaybe } from './exec.js';
 import { LiveSession } from './live.js';
@@ -20,6 +21,7 @@ import { fonts, highlighter, progressPage, reviewPage, type PageConfig } from '.
 import { prKey, removeRun, wantedDir, writeRun, type RunInfo } from './runs.js';
 import { ReviewServer } from './server.js';
 import { editorFrom, ReviewSession } from './session.js';
+import { skill } from './skill.js';
 import { isPrUrl, latestHead, resolveDirectory, resolveUrl, type Target } from './target.js';
 import { VERSION } from './version.js';
 
@@ -36,7 +38,7 @@ async function main(): Promise<number> {
     command = parseCommand(process.argv.slice(2));
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
-    const help = { watch: watchUsage, reply: replyUsage, notes: notesUsage, stop: stopUsage }[process.argv[2]];
+    const help = { watch: watchUsage, reply: replyUsage, note: noteUsage, notes: notesUsage, stop: stopUsage, skill: skillUsage }[process.argv[2]];
     process.stderr.write(`${e.message}\n${help ? help() : usage(VERSION)}`);
     return 2;
   }
@@ -46,8 +48,10 @@ async function main(): Promise<number> {
   }
   if (command.cmd === 'watch') return agent.watch({ target: command.opts.target, given: command.given, forward: command.forward, agent: command.agent, timeout: command.timeout });
   if (command.cmd === 'reply') return agent.reply(command);
+  if (command.cmd === 'note') return agent.note(command);
   if (command.cmd === 'notes') return agent.notes(command);
   if (command.cmd === 'stop') return agent.stop(command);
+  if (command.cmd === 'skill') return skill(command);
   return review(command.opts);
 }
 
@@ -85,6 +89,8 @@ async function review(opts: Options): Promise<number> {
   let url = '';
   // The review's notes: kept for its branch, they stay through refreshes. Where the page opened.
   let notes: Notes | null = null;
+  // An agent's session started this review (its untangle watch, or untangle run in its chat).
+  const byAgent = process.env.UNTANGLE_FROM_AGENT === '1' || !!(process.env.CLAUDECODE || process.env.CODEX_THREAD_ID || process.env.GEMINI_CLI);
   let opened: 'orca' | 'browser' | null = null;
   let run: RunInfo | null = null;
   if (!exporting) {
@@ -137,26 +143,32 @@ async function review(opts: Options): Promise<number> {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
-  // The notes' API: the page's (list, add, reply, resolve, copy, post) and the agents' (hello, watch,
-  // reply, export).
+  // The notes' API: the page's (list, add, reply, resolve, copy, post, wake) and the agents' (hello,
+  // watch, reply, note, export).
   const notesCall = async (book: Notes, route: string, method: string, query: URLSearchParams, body: unknown, signal: AbortSignal): Promise<{ status?: number; data: unknown }> => {
-    const name = (query.get('agent') || '').trim().slice(0, 40) || 'Agent';
+    const b = (body && typeof body === 'object' ? body : {}) as { agent?: unknown; wait?: unknown; brief?: unknown; chat?: unknown; again?: unknown; n?: unknown; body?: string | null; resolve?: unknown; path?: unknown; side?: unknown; line?: unknown; startLine?: unknown; file?: unknown };
+    const name = String(b.agent ?? query.get('agent') ?? '').trim().slice(0, 40) || 'Agent';
+    const chatId = (x: unknown) => (typeof x === 'string' && /^[\w-]{1,100}$/.test(x) ? x : null);
     try {
       if (route === 'notes' && method === 'GET') return { data: book.view() };
       if (route === 'notes' && method === 'POST') return { data: await book.act((body || {}) as NoteAction) };
       if (route === 'notes/hello' && method === 'GET') return { data: { title: target ? names(target).title : '', url, head: target?.headSha, pages: server ? server.pageCount : 0, opened } };
-      if (route === 'notes/watch' && method === 'GET') {
-        const wait = Math.min(WATCH_ROUND, Math.max(0, Number(query.get('wait')) || WATCH_ROUND));
-        return { data: await book.watch(name, { timeout: wait, signal }) };
+      if (route === 'notes/watch' && (method === 'POST' || method === 'GET')) {
+        const wait = Math.min(WATCH_ROUND, Math.max(0, Number(b.wait ?? query.get('wait')) || WATCH_ROUND));
+        // The command the agent reads with, as it types it: it goes in the lines for its chat.
+        const again = typeof b.again === 'string' && /^untangle watch[^\n]{0,300}$/.test(b.again) ? b.again : undefined;
+        return { data: await book.watch(name, { timeout: wait, signal, chat: chatFrom(b.chat), again, brief: b.brief === true }) };
       }
-      if (route === 'notes/agent' && method === 'POST') {
-        const b = (body || {}) as { agent?: string; n?: number; body?: string | null; resolve?: boolean };
-        return { data: book.reply(String(b.agent || '').trim().slice(0, 40) || 'Agent', Number(b.n), b.body ?? null, !!b.resolve) };
+      if (route === 'notes/agent' && method === 'POST') return { data: book.reply(name, Number(b.n), b.body ?? null, !!b.resolve, chatId(b.chat)) };
+      if (route === 'notes/note' && method === 'POST') {
+        const n = (x: unknown) => (x == null ? undefined : Number(x));
+        return { data: book.write(name, { path: String(b.path ?? ''), side: b.side === 'LEFT' ? 'LEFT' : 'RIGHT', line: n(b.line), startLine: n(b.startLine), file: b.file === true, body: String(b.body ?? '') }, chatId(b.chat)) };
       }
       if (route === 'notes/export' && method === 'GET') {
         const scope = (['open', 'new', 'all'].includes(query.get('scope') || '') ? query.get('scope') : 'open') as Scope;
-        return { data: { text: book.exportText(scope) } };
+        return { data: { text: book.exportText(scope), other: book.other(name, chatId(query.get('chat'))) } };
       }
+      if (route === 'notes/wake' && method === 'POST') return { data: await book.wake(name) };
     } catch (e) {
       if (e instanceof NoteError) return { status: e.status, data: { error: e.message } };
       throw e;
@@ -169,7 +181,7 @@ async function review(opts: Options): Promise<number> {
     const file = notesFile(t.repoKey, n.snapshotKey);
     if (!notes || notes.file !== file) {
       notes?.close();
-      const book: Notes = new Notes(file, () => server?.broadcast({ notes: book.revision }));
+      const book: Notes = new Notes(file, () => server?.broadcast({ notes: book.revision }), undefined, byAgent);
       notes = book;
     }
     notes.attach(s.notesContext(t.pr ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}` : t.repoKey.startsWith('local/') ? path.basename(t.repo) : n.repoName, t.pr ? t.pr.headRefName : n.branch));

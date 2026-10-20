@@ -1730,7 +1730,7 @@
     data: null, error: null, loading: false, again: false, busy: null, errors: new Map(),
     anchors: new Map(), files: new Map(), byN: new Map(),
     opened: new Set(), replying: new Set(), editing: null, folded: new Set(), was: new Set(), showResolved: false,
-    reveal: null, opening: null, openingTimer: null, seenAgents: new Set(),
+    reveal: null, opening: null, openingTimer: null, seenAgents: new Set(), agentOpen: null,
   };
   // GitHub can take comments: the review has a pull request, and gh answered (or hasn't yet).
   const ghCan = () => GH.on && !(GH.error && !GH.data);
@@ -1742,8 +1742,25 @@
   // Whether notes can go to GitHub now: as threads on its head, which must be this review's.
   const canPost = () => ghCan() && !!GH.data && !GH.stale && !GH.data.pr.locked;
   const okJson = (r) => r.json().catch(() => ({ error: r.statusText })).then((j) => { if (!r.ok) throw new Error(j.error || r.status); return j; });
-  // An agent shows in the bar while it watches, and for a while after it took your notes.
-  const agentsNow = () => (NT.data ? NT.data.agents.filter((a) => a.state === 'watching' || Date.now() - Date.parse(a.since) < 15 * 60000) : []);
+  // The agents holding the review, and where each one's chat is: listening, working on notes, a
+  // line from untangle waiting for its turn, not listening (deaf), or gone (left).
+  const agentsNow = () => (NT.data ? NT.data.agents : []);
+  // The one a note just written goes to: the first that hears it, else the first.
+  const agentFirst = () => { const l = agentsNow(); return l.find((a) => a.state !== 'deaf' && a.state !== 'left') || l[0] || null; };
+  // Note numbers as words: N4, N2 and N4, N1–N3, N1, N3 and N5.
+  function nList(ns) {
+    const runs = [];
+    [...ns].sort((a, b) => a - b).forEach((n) => { const r = runs[runs.length - 1]; if (r && n === r[1] + 1) r[1] = n; else runs.push([n, n]); });
+    const parts = runs.flatMap(([a, b]) => (b - a >= 2 ? [`N${a}–N${b}`] : a === b ? [`N${a}`] : [`N${a}`, `N${b}`]));
+    return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0] || '';
+  }
+  function agentLabel(a) {
+    if (a.state === 'listening') return `${a.name} is listening`;
+    if (a.state === 'working') return `${a.name} is working${a.on.length ? ' on ' + nList(a.on) : ''}`;
+    if (a.state === 'queued') return a.on.length ? `${nList(a.on)} ${a.on.length === 1 ? 'waits' : 'wait'} for ${a.name}’s turn` : `untangle’s line waits for ${a.name}’s turn`;
+    if (a.state === 'deaf') return `${a.name} isn’t listening`;
+    return `${a.name} left`;
+  }
 
   function ntSet(d) {
     const was = NT.data;
@@ -1770,15 +1787,29 @@
     const news = [];
     if (was) {
       const before = new Map(was.notes.map((n) => [n.n, n]));
+      // An agent's own notes, from its review of the change, and its answers in threads.
+      const wrote = [];
       d.notes.forEach((n) => {
         const b = before.get(n.n);
         const answers = n.comments.filter((c) => c.by && !(b && b.comments.some((x) => x.id === c.id)));
         answers.forEach((c) => GH.fresh.add(c.id));
-        if (answers.length) news.push(`${answers[0].by} answered N${n.n}`);
+        if (!b && n.comments[0].by) wrote.push(n);
+        else if (answers.length) news.push(`${answers[0].by} answered N${n.n}`);
         if (n.resolved && n.resolved.by && !(b && b.resolved)) news.push(`${n.resolved.by} resolved N${n.n}`);
       });
+      if (wrote.length) news.unshift(`${wrote[0].comments[0].by} wrote ${nList(wrote.map((n) => n.n))}`);
     }
-    d.agents.forEach((a) => { if (!NT.seenAgents.has(a.name)) { NT.seenAgents.add(a.name); if (was && a.state === 'watching') news.push(`${a.name} is watching this review`); } });
+    // Where each agent's chat went since: it began listening, another chat took over, it left, or
+    // a line from untangle waits while it's busy.
+    const before = new Map((was ? was.agents : []).map((a) => [a.name, a]));
+    d.agents.forEach((a) => {
+      const b = before.get(a.name);
+      if (!NT.seenAgents.has(a.name)) { NT.seenAgents.add(a.name); if (was && a.state === 'listening') news.push(`${a.name} is listening`); return; }
+      if (!b) return;
+      if (b.chat && a.chat && b.chat !== a.chat) news.push(`A new ${a.name} chat took over this review`);
+      else if (a.state === 'left' && b.state !== 'left') news.push(`${a.name} left: its chat ended`);
+      else if (a.state === 'queued' && b.state !== 'queued' && a.kind === 'codex' && a.busy) news.push(`Queued for ${a.name}: it’s busy`);
+    });
     if (news.length) toast(news.slice(0, 3).join(' · '));
   }
   function ntLoad() {
@@ -2001,8 +2032,8 @@
   // Where a comment box sends: kept here as a note (and to a watching agent), or posted to GitHub.
   function destHtml(local) {
     if (!local) return '<span class="cmp-dest"><i></i><b>Posts to GitHub</b></span>';
-    const a = agentsNow()[0], live = !NT.data || NT.data.live;
-    return `<span class="cmp-dest local"><i></i><b>Saved locally${!live ? ', held until you send it' : a ? `, sent to ${esc(a.name)}` : ''}</b></span>`;
+    const a = agentFirst(), live = !NT.data || NT.data.live;
+    return `<span class="cmp-dest local"><i></i><b>Saved locally${!live ? ', held until you send it' : a && a.state !== 'deaf' && a.state !== 'left' ? `, sent to ${esc(a.name)}` : ''}</b></span>`;
   }
   // A text box for markdown: Write and Preview, an error, and its buttons ([label, attrs, primary]).
   // A note's (o.local) previews here and sends to untangle; o.dest says where it sends.
@@ -2153,7 +2184,11 @@
     const st = n.status;
     if (st === 'held') return '<span class="cm-tag held" title="Live review is off: it waits until you send it, from the Notes menu">Held</span>';
     if (st && st.read) return `<span class="cm-st" title="${esc(st.read)} read it through untangle watch">read by ${esc(st.read)}</span>`;
-    if (st === 'queued') return '<span class="cm-st" title="An agent’s next untangle watch reads it">not read yet</span>';
+    if (st === 'queued') {
+      const q = agentsNow().find((a) => a.state === 'queued' && a.on.includes(n.n));
+      return q ? `<span class="cm-st" title="A line from untangle in ${esc(q.name)}’s chat says it’s here">queued for ${esc(q.name)}</span>` : '<span class="cm-st" title="An agent’s next untangle watch reads it">not read yet</span>';
+    }
+    if (st === 'nobody') return '<span class="cm-st warn" title="No untangle watch is waiting in the chat of an agent holding the review: the label in the bar says more">no one is listening</span>';
     return '';
   }
   const AGENT_AV = '<span class="av ag" aria-hidden="true">✦</span>';
@@ -2162,13 +2197,16 @@
   function noteCommentHtml(n, c, first, lead) {
     const mine = c.by == null;
     const id = n.n + ':' + c.id, key = 'nedit:' + id;
-    const tools = mine ? iconBtn(ICON.edit, 'Edit', `data-act="nt-edit-open" data-n="${n.n}" data-id="${esc(c.id)}"`) + iconBtn(ICON.trash, lead ? 'Delete the note' : 'Delete', `data-act="nt-delete" data-n="${n.n}" data-id="${esc(c.id)}"${ntBusyAttr('del:' + id)}`) : '';
+    // Your comments can be edited and deleted; an agent's note, deleted (its answers stay its own).
+    const trash = iconBtn(ICON.trash, lead ? 'Delete the note' : 'Delete', `data-act="nt-delete" data-n="${n.n}" data-id="${esc(c.id)}"${ntBusyAttr('del:' + id)}`);
+    const tools = mine ? iconBtn(ICON.edit, 'Edit', `data-act="nt-edit-open" data-n="${n.n}" data-id="${esc(c.id)}"`) + trash : lead ? trash : '';
     const body = NT.editing === id
       ? composerHtml(key, { local: true, buttons: [[lead ? 'Update note' : 'Update reply', `data-act="nt-edit" data-n="${n.n}" data-id="${esc(c.id)}"`, true]], cancel: 'nt-edit-cancel' })
       : `<div class="cm-body">${noteMd(c.body)}</div>`;
     const when = `<span title="${esc(new Date(c.at).toLocaleString())}">${ago(c.at)}${c.edited ? ' · edited' : ''}</span>`;
     const since = (what) => `<span class="cm-tag since" title="${what === 'Gone' ? 'The commits since you wrote it removed its lines' : 'The commits since you wrote it changed its lines: it’s on the lines that replaced them'}">${what} since <code>${esc(shortSha(n.wrote.head))}</code></span>`;
-    const tags = lead ? '<span class="cm-tag local" title="Kept on this machine, not on GitHub">Local</span>' + (n.gone ? since('Gone') : n.changed ? since('Changed') : '') + noteStatus(n) : mine ? '' : '<span class="cm-tag">Agent</span>';
+    const agentTag = mine ? '' : '<span class="cm-tag">Agent</span>';
+    const tags = lead ? '<span class="cm-tag local" title="Kept on this machine, not on GitHub">Local</span>' + agentTag + (n.gone ? since('Gone') : n.changed ? since('Changed') : '') + noteStatus(n) : agentTag;
     const av = lead ? `<span class="nt-n" title="Note ${n.n}: “N${n.n}” names it to your agent">N${n.n}</span>` : mine ? '<span class="av"></span>' : AGENT_AV;
     const head = first ? `<div class="cm-h"><b class="cm-who">${mine ? 'You' : esc(c.by)}</b>${lead ? `<span>${esc(noteLines(n))}</span>` : ''}${tags}${when}</div>` : '';
     const err = NT.errors.get('del:' + id);
@@ -2424,11 +2462,11 @@
     const d = NT.data;
     if (!d) return `<p class="rv-sub">${NT.error ? esc(NT.error) : 'Loading the notes…'}</p>`;
     const open = d.notes.filter((x) => !x.resolved), fresh = open.filter((x) => !x.copied);
-    const a = agentsNow()[0];
+    const a = agentFirst();
     const pr = /^#(\d+)\s/.exec(M().raw.title || '');
     const opt = (v, label, k) => `<label class="rv-opt"><input type="radio" name="nt-scope" value="${v}"${d.scope === v ? ' checked' : ''}><span><b>${label}</b></span><span class="ct">${k}</span></label>`;
     let h = `<p class="rv-sub"><b>${open.length} open note${open.length === 1 ? '' : 's'}</b>, kept for ${pr ? '#' + pr[1] : 'this review'} on this machine. Nothing leaves it until you copy or post ${open.length === 1 ? 'it' : 'them'}, or an agent runs <code>untangle watch</code>.</p>`;
-    if (a) h += `<p class="rv-sub rv-agent"><i class="dot ${a.state}"></i><span><b>${esc(a.name)} ${a.state === 'watching' ? 'is watching' : 'is working on your notes'}</b>${d.live ? ': notes and replies reach it as you write them.' : ': notes and replies wait until you send them.'}</span></p>`;
+    if (a) h += `<p class="rv-sub rv-agent st-${a.state}"><i class="dot"></i><span><b>${esc(agentLabel(a))}</b>${a.state === 'deaf' || a.state === 'left' ? ': what you write waits for the next untangle watch.' : d.live ? ': notes and replies reach it as you write them.' : ': notes and replies wait until you send them.'}</span></p>`;
     h += `<label class="rv-check"><input type="checkbox" name="nt-live"${d.live ? ' checked' : ''}><span><b>Live review</b><span class="muted">${d.live ? 'Notes and replies reach a watching agent as you write them.' : 'Notes and replies wait until you send them, like a pending review.'}</span></span></label>`;
     if (d.held) h += `<button type="button" class="sb-pend nt" data-act="nt-send"${ntBusyAttr('send')}>Send ${d.held} held comment${d.held === 1 ? '' : 's'}${a ? ` to ${esc(a.name)}` : ''}</button>`;
     h += `<label class="rv-lbl" for="nt-opening">For the agent</label><textarea id="nt-opening" class="rv-ta" data-nt-opening rows="2" placeholder="The line the copy opens with">${esc(NT.opening != null ? NT.opening : d.opening)}</textarea>`;
@@ -2437,21 +2475,59 @@
     if (pend) h += `<button type="button" class="sb-pend" data-act="nt-mode" data-mode="github">${pend} pending on GitHub · Finish your review</button>`;
     const err = NT.errors.get('post') || NT.errors.get('send');
     if (err) h += `<div class="cmp-err" role="alert">${esc(err)}</div>`;
-    const postable = open.filter((x) => !x.gone).length;
+    // Your open notes post as your review; an agent's, one at a time, from the note.
+    const postable = open.filter((x) => !x.gone && x.comments[0].by == null).length;
     h += `<div class="rv-f">${GH.on ? `<button type="button" class="btn sm" data-act="nt-post" title="${canPost() ? 'Your open notes become threads of your pending review on GitHub, and leave the notes' : 'GitHub can’t take them now'}"${canPost() && postable ? '' : ' disabled'}${ntBusyAttr('post')}>${NT.busy === 'post' ? 'Posting…' : 'Post to GitHub'}</button>` : ''}`
       + `<button type="button" class="btn sm primary" data-act="nt-copy"${ntScoped(d.scope).length ? '' : ' disabled'}>Copy for agent</button></div>`;
     return h;
   }
-  // The bar's pill while an agent holds the review: watching, or working on your notes.
+  // An agent's menu: where its chat is and what reaches it, and Wake while nothing listens there.
+  function agentPopHtml(a) {
+    const watch = '<code>untangle watch</code>', name = esc(a.name);
+    const nobody = NT.data.notes.filter((n) => !n.resolved && n.status === 'nobody').map((n) => n.n);
+    const waits = nobody.length ? `${nList(nobody)} ${nobody.length === 1 ? 'reaches' : 'reach'} nobody yet` : 'what you write reaches nobody yet';
+    const said = {
+      listening: a.kind === 'codex' ? `Its chat is open. Three seconds after your last note or reply, untangle puts a line in it with <code>codex queue</code>, and ${name} reads them.`
+        : `A watch from its chat is waiting: what you write reaches it three seconds after your last note or reply.`,
+      working: `It has ${a.on.length ? nList(a.on) : 'what its last watch brought'}. What you write now ${a.kind === 'codex' ? 'reaches it in a line from untangle, after this turn' : `goes with its next ${watch}`}.`,
+      queued: a.kind === 'codex' && a.busy ? `${name} is busy with something you asked in its chat. The line from untangle waits in its queue, and starts its next turn.`
+        : `untangle ${a.kind === 'codex' ? 'put' : 'typed'} a line into its chat: its next turn reads what’s new.`,
+      deaf: !a.kind ? `No ${watch} of its own is waiting, so ${waits}.`
+        : a.busy ? `Its chat is busy, and no ${watch} is waiting there: what you write waits until it runs one.`
+          : `Its chat is open, but no ${watch} is waiting there, so ${waits}.${a.orca ? '' : ' Ask in its chat to watch the review again, or copy the notes for it.'}`,
+      left: `Its chat ended. The review stays open, and what you write waits for the next chat that runs ${watch}, which gets every open note.`,
+    }[a.state];
+    const who = [a.kind === 'claude' ? `Claude session ${a.chat.slice(0, 8)}` : a.kind === 'codex' ? `Codex thread ${a.chat.slice(0, 8)}` : 'untangle watch', a.orca ? 'Orca terminal' : '', a.state === 'left' ? 'ended' : a.busy === true ? 'busy' : a.busy === false ? 'idle' : ''].filter(Boolean).join(' · ');
+    const err = NT.errors.get('wake:' + a.name) || a.error;
+    let h = `<h4><i class="dot"></i>${esc(agentLabel(a))}</h4><p>${said}</p>`;
+    if (a.wake) h += `<div class="ag-line"><small>Wake types into its chat, in Orca</small>${esc(a.wake)}</div>`;
+    if (err) h += `<div class="cmp-err" role="alert">${esc(err)}</div>`;
+    h += `<p class="ag-who">${esc(who)}</p>`;
+    if (a.state === 'deaf' || a.state === 'left') {
+      h += `<div class="rv-f"><button type="button" class="btn sm" data-act="nt-copy">Copy for agent</button>`
+        + (a.wake ? `<button type="button" class="btn sm primary" data-act="nt-wake" data-agent="${name}"${ntBusyAttr('wake:' + a.name)}>${NT.busy === 'wake:' + a.name ? 'Waking…' : `Wake ${name}`}</button>` : '') + '</div>';
+    }
+    return h;
+  }
+  // The bar's labels, one per agent holding the review: where its chat is. Each opens its menu.
   function renderAgent() {
     const el = $('#vw-agent');
     if (!el) return;
-    const a = agentsNow()[0];
-    el.hidden = !a;
-    if (!a) return;
-    const h = `<i class="dot ${a.state}"></i><span>${esc(a.name)} ${a.state === 'watching' ? 'is watching' : 'is working'}</span>`;
-    if (el.innerHTML !== h) el.innerHTML = h;
-    el.title = a.state === 'watching' ? `${a.name} runs untangle watch on this review: your notes and replies reach it ${NT.data.live ? 'as you write them' : 'when you send them'}` : `${a.name} read your notes: its answers show under them`;
+    const list = agentsNow();
+    el.hidden = !list.length;
+    if (NT.agentOpen && !list.some((a) => a.name === NT.agentOpen)) NT.agentOpen = null;
+    const h = list.map((a) => {
+      const open = NT.agentOpen === a.name, label = esc(agentLabel(a));
+      return `<span class="vw-agent-w"><button type="button" class="vw-agent st-${a.state}" data-act="nt-agent" data-agent="${esc(a.name)}" aria-expanded="${open}" aria-haspopup="dialog"><i class="dot"></i><span>${label}</span>${ICON.chevronDown}</button>`
+        + (open ? `<div class="ag-pop st-${a.state}" role="dialog" aria-label="${label}">${agentPopHtml(a)}</div>` : '') + '</span>';
+    }).join('');
+    if (el.innerHTML === h) return;
+    // The button that had the focus keeps it as the labels are drawn again.
+    const ae = el.contains(document.activeElement) ? document.activeElement : null;
+    const sel = ae && ae.dataset.act ? `[data-act="${ae.dataset.act}"]${ae.dataset.agent ? `[data-agent="${CSS.escape(ae.dataset.agent)}"]` : ''}` : null;
+    el.innerHTML = h;
+    const again = sel && el.querySelector(sel);
+    if (again) again.focus({ preventScroll: true });
   }
   let toastTimer = null;
   function toast(msg) {
@@ -5688,8 +5764,12 @@
   }
   // What a note just written does: kept, and sent to the watching agent or held.
   function noteSaved(what) {
-    const a = agentsNow()[0];
-    return `${what || 'Note'} saved${NT.data && !NT.data.live ? ', held until you send it' : a ? `, sent to ${a.name}` : ''}`;
+    const a = agentFirst();
+    if (NT.data && !NT.data.live) return `${what || 'Note'} saved, held until you send it`;
+    if (!a) return `${what || 'Note'} saved`;
+    // Nothing listens in its chat: its menu opens, with what's left (Wake, in Orca).
+    if (a.state === 'deaf' || a.state === 'left') { NT.agentOpen = a.name; return `${what || 'Note'} saved. ${agentLabel(a)}`; }
+    return `${what || 'Note'} saved, ${a.state === 'queued' ? 'queued' : 'sent'} to ${a.name}`;
   }
   function ntCopied(ns) {
     api('notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'copied', ns }) }).then(okJson).then((j) => { ntSet(j); render(); }).catch(() => {});
@@ -5784,18 +5864,34 @@
       return;
     }
     if (act === 'nt-post' || act === 'nt-post1') {
-      const list = act === 'nt-post1' ? (note ? [note] : []) : NT.data.notes.filter((x) => !x.resolved && !x.gone);
+      const list = act === 'nt-post1' ? (note ? [note] : []) : NT.data.notes.filter((x) => !x.resolved && !x.gone && x.comments[0].by == null);
       if (!list.length) return;
       if (act === 'nt-post' && !confirm(`Post your ${list.length} open note${list.length === 1 ? '' : 's'} to GitHub? ${list.length === 1 ? 'It becomes a thread' : 'Each becomes a thread'} of your pending review, and leaves the notes.`)) return;
       return ntAct(act === 'nt-post' ? 'post' : 'post:' + n, { action: 'post', ns: list.map((x) => x.n) }, () => toast(`${list.length === 1 ? `N${list[0].n} is` : `${list.length} notes are`} in your pending review on GitHub`));
     }
     if (act === 'nt-send') {
-      const k = NT.data ? NT.data.held : 0, a = agentsNow()[0];
+      const k = NT.data ? NT.data.held : 0, a = agentFirst();
       return ntAct('send', { action: 'send' }, () => toast(`${k} held comment${k === 1 ? '' : 's'} sent${a ? ` to ${a.name}` : ''}`));
+    }
+    if (act === 'nt-agent') { NT.agentOpen = NT.agentOpen === d.agent ? null : d.agent; return renderAgent(); }
+    if (act === 'nt-wake') {
+      // untangle types the line into the agent's chat, in Orca, as if you had.
+      const key = 'wake:' + d.agent;
+      if (NT.busy) return;
+      NT.busy = key;
+      NT.errors.delete(key);
+      renderAgent();
+      api('notes/wake', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent: d.agent }) }).then(okJson)
+        .then((j) => { NT.agentOpen = null; ntSet(j); toast(`Typed into ${d.agent}’s chat`); })
+        .catch((e) => { NT.errors.set(key, e.message); ntLoad(); })
+        .then(() => { NT.busy = null; render(); });
+      return;
     }
   }
   // The review's popover closes on a click outside it (what's typed in it stays as a draft).
   document.addEventListener('click', (e) => { if (GH.reviewOpen && !e.target.closest('.vw-review, [data-act="review-toggle"]') && document.contains(e.target)) { GH.reviewOpen = false; render(); } });
+  // So does an agent's menu.
+  document.addEventListener('click', (e) => { if (NT.agentOpen && !e.target.closest('.vw-agent-w') && document.contains(e.target)) { NT.agentOpen = null; renderAgent(); } });
   viewer.addEventListener('input', (e) => {
     const k = e.target.dataset && e.target.dataset.draft;
     // @ and # come from GitHub: not for notes.
@@ -6140,6 +6236,7 @@
       if (MENU.open) return closeMenu();
       if (state.gdrop) return gdClose();
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
+      if (NT.agentOpen) { NT.agentOpen = null; return renderAgent(); }
       if (state.peek) { state.peek = null; return render(); }
       if (HX && HX.detail && state.view.kind === 'history') { HX.detail = null; return render(); }
       if (state.card && state.view.kind === 'chain' && main.querySelector('.hs-detail')) { state.card = null; return render(); }

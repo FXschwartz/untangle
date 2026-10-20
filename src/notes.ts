@@ -1,12 +1,15 @@
 // Local notes: comments kept on this machine, for a coding agent, instead of on GitHub. One file
 // per review in the cache, keyed like the review's branch (untangle/pr-168), so they outlive
 // pushes. Each note moves with its lines when the review moves to newer commits. An agent reads
-// them with `untangle watch`, answers in their threads with `untangle reply`, and may resolve
-// them; what each agent has read is kept with the notes.
+// them with `untangle watch`, answers in their threads with `untangle reply`, may resolve them,
+// and writes notes of its own with `untangle note`; what each agent has read is kept with the
+// notes. An agent holds the review from one chat at a time: the page says where that chat is, and
+// a Codex chat hears of new notes in a line untangle puts in it.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { cacheRoot } from './cache.js';
+import { bell as chatBell, type Bell, type Chat } from './chats.js';
 import { gitMaybe } from './exec.js';
 import { writeAtomic } from './server.js';
 
@@ -69,7 +72,8 @@ interface Stored {
   seq: number;
   notes: Note[];
   events: NoteEvent[];
-  agents: Record<string, { seen: number; first: string; told: boolean }>;
+  /** What each agent has read, whether it heard how the review works, and the chat it holds it from. */
+  agents: Record<string, { seen: number; first: string; told: boolean; chat?: string | null }>;
 }
 
 /** The review the notes are on, as they need it. */
@@ -102,11 +106,61 @@ export class NoteError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
 
+/**
+ * Where an agent's chat is, as the page says: a watch waits in it (or untangle rings it), it works
+ * on notes it read, a line from untangle waits for its turn, nothing in it listens, or it ended.
+ */
+export type AgentState = 'listening' | 'working' | 'queued' | 'deaf' | 'left';
+
+export interface AgentView {
+  name: string;
+  kind: Chat['kind'] | null;
+  /** The chat holding the review for this agent. */
+  chat: string | null;
+  state: AgentState;
+  /** The notes it works on, or that wait for its turn. */
+  on: number[];
+  /** Whether its chat is in a turn now, when untangle can tell. */
+  busy: boolean | null;
+  /** Its chat runs in an Orca terminal, which untangle can type into. */
+  orca: boolean;
+  /** The line Wake types into its chat: while it's idle, nothing listens and there's news for it. */
+  wake: string | null;
+  /** Why untangle couldn't reach its chat, last time it tried. */
+  error: string | null;
+}
+
+export type WatchAnswer =
+  | { text: string; notes: number; replies: number; first: boolean }
+  | { idle: true; first: boolean }
+  | { closed: true }
+  | { taken: true };
+
+/** An agent holding the review in this run: the chat it holds it from, and what it read last. */
+interface Holder {
+  chat: Chat | null;
+  /** The command that reads what's new, as the agent types it. */
+  again: string;
+  watches: number;
+  /** The notes its last watch brought that wait for its answer, the ones it answered since, and when. */
+  on: number[];
+  answered: Set<number>;
+  read: number;
+  /** When its chat last went idle, as far as untangle saw. */
+  idle: number;
+  /** The notes a line in its chat told it of, until it reads them, and when the line went in. */
+  rung: number[] | null;
+  rungAt: number;
+  /** When the last note or reply had been sent as untangle last tried to ring its chat. */
+  tried: number;
+  error: string | null;
+  /** A new chat took the review over: its first watch gets every open note. */
+  fresh: boolean;
+}
+
 export const DEFAULT_OPENING = 'Discuss these with me before changing anything.';
 // A burst of notes reaches a waiting agent together: this long after the last one.
 const QUIET = Number(process.env.UNTANGLE_NOTES_QUIET) >= 0 && process.env.UNTANGLE_NOTES_QUIET ? Number(process.env.UNTANGLE_NOTES_QUIET) : 3000;
-// An agent shows as working on the notes for this long after its watch returned them.
-const WORKING = 15 * 60_000;
 const MAX_BODY = 64 << 10;
 const MAX_EVENTS = 500;
 
@@ -120,6 +174,11 @@ const fence = (code: string[]) => '`'.repeat(Math.max(3, ...code.map((l) => Math
 const FENCE_LANG: Record<string, string> = { dart: 'dart', yaml: 'yaml', yml: 'yaml', json: 'json', sql: 'sql', md: 'markdown', ts: 'ts', js: 'js', mjs: 'js', sh: 'sh', py: 'python', kt: 'kotlin', swift: 'swift', java: 'java', go: 'go', rs: 'rust', html: 'html', css: 'css', proto: 'proto' };
 const langOf = (p: string) => FENCE_LANG[path.extname(p).slice(1).toLowerCase()] || '';
 const plural = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+// "a", "a and b", "a, b and c".
+const and = (parts: Array<string | number | false>) => {
+  const p = parts.filter((x): x is string => typeof x === 'string' && x !== '');
+  return p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p[p.length - 1]}` : p[0] || '';
+};
 
 /** A file's hunks between two commits, from `git diff -U0`: [old start, old count, new start, new count]. */
 type Hunk = [number, number, number, number];
@@ -197,15 +256,24 @@ export class Notes {
   private closed = false;
   private lastSent = 0;
   private readonly waiters = new Set<() => void>();
-  // Watches waiting now, by agent, and when each agent's last watch returned what it read.
-  private readonly watching = new Map<string, number>();
-  private readonly back = new Map<string, number>();
+  // The agents holding the review in this run, and the watches waiting now (each from a chat).
+  private readonly holders = new Map<string, Holder>();
+  private readonly watches = new Set<{ agent: string; chat: string | null; end(answer: WatchAnswer): void }>();
   private readonly lines = new Map<string, string[] | null>();
+  // Looking at the chats now and then, so the page hears when one goes idle or ends; and the next
+  // line for Codex's chats.
+  private pulse: NodeJS.Timeout | null = null;
+  private shown = '';
+  private ringing: NodeJS.Timeout | null = null;
 
   constructor(
     readonly file: string,
     /** Told after each change: the pages hear of it. */
     private readonly changed: () => void = () => {},
+    /** How untangle learns about the chats, and reaches them. */
+    private readonly bell: Bell = chatBell,
+    /** An agent's session started the review: its comments start as notes, for the agent. */
+    private readonly byAgent = false,
   ) {
     this.data = { version: 1, mode: null, live: true, opening: DEFAULT_OPENING, scope: 'open', base: null, head: null, next: 1, seq: 0, notes: [], events: [], agents: {} };
     try {
@@ -235,8 +303,10 @@ export class Notes {
 
   private touch() {
     this.rev++;
+    if (this.holders.size) this.shown = JSON.stringify(this.agents());
     this.changed();
     this.waiters.forEach((w) => w());
+    this.ringLater();
   }
 
   /** The text of a file at a commit, by line; null when it isn't there. */
@@ -314,6 +384,35 @@ export class Notes {
     return c;
   }
 
+  /** A new note, on lines of the review's commits or on a whole file: yours (by null), or an agent's. */
+  private newNote(by: By, a: Extract<NoteAction, { action: 'add' }>): Note {
+    const ctx = this.ctx!;
+    const d = this.data;
+    const body = this.body(a.body);
+    const file = !!a.file || a.line == null;
+    if (typeof a.path !== 'string') throw new NoteError('which file?');
+    // A note on a deleted file is on the base's.
+    const side: Side = a.side === 'LEFT' || (file && !this.fileAt(ctx.head, a.path)) ? 'LEFT' : 'RIGHT';
+    const sha = side === 'LEFT' ? ctx.base : ctx.head;
+    const text = this.fileAt(sha, a.path);
+    if (!text) throw new NoteError(`${a.path} is not a file of this review${side === 'LEFT' ? ' on its base' : ''}`);
+    const line = file ? null : Number(a.line);
+    // A note's lines are on one side: the page sends a range across both as its new lines.
+    const startLine = file || a.startLine == null || Number(a.startLine) === line ? null : Number(a.startLine);
+    if (!file && (!Number.isInteger(line) || line! < 1 || (startLine != null && (!Number.isInteger(startLine) || startLine < 1 || startLine > line!)))) throw new NoteError('which lines?');
+    if (line != null && line > text.length) throw new NoteError(`${a.path} has ${plural(text.length, 'line', 'lines')} at ${short(sha)}`);
+    const startSide = startLine == null ? null : side;
+    const code = this.codeOf(sha, a.path, startLine, line);
+    const q = a.quote && typeof a.quote.thread === 'string' ? { thread: a.quote.thread, author: String(a.quote.author || ''), body: String(a.quote.body || '').slice(0, 4000), url: String(a.quote.url || '') } : null;
+    const note: Note = {
+      n: d.next++, path: a.path, file, side, line, startSide, startLine, code,
+      wrote: { head: ctx.head, path: a.path, line, startLine, code }, changed: false, gone: false,
+      resolved: null, copied: false, quote: q, comments: [this.comment(by, body)],
+    };
+    d.notes.push(note);
+    return note;
+  }
+
   private event(e: Omit<NoteEvent, 'seq'>) {
     this.data.events.push({ ...e, seq: ++this.data.seq });
     if (this.data.events.length > MAX_EVENTS) this.data.events.splice(0, this.data.events.length - MAX_EVENTS);
@@ -346,7 +445,7 @@ export class Notes {
     const code = note.gone ? note.wrote.code : note.code;
     if (code.length) { const f = fence(code); lines.push(f + langOf(note.path), ...code, f); }
     const [first, ...replies] = note.comments;
-    lines.push(first.body, ...replies.map((c) => `${c.by ?? 'You'}: ${c.body}`));
+    lines.push(first.by ? `${first.by}: ${first.body}` : first.body, ...replies.map((c) => `${c.by ?? 'You'}: ${c.body}`));
     return lines.join('\n') + '\n';
   }
 
@@ -366,35 +465,64 @@ export class Notes {
   /** What the page shows: the settings, the notes with their text, and the agents. */
   view() {
     const d = this.data;
+    const agents = this.agents();
+    // A note no agent has read waits for one: unless every agent holding the review is deaf or gone.
+    const nobody = agents.length > 0 && agents.every((a) => a.state === 'deaf' || a.state === 'left');
     const read = (note: Note) => {
       const sent = note.comments[0].sent;
+      if (note.comments[0].by !== null) return null;
       if (sent == null) return 'held';
       const by = Object.entries(d.agents).find(([, a]) => a.seen >= sent);
-      return by ? { read: by[0] } : Object.keys(d.agents).length ? 'queued' : null;
+      return by ? { read: by[0] } : nobody ? 'nobody' : Object.keys(d.agents).length ? 'queued' : null;
     };
     return {
-      rev: this.rev, mode: d.mode, live: d.live, opening: d.opening, scope: d.scope, head: d.head, header: this.header(),
+      // Where comments go, until you choose: notes, for a review an agent started or one that has some.
+      rev: this.rev, mode: d.mode ?? (this.byAgent || d.notes.length ? 'local' : null), live: d.live, opening: d.opening, scope: d.scope, head: d.head, header: this.header(),
       held: d.notes.reduce((k, n) => k + n.comments.filter((c) => c.by === null && c.sent == null).length, 0),
       notes: d.notes.map((n) => ({ ...n, text: this.noteText(n), status: read(n) })),
-      agents: this.agents(),
+      agents,
     };
   }
 
-  /** The agents holding the review: waiting for notes now, or working on the last ones. */
-  agents(): Array<{ name: string; state: 'watching' | 'working'; since: string }> {
-    const now = Date.now();
-    return Object.entries(this.data.agents)
-      .map(([name]) => {
-        if (this.watching.get(name)) return { name, state: 'watching' as const, since: new Date(now).toISOString() };
-        const back = this.back.get(name);
-        return back && now - back < WORKING ? { name, state: 'working' as const, since: new Date(back).toISOString() } : null;
-      })
-      .filter((x): x is NonNullable<typeof x> => !!x);
+  /** Whether a note waits for an agent's answer: it's open, and the agent didn't have the last word. */
+  private awaits(agent: string, n: number): boolean {
+    const note = this.data.notes.find((x) => x.n === n);
+    return !!note && !note.resolved && note.comments[note.comments.length - 1].by !== agent;
+  }
+
+  /**
+   * The agents holding the review in this run, and where each one's chat is, from what untangle
+   * sees: a watch waiting, whether the agent's process runs, and whether its chat is in a turn.
+   */
+  agents(): AgentView[] {
+    return [...this.holders].map(([name, h]) => {
+      const chat = h.chat;
+      const alive = chat ? this.bell.alive(chat) : null;
+      const turn = chat && alive !== false ? this.bell.busy(chat) : null;
+      if (turn && !turn.busy) h.idle = Math.max(h.idle, turn.since);
+      // A line Wake typed into Claude's chat that its turn ended without reading.
+      if (h.rung && chat?.kind === 'claude' && h.idle > h.rungAt) h.rung = null;
+      // Working: in a turn that its last watch's notes started or came into, or, when untangle
+      // can't tell, until it answers them.
+      const pending = h.on.filter((n) => !h.answered.has(n) && this.awaits(name, n));
+      const working = turn ? turn.busy && h.read > h.idle : pending.length > 0;
+      const state: AgentState = h.watches ? 'listening'
+        : alive === false ? 'left'
+          : h.rung ? 'queued'
+            : working ? 'working'
+              : chat?.kind === 'codex' ? 'listening' : 'deaf';
+      const news = state === 'deaf' && chat?.orca && turn && !turn.busy ? this.unseen(name) : null;
+      return {
+        name, kind: chat?.kind ?? null, chat: chat?.id ?? null, state,
+        on: state === 'queued' ? h.rung! : state === 'working' ? (pending.length ? pending : h.on) : [],
+        busy: turn ? turn.busy : null, orca: !!chat?.orca, wake: news && news.count ? this.line(name, news) : null, error: h.error,
+      };
+    });
   }
 
   /** Whether an agent holds the review now: untangle then looks for its commits more often. */
   watched(): boolean {
-    return this.agents().length > 0;
+    return this.agents().some((a) => a.state === 'listening' || a.state === 'working' || a.state === 'queued');
   }
 
   async act(a: NoteAction): Promise<ReturnType<Notes['view']> & { conversation?: unknown }> {
@@ -403,28 +531,9 @@ export class Notes {
     if (!ctx) throw new NoteError('the review is still being built', 503);
     let conversation: unknown;
     switch (a.action) {
-      case 'add': {
-        const body = this.body(a.body);
-        const file = !!a.file || a.line == null;
-        if (typeof a.path !== 'string') throw new NoteError('which file?');
-        // A note on a deleted file is on the base's.
-        const side: Side = a.side === 'LEFT' || (file && !this.fileAt(ctx.head, a.path)) ? 'LEFT' : 'RIGHT';
-        const sha = side === 'LEFT' ? ctx.base : ctx.head;
-        if (!this.fileAt(sha, a.path)) throw new NoteError(`${a.path} is not a file of this review`);
-        const line = file ? null : Number(a.line);
-        // A note's lines are on one side: the page sends a range across both as its new lines.
-        const startLine = file || a.startLine == null || Number(a.startLine) === line ? null : Number(a.startLine);
-        if (!file && (!Number.isInteger(line) || line! < 1 || (startLine != null && (!Number.isInteger(startLine) || startLine < 1 || startLine > line!)))) throw new NoteError('which lines?');
-        const startSide = startLine == null ? null : side;
-        const code = this.codeOf(sha, a.path, startLine, line);
-        const q = a.quote && typeof a.quote.thread === 'string' ? { thread: a.quote.thread, author: String(a.quote.author || ''), body: String(a.quote.body || '').slice(0, 4000), url: String(a.quote.url || '') } : null;
-        d.notes.push({
-          n: d.next++, path: a.path, file, side, line, startSide, startLine, code,
-          wrote: { head: ctx.head, path: a.path, line, startLine, code }, changed: false, gone: false,
-          resolved: null, copied: false, quote: q, comments: [this.comment(null, body)],
-        });
+      case 'add':
+        this.newNote(null, a);
         break;
-      }
       case 'reply':
         this.note(a.n).comments.push(this.comment(null, this.body(a.body)));
         break;
@@ -512,17 +621,47 @@ export class Notes {
 
   // ---- The agents
 
+  /** The agent's holder in this run, made when it first asks. */
+  private holder(agent: string): Holder {
+    let h = this.holders.get(agent);
+    if (!h) {
+      h = { chat: null, again: 'untangle watch', watches: 0, on: [], answered: new Set(), read: 0, idle: 0, rung: null, rungAt: 0, tried: 0, error: null, fresh: false };
+      this.holders.set(agent, h);
+      this.watchChats();
+    }
+    return h;
+  }
+
+  /**
+   * A note an agent writes, from its own review of the change: a thread on its lines for you to
+   * answer, as you answer each other on GitHub.
+   */
+  write(agent: string, a: Omit<Extract<NoteAction, { action: 'add' }>, 'action' | 'quote'>, chat: string | null = null): { n: number; where: string; head: string; code: string[]; other: boolean } {
+    if (!this.ctx) throw new NoteError('the review is still being built', 503);
+    const note = this.newNote(agent, { ...a, action: 'add' });
+    this.save();
+    this.touch();
+    return { n: note.n, where: this.where(note), head: short(note.side === 'LEFT' ? this.ctx.base : this.ctx.head), code: note.code, other: this.other(agent, chat) };
+  }
+
+  /** Whether another chat of the agent holds the review than the one asking. */
+  other(agent: string, chat: string | null): boolean {
+    const held = this.data.agents[agent]?.chat;
+    return !!chat && !!held && held !== chat;
+  }
+
   /** An agent's answer in a note's thread, and its resolving the note when it's done. */
-  reply(agent: string, n: number, body: string | null, resolve: boolean): { n: number; resolved: boolean } {
+  reply(agent: string, n: number, body: string | null, resolve: boolean, chat: string | null = null): { n: number; resolved: boolean; other: boolean } {
     const note = this.note(n);
     if (body != null) note.comments.push(this.comment(agent, this.body(body)));
     if (resolve && !note.resolved) {
       note.resolved = { by: agent, at: new Date().toISOString() };
       this.event({ type: 'resolve', n, by: agent });
     }
+    this.holders.get(agent)?.answered.add(n);
     this.save();
     this.touch();
-    return { n, resolved: !!note.resolved };
+    return { n, resolved: !!note.resolved, other: this.other(agent, chat) };
   }
 
   /** What an agent hasn't read: comments by others, and what changed on notes it has read. */
@@ -549,71 +688,174 @@ export class Notes {
 
   private threadText(note: Note): string {
     const [first, ...rest] = note.comments;
-    return [`N${note.n} · ${this.where(note)} · ${rest.length === 1 ? 'a reply' : 'replies'} in its thread`, ...first.body.split('\n').map((l) => '> ' + l), ...rest.map((c) => `${c.by ?? 'You'}: ${c.body}`)].join('\n') + '\n';
+    return [`N${note.n} · ${this.where(note)} · ${rest.length === 1 ? 'a reply' : 'replies'} in its thread`, ...(first.by ? `${first.by}: ${first.body}` : first.body).split('\n').map((l) => '> ' + l), ...rest.map((c) => `${c.by ?? 'You'}: ${c.body}`)].join('\n') + '\n';
   }
 
-  /** Delivers what's new to an agent, as text, and remembers that it read it. */
+  /**
+   * Delivers what's new to an agent, as text, and remembers that it read it. A chat that took the
+   * review over gets every open note with its thread instead: it knows none of them.
+   */
   private deliver(agent: string) {
-    const u = this.unseen(agent);
+    const h = this.holder(agent);
     const a = this.data.agents[agent];
-    const counts = [u.notes.length && plural(u.notes.length, 'note', 'notes'), u.replies && plural(u.replies, 'reply', 'replies'), u.lines.length && plural(u.lines.length, 'change', 'changes')].filter(Boolean).join(' and ');
-    const parts: string[] = [];
-    if (u.notes.length) {
-      if (this.data.opening.trim()) parts.push(this.data.opening.trim() + '\n');
-      parts.push(...u.notes.map((n) => this.noteText(n)));
-    }
-    parts.push(...u.threads.map((n) => this.threadText(n)), ...u.lines.map((l) => l + '\n'));
     const ctx = this.ctx!;
-    const text = `untangle: ${counts.replace(/ and (?=[^,]* and )/, ', ')} you haven’t read, on ${ctx.name} at ${short(ctx.head)}. Line numbers are on that commit.\n\n${parts.join('\n')}`;
+    const opening = this.data.opening.trim();
+    const at = `on ${ctx.name} at ${short(ctx.head)}. Line numbers are on that commit.`;
+    let text: string, notes: Note[], replies = 0, read: Note[];
+    if (h.fresh) {
+      notes = read = this.data.notes.filter((n) => !n.resolved);
+      text = `untangle: you hold this review now: another ${agent} chat held it. Here ${notes.length === 1 ? 'is its open note' : `are its ${notes.length} open notes`}, ${at}\n\n`
+        + [opening && opening + '\n', ...notes.map((n) => this.noteText(n))].filter(Boolean).join('\n');
+    } else {
+      const u = this.unseen(agent);
+      ({ notes, replies } = u);
+      read = [...u.notes, ...u.threads];
+      const parts: string[] = [];
+      if (notes.length) {
+        if (opening) parts.push(opening + '\n');
+        parts.push(...notes.map((n) => this.noteText(n)));
+      }
+      parts.push(...u.threads.map((n) => this.threadText(n)), ...u.lines.map((l) => l + '\n'));
+      text = `untangle: ${and([notes.length && plural(notes.length, 'note', 'notes'), replies && plural(replies, 'reply', 'replies'), u.lines.length && plural(u.lines.length, 'change', 'changes')])} you haven’t read, ${at}\n\n${parts.join('\n')}`;
+    }
     const first = !a.told;
     a.seen = this.data.seq;
     a.told = true;
-    this.back.set(agent, Date.now());
+    Object.assign(h, { fresh: false, on: read.map((n) => n.n).filter((n) => this.awaits(agent, n)).sort((x, y) => x - y), answered: new Set(), read: Date.now(), rung: null, error: null });
     this.save();
-    return { text, notes: u.notes.length, replies: u.replies, first };
+    return { text, notes: notes.length, replies, first };
   }
 
   /**
    * Waits for what an agent hasn't read, a moment after the last of it, then delivers it. Settles
-   * early when the review closes, when the wait runs out, or when the agent stops asking.
+   * early when the review closes, when the wait runs out, when the agent stops asking, or when
+   * another chat of the agent takes the review over. A brief watch doesn't wait for news: Codex
+   * hears of it from untangle instead.
    */
-  watch(agent: string, opts: { timeout: number; signal?: AbortSignal }): Promise<{ text: string; notes: number; replies: number; first: boolean } | { idle: true; first: boolean } | { closed: true }> {
+  watch(agent: string, opts: { timeout: number; signal?: AbortSignal; chat?: Chat | null; again?: string; brief?: boolean }): Promise<WatchAnswer> {
     const d = this.data;
-    if (!d.agents[agent]) d.agents[agent] = { seen: 0, first: new Date().toISOString(), told: false };
-    this.watching.set(agent, (this.watching.get(agent) || 0) + 1);
-    this.touch();
+    const a = (d.agents[agent] ??= { seen: 0, first: new Date().toISOString(), told: false });
+    const h = this.holder(agent);
+    const chat = opts.chat ?? null;
+    if (chat) {
+      // Another chat of the agent takes the review over: the one that held it hears so, and this
+      // one hears how the review works, with every open note.
+      if (a.told && a.chat !== chat.id) {
+        this.watches.forEach((w) => { if (w.agent === agent && w.chat !== chat.id) w.end({ taken: true }); });
+        a.told = false;
+        Object.assign(h, { fresh: d.notes.some((n) => !n.resolved), on: [], answered: new Set(), rung: null, error: null });
+      }
+      a.chat = chat.id;
+      h.chat = chat;
+    }
+    if (opts.again) h.again = opts.again;
+    this.save();
     return new Promise((resolve) => {
       let timer: NodeJS.Timeout | null = null, quiet: NodeJS.Timeout | null = null;
-      const done = (answer: Parameters<typeof resolve>[0] | null) => {
+      const w = { agent, chat: chat?.id ?? null, end: (answer: WatchAnswer) => done(answer) };
+      const done = (answer: WatchAnswer | null) => {
+        if (!this.watches.delete(w)) return;
         this.waiters.delete(check);
         if (timer) clearTimeout(timer);
         if (quiet) clearTimeout(quiet);
         opts.signal?.removeEventListener('abort', aborted);
-        this.watching.set(agent, (this.watching.get(agent) || 1) - 1);
-        if (!this.watching.get(agent)) this.watching.delete(agent);
+        h.watches--;
         this.touch();
         if (answer) resolve(answer);
       };
+      const idle = (): WatchAnswer => { const first = !a.told; a.told = true; this.save(); return { idle: true, first }; };
       const check = () => {
         if (this.closed) return done({ closed: true });
-        if (!this.ctx || !this.unseen(agent).count) return;
+        if (!this.ctx) return;
+        if (h.fresh) return done(this.deliver(agent));
+        if (!this.unseen(agent).count) { if (opts.brief) done(idle()); return; }
         const wait = QUIET - (Date.now() - this.lastSent);
         if (wait > 0) { if (!quiet) quiet = setTimeout(() => { quiet = null; check(); }, wait); return; }
         done(this.deliver(agent));
       };
       const aborted = () => done(null);
+      this.watches.add(w);
+      h.watches++;
       if (opts.signal?.aborted) return aborted();
       opts.signal?.addEventListener('abort', aborted);
-      if (opts.timeout > 0) timer = setTimeout(() => { const first = !d.agents[agent].told; d.agents[agent].told = true; this.save(); done({ idle: true, first }); }, opts.timeout);
+      if (opts.timeout > 0) timer = setTimeout(() => done(idle()), opts.timeout);
       this.waiters.add(check);
+      this.touch();
       check();
     });
+  }
+
+  /** The line untangle puts in an agent's chat: what's new, and the command that reads it. */
+  private line(agent: string, u: { notes: Note[]; replies: number; lines: string[]; count: number }): string {
+    const ctx = this.ctx!;
+    const what = and([u.notes.length && plural(u.notes.length, 'new note', 'new notes'), u.replies && plural(u.replies, 'new reply', 'new replies'), u.lines.length && plural(u.lines.length, 'change', 'changes')]);
+    const title = /#\d+$/.exec(ctx.name)?.[0] ?? ctx.branch ?? ctx.name;
+    return `untangle: ${what} on the review of ${title}. Run ${this.holders.get(agent)?.again || 'untangle watch'} to read ${u.count === 1 ? 'it' : 'them'}.`;
+  }
+
+  // A Codex chat with news since untangle last tried it, no line from untangle unread there, and
+  // no watch of its own reading now.
+  private ringable(name: string, h: Holder): boolean {
+    return h.chat?.kind === 'codex' && !h.rung && !h.watches && !h.fresh && this.lastSent > h.tried && this.unseen(name).count > 0;
+  }
+
+  /** A Codex chat holding the review hears of what's new, a moment after the last of it. */
+  private ringLater() {
+    if (this.ringing || this.closed || !this.ctx || ![...this.holders].some(([name, h]) => this.ringable(name, h))) return;
+    this.ringing = setTimeout(() => { this.ringing = null; this.ring(); }, Math.max(0, QUIET - (Date.now() - this.lastSent)));
+    this.ringing.unref();
+  }
+
+  /** One line in each Codex chat with news: no second one while that one waits unread. */
+  private ring() {
+    if (Date.now() - this.lastSent < QUIET) return this.ringLater();
+    let rang = false;
+    for (const [name, h] of this.holders) {
+      if (!this.ringable(name, h)) continue;
+      h.tried = this.lastSent;
+      const chat = h.chat!;
+      if (this.bell.alive(chat) === false) continue;
+      const u = this.unseen(name);
+      Object.assign(h, { rung: [...u.notes, ...u.threads].map((n) => n.n).sort((x, y) => x - y), rungAt: Date.now(), error: null });
+      rang = true;
+      void this.bell.ring(chat, this.line(name, u)).then((err) => {
+        if (!err || h.chat !== chat || !h.rung) return;
+        Object.assign(h, { rung: null, error: `untangle couldn’t put a line in ${name}’s chat: ${err}` });
+        this.touch();
+      });
+    }
+    if (rang) this.touch();
+  }
+
+  /** Types the line into an idle Claude chat that nothing in listens, in Orca: Wake, on the page. */
+  async wake(agent: string): Promise<ReturnType<Notes['view']>> {
+    const h = this.holders.get(agent), a = this.agents().find((x) => x.name === agent);
+    if (!h?.chat || !a?.wake) throw new NoteError(a && a.state !== 'deaf' ? `${agent} ${a.state === 'left' ? 'left' : 'is listening'}` : `untangle can’t type into ${agent}’s chat now`, 409);
+    const err = await this.bell.wake(h.chat, a.wake);
+    if (err) throw new NoteError(`untangle couldn’t type into ${agent}’s chat: ${err}`, 502);
+    const u = this.unseen(agent);
+    Object.assign(h, { rung: [...u.notes, ...u.threads].map((n) => n.n).sort((x, y) => x - y), rungAt: Date.now() });
+    this.touch();
+    return this.view();
+  }
+
+  /** Looks at the chats every few seconds, so the page hears when one goes idle, or ends. */
+  private watchChats() {
+    if (this.pulse || this.closed) return;
+    this.pulse = setInterval(() => {
+      const now = JSON.stringify(this.agents());
+      if (now !== this.shown) this.touch();
+    }, 2000);
+    this.pulse.unref();
   }
 
   /** The review is closing: waiting agents hear so. */
   close(): void {
     this.closed = true;
     this.waiters.forEach((w) => w());
+    if (this.pulse) clearInterval(this.pulse);
+    if (this.ringing) clearTimeout(this.ringing);
+    this.pulse = this.ringing = null;
   }
 
   /** Changes so far: a page whose notes are older asks again. */

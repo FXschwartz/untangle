@@ -1,0 +1,84 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { stubGh, type GhStub } from '../helpers/gh.ts';
+import { untangleCommand } from '../helpers/run.ts';
+
+// untangle skill in a home of its own, where only what the test makes says Claude or Codex is here.
+describe('Given a home where Claude and Codex keep their folders, ', () => {
+  let gh: GhStub;
+  let home = '';
+  const run = (args: string[], at = home) => untangleCommand(['skill', ...args], { cacheDir: path.join(at, 'cache'), gh, cwd: at, env: { HOME: at, PATH: `${path.dirname(process.execPath)}${path.delimiter}/usr/bin${path.delimiter}/bin` } });
+  const fresh = (...dirs: string[]) => {
+    const at = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-home-'));
+    dirs.forEach((d) => fs.mkdirSync(path.join(at, d), { recursive: true }));
+    return at;
+  };
+  const homes: string[] = [];
+
+  before(() => {
+    gh = stubGh();
+    home = fresh('.claude', '.codex');
+    homes.push(home);
+  });
+
+  after(() => {
+    gh.remove();
+    homes.forEach((h) => fs.rmSync(h, { recursive: true, force: true }));
+  });
+
+  it(
+    'when the skill is installed, '
+    + 'then it goes where each agent reads skills, with the rule that lets untangle run outside Codex’s sandbox.',
+    async () => {
+      const r = await run(['-install']);
+      const skill = (await run([])).out;
+      assert.deepEqual([r.code, r.out.split('\n')], [0, [
+        'untangle: installed the untangle skill, for both agents:',
+        '  ~/.claude/skills/untangle/SKILL.md   Claude: /untangle, or ask for a review in untangle',
+        '  ~/.agents/skills/untangle/SKILL.md   Codex: $untangle, or ask the same',
+        'untangle: Codex’s sandbox can’t write untangle’s cache or serve its page, so untangle runs outside it:',
+        '  ~/.codex/rules/untangle.rules   prefix_rule(pattern=["untangle"], decision="allow")',
+        'untangle: ask for a review in either chat: “review this in untangle”.',
+        '',
+      ]]);
+      assert.deepEqual([skill.split('\n').slice(0, 2), fs.readFileSync(path.join(home, '.claude/skills/untangle/SKILL.md'), 'utf8') === skill, fs.readFileSync(path.join(home, '.agents/skills/untangle/SKILL.md'), 'utf8') === skill], [['---', 'name: untangle'], true, true]);
+      assert.match(fs.readFileSync(path.join(home, '.codex/rules/untangle.rules'), 'utf8'), /\nprefix_rule\(pattern=\["untangle"\], decision="allow"\)\n$/);
+    },
+  );
+
+  it(
+    'when it is installed again, '
+    + 'then it says the skill is up to date.',
+    async () => {
+      const r = await run(['-install']);
+      assert.equal(r.out.split('\n')[0], 'untangle: the untangle skill is up to date, for both agents:');
+    },
+  );
+
+  it(
+    'when Claude’s skills folder links to the one Codex reads, '
+    + 'then one file serves both.',
+    async () => {
+      const at = fresh('.agents/skills', '.codex');
+      homes.push(at);
+      fs.mkdirSync(path.join(at, '.claude'));
+      fs.symlinkSync(path.join(at, '.agents/skills'), path.join(at, '.claude/skills'));
+      const r = await run(['-install'], at);
+      assert.deepEqual([r.out.split('\n')[0], fs.readdirSync(path.join(at, '.agents/skills'))], ['untangle: installed the untangle skill, one SKILL.md for both agents:', ['untangle']]);
+    },
+  );
+
+  it(
+    'when neither agent is here, '
+    + 'then it says so, and that the skill prints.',
+    async () => {
+      const at = fresh();
+      homes.push(at);
+      const r = await run(['-install'], at);
+      assert.deepEqual([r.code, r.err], [1, 'untangle: found neither Claude nor Codex here: untangle skill prints the skill, to put where your agent reads skills\n']);
+    },
+  );
+});

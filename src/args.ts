@@ -55,7 +55,7 @@ export function usage(version: string): string {
     'usage:',
     '  untangle [flags] [directory]',
     '  untangle [flags] <pr-url>',
-    '  untangle watch | reply | notes | stop ...',
+    '  untangle watch | reply | note | notes | stop | skill ...',
     '',
     'A directory reviews its branch’s pull request, or else what the branch adds to the default branch.',
     'A pull request URL is cloned into the cache first. The review opens in your browser.',
@@ -64,8 +64,12 @@ export function usage(version: string): string {
     '  watch [directory | pr-url]  start the review if it isn’t running, wait for the notes and replies',
     '                              the agent hasn’t read, print them and exit',
     '  reply <N> <text>            answer in note N’s thread',
+    '  note <path:line> <text>     write a note of its own, from its review of the change',
     '  notes                       print the open notes, as Copy for agent gives them',
     '  stop                        close the review',
+    '',
+    'untangle skill -install teaches Claude and Codex those commands, so asking for a review in their',
+    'chat is enough: “review this in untangle”.',
     '',
     'flags:',
     ...flagLines(FLAGS),
@@ -175,8 +179,10 @@ const AGENT: Flag = { name: 'agent', type: 'string', usage: 'the agent’s name,
 const REVIEW: Flag = { name: 'review', type: 'string', usage: 'the review’s directory or pull request URL', default: '.' };
 const WATCH_FLAGS: Flag[] = [AGENT, { name: 'timeout', type: 'duration', usage: 'stop waiting after this long (e.g. 9m), for an agent whose commands have a time limit; 0 waits until something comes', default: '0s' }];
 const REPLY_FLAGS: Flag[] = [AGENT, { name: 'resolve', type: 'bool', usage: 'resolve the note too, once it’s done' }, REVIEW];
-const NOTES_FLAGS: Flag[] = [{ name: 'all', type: 'bool', usage: 'the resolved notes too' }, REVIEW];
+const NOTE_FLAGS: Flag[] = [AGENT, { name: 'removed', type: 'bool', usage: 'the lines are ones the change removed, numbered as on the base' }, REVIEW];
+const NOTES_FLAGS: Flag[] = [AGENT, { name: 'all', type: 'bool', usage: 'the resolved notes too' }, REVIEW];
 const STOP_FLAGS: Flag[] = [REVIEW];
+const SKILL_FLAGS: Flag[] = [{ name: 'install', type: 'bool', usage: 'put it where Claude and Codex read skills, and let untangle run outside Codex’s sandbox' }];
 
 export type Command =
   | { cmd: 'review'; opts: Options }
@@ -184,8 +190,11 @@ export type Command =
   /** `forward`: the review's flags as given, for a review watch starts. `given`: a target was named. */
   | { cmd: 'watch'; opts: Options; forward: string[]; agent: string | null; timeout: number; given: boolean }
   | { cmd: 'reply'; review: string | null; agent: string | null; resolve: boolean; note: number; text: string | null }
-  | { cmd: 'notes'; review: string | null; all: boolean }
-  | { cmd: 'stop'; review: string | null };
+  /** A note of the agent's own: on lines of a file (from startLine to line), or on the whole file (line null). */
+  | { cmd: 'note'; review: string | null; agent: string | null; removed: boolean; path: string; line: number | null; startLine: number | null; text: string }
+  | { cmd: 'notes'; review: string | null; agent: string | null; all: boolean }
+  | { cmd: 'stop'; review: string | null }
+  | { cmd: 'skill'; install: boolean };
 
 const commandUsage = (name: string, what: string, line: string, about: string[], flags: Flag[], more: string[] = []) => [
   `untangle ${name} - ${what}`, '', 'usage:', `  untangle ${name} ${line}`, '', ...about, '', 'flags:', ...flagLines(flags), ...more,
@@ -199,8 +208,20 @@ export const watchUsage = () => commandUsage('watch', 'hold a review as a coding
 export const replyUsage = () => commandUsage('reply', 'answer in a note’s thread', '[flags] <N> <text>', [
   'N is the note’s number (N2, or 2). The text is the rest of the line; - reads it from stdin.',
 ], REPLY_FLAGS);
+export const noteUsage = () => commandUsage('note', 'write a note of your own, on the review’s lines', '[flags] <path>[:<line>[-<line>]] <text>', [
+  'Writes a note on the lines, from the agent’s own review of the change: the person reviewing answers',
+  'in its thread, and untangle watch brings the answers. The path is the file’s in the repository, and',
+  'its lines are numbered as on the review’s commit (with -removed, as on its base). A path alone is',
+  'a note on the whole file. The text is the rest of the line; - reads it from stdin.',
+], NOTE_FLAGS);
 export const notesUsage = () => commandUsage('notes', 'print a review’s notes, as Copy for agent gives them', '[flags]', ['Prints the open notes, with their code and threads.'], NOTES_FLAGS);
 export const stopUsage = () => commandUsage('stop', 'close a review', '[flags]', ['Stops the review: its page closes and a waiting untangle watch says so.'], STOP_FLAGS);
+export const skillUsage = () => commandUsage('skill', 'teach Claude and Codex to hold a review', '[flags]', [
+  'Prints the untangle skill: how an agent holds a review with watch, reply, notes and stop. With',
+  '-install, it goes where each agent on this machine reads skills (~/.claude/skills for Claude,',
+  '~/.agents/skills for Codex), with a rule in ~/.codex/rules that lets untangle run outside Codex’s',
+  'sandbox. Then asking for a review in their chat is enough: “review this in untangle”.',
+], SKILL_FLAGS);
 
 /** The command line: a review, or one of the agent's commands (its first word). */
 export function parseCommand(argv: string[]): Command {
@@ -228,12 +249,31 @@ export function parseCommand(argv: string[]): Command {
     if (!text && !values.get('resolve')) throw new UsageError('what to answer? untangle reply <N> <text>, or -resolve alone');
     return { cmd: 'reply', review: values.has('review') ? String(values.get('review')) : null, agent: values.has('agent') ? String(values.get('agent')) : null, resolve: values.get('resolve') === true, note: Number(m[1]), text: text || null };
   }
+  if (first === 'note') {
+    const { values, rest } = readFlags(more, NOTE_FLAGS, true);
+    if (values.get('help')) return { cmd: 'help', text: noteUsage() };
+    const at = /^(.+?)(?::(\d+)(?:-(\d+))?)?$/.exec(rest[0] || '');
+    if (!at) throw new UsageError('on which lines? untangle note <path>[:<line>[-<line>]] <text>');
+    const text = rest.slice(1).join(' ');
+    if (!text) throw new UsageError('what to write? untangle note <path>[:<line>[-<line>]] <text>');
+    const [from, to] = [at[2] ? Number(at[2]) : null, at[3] ? Number(at[3]) : null];
+    return {
+      cmd: 'note', review: values.has('review') ? String(values.get('review')) : null, agent: values.has('agent') ? String(values.get('agent')) : null,
+      removed: values.get('removed') === true, path: at[1], line: to ?? from, startLine: to != null ? from : null, text,
+    };
+  }
   if (first === 'notes' || first === 'stop') {
     const { values, rest } = readFlags(more, first === 'notes' ? NOTES_FLAGS : STOP_FLAGS, true);
     if (values.get('help')) return { cmd: 'help', text: first === 'notes' ? notesUsage() : stopUsage() };
     if (rest.length) throw new UsageError(`untangle ${first} takes no arguments (got ${rest.join(' ')}): the review is -review`);
     const review = values.has('review') ? String(values.get('review')) : null;
-    return first === 'notes' ? { cmd: 'notes', review, all: values.get('all') === true } : { cmd: 'stop', review };
+    return first === 'notes' ? { cmd: 'notes', review, agent: values.has('agent') ? String(values.get('agent')) : null, all: values.get('all') === true } : { cmd: 'stop', review };
+  }
+  if (first === 'skill') {
+    const { values, rest } = readFlags(more, SKILL_FLAGS, true);
+    if (values.get('help')) return { cmd: 'help', text: skillUsage() };
+    if (rest.length) throw new UsageError(`untangle skill takes no arguments (got ${rest.join(' ')})`);
+    return { cmd: 'skill', install: values.get('install') === true };
   }
   return { cmd: 'review', opts: parseArgs(argv) };
 }

@@ -57,6 +57,10 @@ function untangleEnv(cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): N
   for (const key of Object.keys(env)) {
     if (key.startsWith('ORCA_')) delete env[key];
   }
+  // And inside an agent's chat: a watch must not take that chat for the one holding the review.
+  for (const key of Object.keys(env)) {
+    if (/^(CLAUDE|CODEX_)/.test(key) || ['AI_AGENT', 'GEMINI_CLI', 'UNTANGLE_AGENT'].includes(key)) delete env[key];
+  }
   const merged = extra ? { ...env, ...extra } : env;
   merged.PATH = `${browserGuard()}${path.delimiter}${merged.PATH ?? ''}`;
   return merged;
@@ -205,15 +209,16 @@ function waitForUrl(child: ChildProcess, text: { out: () => string; err: () => s
   });
 }
 
-/** Runs one of the agent's commands (watch, reply, notes, stop) in `cwd`, to its end. */
-export function untangleCommand(args: string[], opts: { cacheDir: string; gh: GhStub; cwd: string; env?: NodeJS.ProcessEnv; timeout?: number }): Promise<{ code: number | null; out: string; err: string }> {
+/** Runs one of the agent's commands (watch, reply, notes, stop) in `cwd`, to its end; `pid` is its process. */
+export function untangleCommand(args: string[], opts: { cacheDir: string; gh: GhStub; cwd: string; env?: NodeJS.ProcessEnv; timeout?: number }): Promise<{ code: number | null; out: string; err: string }> & { pid: number } {
   const child = spawn(process.execPath, [cli, ...args], { cwd: opts.cwd, env: untangleEnv(opts.cacheDir, opts.gh, opts.env), stdio: ['ignore', 'pipe', 'pipe'] });
   const text = collect(child);
-  return new Promise((resolve, reject) => {
+  const done = new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`untangle ${args.join(' ')} did not end\n${text.out()}\n${text.err()}`)); }, opts.timeout ?? 120_000);
     child.once('error', (e) => { clearTimeout(timer); reject(e); });
     child.once('exit', (code) => { clearTimeout(timer); resolve({ code, out: text.out(), err: text.err() }); });
   });
+  return Object.assign(done, { pid: child.pid ?? 0 });
 }
 
 /** The reviews running from this cache, by their run files: a watch starts them in the background. */
