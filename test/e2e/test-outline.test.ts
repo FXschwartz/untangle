@@ -66,6 +66,9 @@ const rowsRead = `[...document.querySelectorAll('#vw-main .ol-row, #vw-main .ol-
   return '  '.repeat(d + 1) + mark + ' ' + words(el.querySelector('.ol-tt')) + (notes.length ? ' [' + notes.join(', ') + ']' : '') + (el.classList.contains('done') ? ' (reviewed)' : '');
 }).join('\\n')`;
 
+/** Whether the first test file's mark, on its line, reads the file reviewed. */
+const fileMark = `(document.querySelector('#vw-main .ol-file .ol-tick')?.getAttribute('aria-pressed') === 'true' ? 'file reviewed' : 'file to review')`;
+
 async function openChain(page: Browser, name: string): Promise<void> {
   await page.click('[data-tab="chains"]');
   await page.until(`!!document.querySelector('.sb-row[data-chain]')`);
@@ -270,6 +273,71 @@ describe('Given a served review by commit: a discount with its tests, more tests
         '    + when nothing is bought, then nothing comes off.',
         '    + 1 unchanged when',
         '1 of 1',
+      ].join('\n'));
+    });
+  });
+
+  describe('when the file’s mark is clicked in the chain of the commit that only adds tests, ', () => {
+    let marked = '';
+    let other = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Cover more totals');
+      await page!.click('#vw-main .ol-file .ol-tick');
+      await page!.until(`document.querySelector('#vw-main .ol-file .ol-tick').getAttribute('aria-pressed') === 'true'`);
+      marked = await read(page!, `${rowsRead} + '\\n' + ${fileMark}`);
+      await openChain(page!, 'Take a discount');
+      other = await read(page!, `${rowsRead} + '\\n' + ${fileMark}`);
+    });
+
+    it('then the tests that commit wrote in the file read reviewed, and so does the file.', () => {
+      assert.equal(marked, [
+        'cart_test.dart · 2 new',
+        `  · Given a cart holding two items, [${nameSha.slice(0, 7)}]`,
+        '    · when the total is taken,',
+        '      + then it is positive. (reviewed)',
+        '      + 1 unchanged then',
+        `  · Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        '    + when nothing is bought, then nothing comes off. (reviewed)',
+        '    + 1 unchanged when',
+        'file reviewed',
+      ].join('\n'));
+    });
+
+    it('then the tests another commit wrote in the file are still to review.', () => {
+      assert.equal(other, [
+        'cart_test.dart · 1 new',
+        '  + Given a cart with a discount of one,',
+        '    + when the total is taken, then the discount comes off.',
+        `    · when nothing is bought, then nothing comes off. [${moreSha.slice(0, 7)}]`,
+        'file to review',
+      ].join('\n'));
+    });
+  });
+
+  describe('when the file’s mark is clicked again, ', () => {
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await openChain(page!, 'Cover more totals');
+      await page!.click('#vw-main .ol-file .ol-tick');
+      await page!.until(`!document.querySelector('#vw-main .ol-row.done')`);
+      rows = await read(page!, `${rowsRead} + '\\n' + ${fileMark}`);
+    });
+
+    it('then its tests are to review again.', () => {
+      assert.equal(rows, [
+        'cart_test.dart · 2 new',
+        `  · Given a cart holding two items, [${nameSha.slice(0, 7)}]`,
+        '    · when the total is taken,',
+        '      + then it is positive.',
+        '      + 1 unchanged then',
+        `  · Given a cart with a discount of one, [${discountSha.slice(0, 7)}]`,
+        '    + when nothing is bought, then nothing comes off.',
+        '    + 1 unchanged when',
+        'file to review',
       ].join('\n'));
     });
   });

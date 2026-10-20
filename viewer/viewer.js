@@ -3165,6 +3165,12 @@
     const part = st.open > 0 && st.open < st.total;
     return `<button type="button" class="tick ol-tick${st.open ? (part ? ' part' : '') : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${esc(st.open ? title : 'Mark unreviewed')}" aria-pressed="${st.open ? (part ? 'mixed' : 'false') : 'true'}"></button>`;
   }
+  // A file's mark: every change in it, or in a chain (or a commit), every change of the chain's.
+  const olFileMarks = (sc) => sc.f.blocks.filter((b) => b.edits.length && (!sc.chain || sc.chain.blockSet.has(b.id)));
+  function olFileTickHtml(sc, marks, st) {
+    if (!st.total || outOfLens(st)) return '<span class="ol-tick-sp"></span>';
+    return olTickHtml(marks, st, `Mark this file reviewed: ${!sc.chain ? 'every change in it' : `its changes in this ${sc.chain.sha ? 'commit' : 'chain'}`}`);
+  }
   // What a removed call's mark covers.
   const olGoneMarks = (sc, r) => (r.b || []).map((k) => sc.f.blocks[k]).filter((b) => b && b.edits.length && (!sc.chain || sc.chain.blockSet.has(b.id)));
   function olRemovedHtml(sc, r) {
@@ -3241,7 +3247,8 @@
       // Nothing it asserts changed: one row, which opens on the calls whose code changed.
       const key = f.p + '#edited', open = state.olUnfold.has(key);
       const edits = sc.edited.flatMap((n) => sc.st.get(n).own).concat(sc.outside);
-      h += `<div class="ol-file fold${open ? ' open' : ''}" data-act="ol-unfold" data-key="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(fileName(f.p))}</span><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span></div>`;
+      const marks = olFileMarks(sc), st = stats(marks);
+      h += `<div class="ol-file fold${open ? ' open' : ''}${st.total && !st.open ? ' done' : ''}" data-act="ol-unfold" data-key="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(fileName(f.p))}</span><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span>${olFileTickHtml(sc, marks, st)}</div>`;
       if (open) h += olEditedRowsHtml(sc, o) + (sc.outside.length ? olOutsideHtml(sc) : '');
       return h + '</section>';
     }
@@ -3249,14 +3256,17 @@
     // mark reviews it whole; what's reviewed in a file still open folds as it's marked.
     let settle = false;
     if (o.settle) {
-      const fkey = 'olf|' + f.p, marks = (f.blocks || []).filter((b) => b.edits.length);
+      const fkey = 'olf|' + f.p, marks = olFileMarks(sc);
       const st = stats(marks), all = st.total > 0 && !st.open;
       const folded = state.collapsed.has(fkey) || (all && !state.expanded.has(fkey));
       const said = folded && all ? `<span class="ok-ic" aria-hidden="true">${ICON.check}</span>${olReviewedWhat(c.new + c.reworded + c.regrouped, c.removed, true)}` : (olSaid(c) || 'no sentence changes') + (folded && st.open ? ` · ${st.open} to review` : '');
-      h += `<div class="ol-file ck${all ? ' done' : ''}"><button type="button" class="car" data-act="ol-file" data-key="${esc(fkey)}" aria-expanded="${!folded}" title="${folded ? 'Unfold' : 'Fold'}">${folded ? ICON.chevronRight : ICON.chevronDown}</button><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${said}</span>${st.total && !outOfLens(st) ? olTickHtml(marks, st, 'Mark this file reviewed: every change in it') : '<span class="ol-tick-sp"></span>'}</div>`;
+      h += `<div class="ol-file ck${all ? ' done' : ''}"><button type="button" class="car" data-act="ol-file" data-key="${esc(fkey)}" aria-expanded="${!folded}" title="${folded ? 'Unfold' : 'Fold'}">${folded ? ICON.chevronRight : ICON.chevronDown}</button><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${said}</span>${olFileTickHtml(sc, marks, st)}</div>`;
       if (folded) return h + '</section>';
       settle = st.open > 0;
-    } else h += `<div class="ol-file"><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${olSaid(c) || 'no sentence changes'}</span></div>`;
+    } else {
+      const marks = olFileMarks(sc), st = stats(marks);
+      h += `<div class="ol-file${st.total && !st.open ? ' done' : ''}"><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${olSaid(c) || 'no sentence changes'}</span>${olFileTickHtml(sc, marks, st)}</div>`;
+    }
     if (o.sentences) {
       let label = null, prev = null, run = [];
       const sentence = (n) => { h += olSentenceHtml(sc, n, prev, o); prev = olPath(n); };

@@ -322,6 +322,36 @@ describe('Given a served review of a moved function, a deletion, a repeated edit
     });
   });
 
+  describe('when the test file is marked from its line in the Tests view, ', () => {
+    let line = '';
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main [data-key="tests:code"]')`);
+      await page!.click('#vw-main [data-key="tests:code"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file.fold .ol-tick')`);
+      await page!.click('#vw-main .ol-file.fold .ol-tick');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file.fold.done')`);
+      line = await read(page!, `(() => { const el = document.querySelector('#vw-main .ol-file.fold'); return [el.querySelector('.nm').textContent, el.querySelector('.n').textContent, el.getAttribute('aria-expanded') === 'true' ? 'open' : 'folded', el.querySelector('.ol-tick').title].join(' · '); })()`);
+      await page!.click('#vw-main .ol-file.fold');
+      await page!.until(`!!document.querySelector('#vw-main .ol-row')`);
+      rows = await read(page!, `[...document.querySelectorAll('#vw-main .ol-row')].map((el) => '  '.repeat(Number(el.style.getPropertyValue('--d')) + 1) + el.querySelector('.ol-tt').textContent.trim() + (el.classList.contains('done') ? ' (reviewed)' : '')).join('\\n')`);
+      await page!.click('#vw-main .ol-file.fold .ol-tick');
+      await page!.until(`!document.querySelector('#vw-main .ol-file.fold.done')`);
+    });
+
+    it('then its line reads reviewed, still folded.', () => {
+      assert.equal(line, 'app_test.dart · 1 call edited · +3 −3 · folded · Mark unreviewed');
+    });
+
+    it('then the call whose body it edited reads reviewed once it unfolds.', () => {
+      assert.equal(rows, ['  names', '    one (reviewed)'].join('\n'));
+    });
+  });
+
   describe('when the generated file is opened, ', () => {
     let facts: string;
     let rows: string;

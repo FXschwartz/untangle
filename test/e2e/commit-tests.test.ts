@@ -56,13 +56,13 @@ const nothing = `
 const cartTest = (body: string) => `import 'package:sample/cart.dart';\n\nvoid main() {\n${body}}\n`;
 
 // The panel under a commit's files in History: its title, then its outline's rows (indented as
-// nested, with their mark) or how many diff lines it shows.
+// nested, with their mark, and whether they read reviewed) or how many diff lines it shows.
 const panel = `(() => {
   const pk = document.querySelector('.hs-detail .peek');
   if (!pk) return 'none';
   const head = pk.querySelector('.pk-h b').textContent + ' · ' + [...pk.querySelectorAll('.pk-h button')].map((b) => b.textContent).join(' ');
-  const rows = [...pk.querySelectorAll('.ol-file, .ol-row')].map((el) => el.matches('.ol-file') ? el.querySelector('.nm').textContent + ' · ' + el.querySelector('.n').textContent
-    : '  '.repeat(Number(el.style.getPropertyValue('--d') || 0) + 1) + (el.querySelector('.ol-mk').textContent || '·') + ' ' + el.querySelector('.ol-tt').textContent.trim());
+  const rows = [...pk.querySelectorAll('.ol-file, .ol-row')].map((el) => (el.matches('.ol-file') ? el.querySelector('.nm').textContent + ' · ' + el.querySelector('.n').textContent
+    : '  '.repeat(Number(el.style.getPropertyValue('--d') || 0) + 1) + (el.querySelector('.ol-mk').textContent || '·') + ' ' + el.querySelector('.ol-tt').textContent.trim()) + (el.classList.contains('done') ? ' (reviewed)' : ''));
   return [head, ...(rows.length ? rows : [pk.querySelectorAll('.pk-ln').length + ' diff lines'])].join('\\n');
 })()`;
 
@@ -161,6 +161,47 @@ describe('Given a served review with a commit that adds tests to an earlier one�
 
     it('then it reads as its diff, as before.', () => {
       assert.equal(shown, 'Diff · Close');
+    });
+  });
+
+  describe('when the mark on the test file’s line is clicked in the panel of the commit that adds tests, ', () => {
+    let marked = '';
+    let other = '';
+    const openTests = async (sha: string) => {
+      await openCommit(sha);
+      await page!.click(`.hs-detail[data-detail-of="${sha}"] [data-act="hd-open"][data-p="test/cart_test.dart"]`);
+      await page!.until(`!!document.querySelector('.hs-detail .peek .ol-file')`);
+    };
+
+    before(async () => {
+      await openTests(moreSha);
+      await page!.click('.hs-detail .peek .ol-file .ol-tick');
+      await page!.until(`!!document.querySelector('.hs-detail .peek .ol-file.done')`);
+      marked = await read(page!, panel);
+      await openTests(discountSha);
+      other = await read(page!, panel);
+    });
+
+    it('then the tests that commit wrote read reviewed, and so does the file.', () => {
+      assert.equal(marked, [
+        'Tests · Diff Close',
+        'cart_test.dart · 2 new (reviewed)',
+        '  · Given a cart with two items,',
+        '    · when the total is taken,',
+        '      + then it is positive. (reviewed)',
+        '  · Given a cart with a discount of one,',
+        '    + when nothing is bought, then nothing comes off. (reviewed)',
+      ].join('\n'));
+    });
+
+    it('then the tests the earlier commit wrote in the file are still to review.', () => {
+      assert.equal(other, [
+        'Tests · Diff Close',
+        'cart_test.dart · 1 new',
+        '  + Given a cart with a discount of one,',
+        '    + when the total is taken, then the discount comes off.',
+        '    · when nothing is bought, then nothing comes off.',
+      ].join('\n'));
     });
   });
 });

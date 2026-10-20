@@ -378,9 +378,10 @@ and reviewing a test starts there: the code is there to confirm it.
    - A rewording marks the words that changed. A title with two clauses ("when …, then ….") is
      one row.
    - A same change keeps its places; a rename chain reads as before.
-6. **Marks.** A test's mark covers its body; a group's, its setup and everything under it. The
-   pill, j, k and Space go through the rows with lines left to review: a test's body, a group's
-   own lines and title.
+6. **Marks.** A test's mark covers its body; a group's, its setup and everything under it; a
+   file's, on its line, every change in it (in a chain or a commit, the ones there). The pill, j,
+   k and Space go through the rows with lines left to review: a test's body, a group's own lines
+   and title.
 7. **The Tests view,** under History in the sidebar: every sentence the review's tests add,
    reword, regroup or remove, file by file, each with the commit (or chain) that wrote it, which
    opens that chain at the row. Filters keep one kind, each with its count (one with none is
