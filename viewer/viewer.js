@@ -1105,10 +1105,34 @@
     if (t.side === 'head' && M().head.has(t.p + ':' + t.l)) h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
     return h;
   }
+  // A test file's outline under one commit: the changes in it that commit started, as its chain
+  // holds them. None when the file isn't a test or nothing the commit started is left.
+  function commitTests(sha, path) {
+    const m = M(), ci = hxOn() ? HX.index.get(sha) : null;
+    const f = ci == null ? null : m.files.find((x) => x.p === path);
+    if (!f || !olOf(f) || !TEST_FILE.test(f.p)) return null;
+    // By commit, a change is in the chain of the commit that started it; else, its first line tells.
+    const started = (b) => {
+      if (m.byCommit) return (m.chainsOf.get(b.id) || []).some((id) => chainSha(m.chains[id]) === sha);
+      const h = b.file.hunks[b.hunk];
+      for (let ri = b.first; ri < b.first + b.len; ri++) if (h.rows[ri][0] !== ' ') return rowCommit(b.file, b.hunk, ri) === ci;
+      return false;
+    };
+    const blocks = f.blocks.filter((b) => b.edits.length && started(b));
+    return blocks.length ? olScope(f, { id: 'c' + sha, sha, blockSet: new Set(blocks.map((b) => b.id)) }) : null;
+  }
+  // A commit's file in History: a test file reads as its outline, as in a chain, with its diff a
+  // click away; any other file as its diff.
   function historyPeekHtml(p) {
     const v = p.history;
+    const sc = commitTests(v.sha, v.path);
+    const to = (mode, label) => `<button type="button" class="btn xs" data-act="hd-peek" data-mode="${mode}">${label}</button>`;
+    if (sc && !v.diff) {
+      return `<div class="pk-h"><b>Tests</b><span class="pk-loc">${esc(v.path)}</span><span class="pk-src">Commit ${shortSha(v.sha)}</span><span class="sp"></span>${to('diff', 'Diff')}<button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
+        + `<div class="pk-ol">${olFileHtml(sc)}</div>`;
+    }
     const s = CONFIG.served ? loadSource({ commit: v.sha, path: v.path }, true) : { status: 'error', error: 'This saved page does not contain files at earlier commits. Open the served review to read them.' };
-    const head = `<div class="pk-h"><b>Diff</b><span class="pk-loc">${esc(v.path)}</span><span class="pk-src">Commit ${shortSha(v.sha)}</span><span class="sp"></span><button type="button" class="pk-x" data-act="close-peek">Close</button></div>`;
+    const head = `<div class="pk-h"><b>Diff</b><span class="pk-loc">${esc(v.path)}</span><span class="pk-src">Commit ${shortSha(v.sha)}</span><span class="sp"></span>${sc ? to('tests', 'Tests') : ''}<button type="button" class="pk-x" data-act="close-peek">Close</button></div>`;
     if (s.status !== 'ok') return head + `<div class="pk-foot">${s.status === 'loading' ? 'Loading the diff…' : esc(s.error)}</div>`;
     const file = { p: v.path, lang: C.langOf(v.path) };
     let first = true;
@@ -3121,7 +3145,7 @@
     if (body) tags.push(olTag(`body ${olPm(s.adds, s.dels)}`, 'Its body changed; its sentence didn’t'));
     const shown = s.s === 'new' || s.s === 'renamed' || (s.s === 'reworded' && was);
     const writer = (o.chips && shown) || (sc.chain && !shown) ? olWriter(f, n) : null;
-    const chip = writer && (!sc.chain || writer.id !== sc.chain.id) ? olChip(writer, key) : '';
+    const chip = writer && (!sc.chain || (writer.id !== sc.chain.id && !(sc.chain.sha && chainSha(writer) === sc.chain.sha))) ? olChip(writer, key) : '';
     const marks = s.s ? s.all : [];
     const st = stats(marks), todo = stats(s.own).open > 0;
     const open = state.olOpen.has(key);
@@ -6176,6 +6200,11 @@
       const peek = main.querySelector('.hs-detail .peek');
       if (peek) peek.scrollIntoView({ block: 'nearest' });
       return;
+    }
+    // A test file's outline, or its diff.
+    if (act === 'hd-peek') {
+      if (state.peek && state.peek.history) state.peek = { history: { ...state.peek.history, diff: d.mode === 'diff' } };
+      return render();
     }
     if (act === 'brought') {
       const sha = d.sha;
