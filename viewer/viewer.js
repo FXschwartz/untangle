@@ -551,7 +551,7 @@
     const oldNo = meta.t === '-' ? meta.o : null;
     const c = o.c ? (meta.t === '-' ? (o.mv ? '' : 'L:' + meta.o) : n != null ? 'R:' + n : '') : '';
     const notes = (o.badges || '') + (o.toggle || '');
-    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
+    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}${o.mark || ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
   // Each move annotation stays at the moved block's position. The removed body stays
   // collapsed; the added body's annotation immediately precedes its rows.
@@ -652,8 +652,8 @@
         if (b.movedTo) out += threadsAt(f, 'LEFT', meta.o);
         continue;
       }
-      const sel = inCompose(f, hi, ri);
-      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors, c: true, sel }); continue; }
+      const sel = inCompose(f, hi, ri), mark = markAt(f, hi, ri);
+      if (!b || !b.edits.length) { out += uRow(f, meta, text, null, { cls: 'ctx', refs: !ctx.noRefs, colors, c: true, sel, mark }); continue; }
       const d = done(b);
       const showDiff = !d || state.showReviewedDiff || state.blockDiff.has(b.id);
       const other = (ctx.unit && b.unit !== ctx.unit) || (ctx.chain && !ctx.chain.blockSet.has(b.id)) ? ' other' : '';
@@ -670,14 +670,14 @@
         }
         const want = tickRow(b, true), first = want >= start && want < end ? ri === want : !placed.has(b.id);
         placed.add(b.id);
-        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel, w: wroteRow(f, hi, ri) });
+        out += uRow(f, meta, text, null, { cls: 'ctx rvd-quiet' + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), sign: '', tick: first ? tickHtml(b) : '', toggle: first ? diffToggle(b) : '', refs: !ctx.noRefs, colors, c: true, sel, mark, w: wroteRow(f, hi, ri) });
         continue;
       }
       // The change's mark: on its row in the lens, or on its first row drawn here.
       const want = tickRow(b), first = want >= start && want < end ? ri === want : !placed.has(b.id);
       placed.add(b.id);
       out += uRow(f, meta, text, ranges, {
-        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, colors, c: true, sel, w: wroteRow(f, hi, ri),
+        cls: (t === '+' ? 'add' : 'del') + (d ? ' rvd' : '') + other + (lensOut(f, hi, ri) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, colors, c: true, sel, mark, w: wroteRow(f, hi, ri),
         tick: first ? tickHtml(b) : '', toggle: first && d ? diffToggle(b) : '',
         badges: ctx.noBadges ? '' : badgesHtml(f, b, ri, t !== '-' ? meta.n : null),
       });
@@ -711,7 +711,7 @@
       if (!b || !b.edits.length) {
         const [, text] = h.rows[ri];
         const colors = rowColors(h.rows, f.p, ri);
-        out += `<div class="sl${inCompose(f, hi, ri) ? ' cm-sel' : ''}" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx', colors, c: true })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs, colors, c: true })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '') + threadsAt(f, 'LEFT', meta.o) + threadsAt(f, 'RIGHT', meta.n);
+        out += `<div class="sl${inCompose(f, hi, ri) ? ' cm-sel' : ''}${markAt(f, hi, ri)}" data-n="${meta.n != null ? meta.n : ''}"><span class="g"></span>${sCell(f, meta, text, null, 'l', { cls: 'ctx', colors, c: true })}${sCell(f, meta, text, null, 'r', { cls: 'ctx', refs: !ctx.noRefs, colors, c: true })}</div>` + (meta.n != null ? peekAfter(f, meta.n) : '') + threadsAt(f, 'LEFT', meta.o) + threadsAt(f, 'RIGHT', meta.n);
         ri++;
         continue;
       }
@@ -732,7 +732,7 @@
         adds.forEach((i, k) => {
           const m2 = h.meta[i];
           const colors = rowColors(h.rows, f.p, i);
-          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}" data-n="${m2.n}"><span class="g">${k === kWant ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true, w: wroteRow(f, hi, i) })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
+          out += `<div class="sl rvd-quiet${other}${lensOut(f, hi, i) ? ' lens-out' : ''}${inCompose(f, hi, i) ? ' cm-sel' : ''}${markAt(f, hi, i)}" data-n="${m2.n}"><span class="g">${k === kWant ? tickHtml(b) : ''}</span>${sCell(f, m2, h.rows[i][1], null, 'l', { cls: 'ctx', sign: '', colors }).replace(/<span class="no">\d*<\/span>/, '<span class="no"></span>')}${sCell(f, m2, h.rows[i][1], null, 'r', { cls: 'ctx', sign: '', refs: !ctx.noRefs, toggle: k === 0 ? diffToggle(b) : '', colors, c: true, w: wroteRow(f, hi, i) })}</div>` + peekAfter(f, m2.n) + threadsAt(f, 'RIGHT', m2.n);
         });
       } else {
         const rows = Math.max(dels.length, adds.length);
@@ -745,7 +745,7 @@
           const lm = li != null ? h.meta[li] : null, am = ai != null ? h.meta[ai] : null;
           const sel = (li != null && inCompose(f, hi, li)) || (ai != null && inCompose(f, hi, ai));
           const fade = lensOn() && (li == null || outL(li)) && (ai == null || outL(ai));
-          out += `<div class="sl${d ? ' rvd' : ''}${other}${fade ? ' lens-out' : ''}${sel ? ' cm-sel' : ''}" data-n="${am ? am.n : ''}"><span class="g">${k === kTick ? tickHtml(b) : ''}</span>`
+          out += `<div class="sl${d ? ' rvd' : ''}${other}${fade ? ' lens-out' : ''}${sel ? ' cm-sel' : ''}${markAt(f, hi, li, ai)}" data-n="${am ? am.n : ''}"><span class="g">${k === kTick ? tickHtml(b) : ''}</span>`
             + sCell(f, lm, lm ? h.rows[li][1] : '', lm ? h.rows[li][2] : null, 'l', { cls: 'del' + (outL(li) ? ' lens-out' : ''), emphasis, colors: li != null ? rowColors(h.rows, f.p, li) : null, c: true, w: li != null ? wroteRow(f, hi, li) : -1 })
             + sCell(f, am, am ? h.rows[ai][1] : '', am ? h.rows[ai][2] : null, 'r', { cls: 'add' + (outL(ai) ? ' lens-out' : ''), emphasis, refs: !ctx.noRefs, badges: am && !ctx.noBadges ? badgesHtml(f, b, ai, am.n) : '', toggle: k === kTick && d ? diffToggle(b) : '', colors: ai != null ? rowColors(h.rows, f.p, ai) : null, c: true, w: ai != null ? wroteRow(f, hi, ai) : -1 })
             + '</div>' + (am ? peekAfter(f, am.n) : '') + (lm ? peekAfterOld(f, lm.o) : '') + (lm ? threadsAt(f, 'LEFT', lm.o) : '') + (am ? threadsAt(f, 'RIGHT', am.n) : '');
@@ -2134,6 +2134,44 @@
   }
   // Whether a row of a hunk is in the range a comment is being written on.
   const inCompose = (f, hi, ri) => { const c = state.compose; return !!c && c.path === f.p && c.hi === hi && ri >= c.r0 && ri <= c.r1; };
+  // The rows each open thread and note is on, by hunk and row as the composer's range: they get a
+  // bar in the gutter, a tint while you point at the comment or its bar, and a click back to it.
+  // Built once a render. Per file: the ranges, and the comments under each line ('R:12', 'L:9').
+  let MARKS = null;
+  function marks() {
+    if (MARKS) return MARKS;
+    MARKS = { byPath: new Map(), byId: new Map() };
+    const m = M();
+    const at = (path, side, line) => (line == null ? null : (side === 'LEFT' ? m.old : m.head).get(path + ':' + line) || null);
+    const put = (id, kind, path, from, to) => {
+      const b = at(path, to.side, to.line);
+      if (!b) return;
+      const a = (from && at(path, from.side, from.line)) || b;
+      const [r0, r1] = a.hi === b.hi ? [Math.min(a.ri, b.ri), Math.max(a.ri, b.ri)] : [b.ri, b.ri];
+      const keys = [];
+      for (let ri = r0; ri <= r1; ri++) {
+        const r = b.f.hunks[b.hi].meta[ri];
+        if (r.n != null) keys.push('R:' + r.n);
+        if (r.o != null && r.t !== '+') keys.push('L:' + r.o);
+      }
+      if (!MARKS.byPath.has(path)) MARKS.byPath.set(path, { ranges: [], byKey: new Map() });
+      const p = MARKS.byPath.get(path);
+      p.ranges.push({ hi: b.hi, r0, r1, kind });
+      keys.forEach((k) => { if (!p.byKey.has(k)) p.byKey.set(k, []); p.byKey.get(k).push(id); });
+      MARKS.byId.set(id, { path, kind, keys });
+    };
+    if (GH.on && GH.data) GH.data.threads.forEach((t) => { if (!t.resolved && !t.file && t.at != null) put('gh:' + t.id, 'gh', t.path, t.from != null ? { side: t.startSide || t.side, line: t.from } : null, { side: t.side, line: t.at }); });
+    if (NT.data) NT.data.notes.forEach((n) => { if (!n.resolved && !n.file && !n.gone && n.line != null) put('nt:' + n.n, 'nt', n.path, n.startLine != null ? { side: n.startSide || n.side, line: n.startLine } : null, { side: n.side, line: n.line }); });
+    return MARKS;
+  }
+  // A row's marks: ' cm-on' under an open thread, ' nt-on' under an open note (a split row: either side's).
+  function markAt(f, hi, ...ris) {
+    const p = marks().byPath.get(f.p);
+    if (!p) return '';
+    let gh = false, nt = false;
+    p.ranges.forEach((r) => { if (r.hi === hi && ris.some((ri) => ri != null && ri >= r.r0 && ri <= r.r1)) { if (r.kind === 'gh') gh = true; else nt = true; } });
+    return (gh ? ' cm-on' : '') + (nt ? ' nt-on' : '');
+  }
   // Comments and notes on a file (not a line), threads and notes whose line isn't in this version,
   // and a new file comment.
   function fileThreadsHtml(f) {
@@ -2564,6 +2602,49 @@
     if (cell && main.contains(cell)) placeAdd(cell); else addBtn.classList.remove('on');
   });
   main.addEventListener('mouseleave', () => { if (!drag) addBtn.classList.remove('on'); });
+  // Pointing at an open thread or note, or at its bar in the gutter, tints the lines it's on; a
+  // click on the bar goes to it.
+  let lit = '';
+  function lightComments(ids) {
+    const key = ids.join(' ');
+    if (key === lit) return;
+    lit = key;
+    main.querySelectorAll('.cm-hot, .nt-hot').forEach((x) => x.classList.remove('cm-hot', 'nt-hot'));
+    ids.forEach((id) => {
+      const mk = marks().byId.get(id);
+      if (!mk) return;
+      main.querySelectorAll('.code[data-p]').forEach((code) => {
+        if (code.dataset.p !== mk.path) return;
+        mk.keys.forEach((k) => code.querySelectorAll(`[data-c="${k}"]`).forEach((c) => c.closest('.ln, .sl')?.classList.add(mk.kind === 'gh' ? 'cm-hot' : 'nt-hot')));
+      });
+    });
+  }
+  // The open threads and notes a row is under.
+  function commentsAt(row) {
+    const code = row.closest('.code[data-p]'), p = code && marks().byPath.get(code.dataset.p);
+    if (!p) return [];
+    const keys = [row.dataset.c, ...[...row.querySelectorAll('[data-c]')].map((x) => x.dataset.c)].filter(Boolean);
+    return [...new Set(keys.flatMap((k) => p.byKey.get(k) || []))];
+  }
+  const markedRow = (el) => (el.closest('.g') && !el.closest('button') ? el.closest('.ln.cm-on, .ln.nt-on, .sl.cm-on, .sl.nt-on') : null);
+  main.addEventListener('mouseover', (e) => {
+    if (drag) return;
+    const th = e.target.closest('.th[data-thread], .th.note[data-note]');
+    if (th) return lightComments([th.dataset.note != null ? 'nt:' + th.dataset.note : 'gh:' + th.dataset.thread]);
+    const row = markedRow(e.target);
+    lightComments(row ? commentsAt(row) : []);
+  });
+  main.addEventListener('mouseleave', () => lightComments([]));
+  main.addEventListener('click', (e) => {
+    const row = markedRow(e.target), id = row && commentsAt(row)[0];
+    if (!id) return;
+    const el = id.startsWith('nt:') ? main.querySelector(`.th.note[data-note="${id.slice(3)}"]`) : [...main.querySelectorAll('.th[data-thread]')].find((x) => x.dataset.thread === id.slice(3));
+    if (!el) return;
+    placeRow(el, headH() + 40);
+    el.classList.remove('flash-th');
+    void el.offsetWidth;
+    el.classList.add('flash-th');
+  });
   // Pressing the + and dragging over lines comments on all of them, as on GitHub (within a hunk;
   // near the pane's edges it scrolls). Shift stretches the open comment instead.
   let drag = null, dragUp = 0;
@@ -4886,6 +4967,8 @@
     renderSide();
     renderReviewBar();
     const v = state.view;
+    MARKS = null;
+    lit = '';
     try {
       main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : v.kind === 'history' ? renderHistory() : v.kind === 'tests' ? renderTests() : renderFile(v.path);
     } catch (e) {

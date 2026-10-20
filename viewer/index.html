@@ -942,6 +942,13 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .cm-add { position: absolute; z-index: 3; display: none; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: var(--gh); color: #06101F; font: 700 14px/1 var(--ui); cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); transition: transform var(--fast) var(--ease); }
 .cm-add.on { display: grid; }
 .cm-add:hover { transform: scale(1.12); }
+/* The lines an open thread or note is on: a bar in the gutter, blue for GitHub and orchid for notes,
+   side by side under both. Pointing at the comment or its bar tints them; a click on the bar goes to it. */
+.ln.cm-on .g, .sl.cm-on .g { box-shadow: inset 2px 0 0 var(--gh); cursor: pointer; }
+.ln.nt-on .g, .sl.nt-on .g { box-shadow: inset 2px 0 0 var(--local); cursor: pointer; }
+.ln.cm-on.nt-on:not(.cm-sel) .g, .sl.cm-on.nt-on:not(.cm-sel) .g { box-shadow: inset 2px 0 0 var(--gh), inset 4px 0 0 var(--local); }
+.ln.cm-hot, .sl.cm-hot, .ln.cm-hot .g, .sl.cm-hot .g { background-image: linear-gradient(var(--gh-soft), var(--gh-soft)); }
+.ln.nt-hot, .sl.nt-hot, .ln.nt-hot .g, .sl.nt-hot .g { background-image: linear-gradient(var(--local-soft), var(--local-soft)); }
 .ln.cm-sel, .sl.cm-sel, .ln.cm-drag, .sl.cm-drag, .ln.cm-sel .g, .ln.cm-drag .g, .sl.cm-sel .g, .sl.cm-drag .g { background-image: linear-gradient(var(--gh-soft), var(--gh-soft)); }
 .ln.cm-sel .g, .ln.cm-drag .g, .sl.cm-sel .g, .sl.cm-drag .g { box-shadow: inset 2px 0 0 var(--gh); }
 body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
@@ -1059,6 +1066,8 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 .th-hunk .d { background: var(--del); }
 /* Notes: threads kept on this machine, with orchid on their edge, the note's number for an avatar. */
 .th.note { box-shadow: inset 2px 0 0 var(--local); }
+.th.note.flash-th { animation-name: flashnt; }
+@keyframes flashnt { 0% { box-shadow: inset 2px 0 0 var(--local), 0 0 0 2px var(--local); } 100% { box-shadow: inset 2px 0 0 var(--local), 0 0 0 2px transparent; } }
 .th.note.resolved { box-shadow: inset 2px 0 0 var(--hair-2); }
 .th.new.note { box-shadow: inset 2px 0 0 var(--local), inset 0 0 0 1px rgba(224, 138, 216, .3); }
 .th.new.note .th-new-h svg { color: var(--local); }

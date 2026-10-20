@@ -8,6 +8,8 @@ export interface ThreadSpec {
   id: string;
   path: string;
   line: number;
+  /** The first of its lines, for a thread on more than one. */
+  startLine?: number;
   body: string;
   resolved?: boolean;
   /** A second comment, after the first. */
@@ -77,10 +79,10 @@ export function pullRequest(spec: ConversationSpec) {
         path: thread.path,
         line: thread.line,
         originalLine: thread.line,
-        startLine: null,
-        originalStartLine: null,
+        startLine: thread.startLine ?? null,
+        originalStartLine: thread.startLine ?? null,
         diffSide: 'RIGHT',
-        startDiffSide: null,
+        startDiffSide: thread.startLine != null ? 'RIGHT' : null,
         subjectType: 'LINE',
         viewerCanResolve: !thread.resolved,
         viewerCanUnresolve: !!thread.resolved,
