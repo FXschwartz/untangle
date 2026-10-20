@@ -975,6 +975,8 @@
     return streamRowsHtml(f, 0, end == null ? Infinity : end, ctx);
   }
   // The hunks a set of changes needs: each change with 3 lines of context, merged when they touch.
+  // ctx.tight: only unchanged lines around the blocks, so the changes next to them don't read as
+  // theirs.
   function subHunksHtml(blocks, ctx) {
     const byFile = new Map();
     blocks.forEach((b) => { if (!byFile.has(b.file)) byFile.set(b.file, []); byFile.get(b.file).push(b); });
@@ -985,8 +987,16 @@
       byFile.get(f).forEach((b) => { if (!byHunk.has(b.hunk)) byHunk.set(b.hunk, []); byHunk.get(b.hunk).push(b); });
       const secs = [];
       [...byHunk.keys()].sort((x, y) => x - y).forEach((hi) => {
-        const rows = f.hunks[hi].rows.length;
-        const ranges = byHunk.get(hi).map((b) => [Math.max(0, b.first - 3), Math.min(rows, b.first + b.len + 3)]).sort((x, y) => x[0] - y[0]);
+        const hr = f.hunks[hi].rows, rows = hr.length;
+        const around = (b) => {
+          let s = Math.max(0, b.first - 3), e = Math.min(rows, b.first + b.len + 3);
+          if (ctx.tight) {
+            while (s < b.first && hr.slice(s, b.first).some((r) => r[0] !== ' ')) s++;
+            while (e > b.first + b.len && hr.slice(b.first + b.len, e).some((r) => r[0] !== ' ')) e--;
+          }
+          return [s, e];
+        };
+        const ranges = byHunk.get(hi).map(around).sort((x, y) => x[0] - y[0]);
         const merged = [];
         ranges.forEach((r) => { const last = merged[merged.length - 1]; if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]); else merged.push(r.slice()); });
         merged.forEach(([s0, e0]) => secs.push(sectionOf(f, hi, s0, e0, ctx)));
@@ -3346,7 +3356,7 @@
     const f = sc.f, key = f.p + '#outside', open = olFold(sc, key);
     const names = [...new Set(sc.outside.map((b) => (b.member || '').split('.')[0]).filter((x) => x && x !== 'main'))];
     let h = `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Outside the tests${names.length ? `: <code>${esc(names.slice(0, 3).join(', '))}</code>${names.length > 3 ? ` and ${names.length - 3} more` : ''}` : ''} · ${plusMinus(sumOf(sc.outside, 'adds'), sumOf(sc.outside, 'dels'))}</div>`;
-    if (open) h += `<div class="ol-out">${subHunksHtml(sc.outside, { chain: sc.chain || undefined, key: 'olo|' + f.p })}</div>`;
+    if (open) h += `<div class="ol-out">${subHunksHtml(sc.outside, { chain: sc.chain || undefined, key: 'olo|' + f.p, tight: true })}</div>`;
     return h;
   }
   // A chain's members that are a test file's changes, read as that file's outline: the files, and

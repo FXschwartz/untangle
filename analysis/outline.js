@@ -199,11 +199,19 @@ export function testOutline(f) {
     return out;
   });
 
-  // Blocks with changes outside every call: imports, helpers.
+  // Blocks with changes outside every call: imports, helpers. Closing brackets alone don't count
+  // when the rest of their block is a call's: a block runs to where the next one starts, so the
+  // last test's holds the brace that closes main.
   const inside = (line, roots) => roots.some((c) => line >= c.s && line <= c.e);
-  const outside = new Set();
-  for (const [line, r] of added) if (r.block >= 0 && r.text.trim() && !inside(line, now)) outside.add(r.block);
-  for (const [line, r] of removed) if (r.block >= 0 && r.text.trim() && !inside(line, was)) outside.add(r.block);
+  const outside = new Set(), within = new Set(), brackets = new Set();
+  for (const [lines, roots] of [[added, now], [removed, was]]) {
+    for (const [line, r] of lines) {
+      if (r.block < 0 || !r.text.trim()) continue;
+      if (inside(line, roots)) within.add(r.block);
+      else (/^[\s})\];,]*$/.test(r.text) ? brackets : outside).add(r.block);
+    }
+  }
+  brackets.forEach((k) => { if (!within.has(k)) outside.add(k); });
 
   const out = { nodes };
   if (removedOut.length) out.removed = removedOut;

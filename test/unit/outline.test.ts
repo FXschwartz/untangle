@@ -46,6 +46,17 @@ function blocksOf(review: BuiltReview, file: string): string {
   }).join('\n');
 }
 
+/** The blocks a file's outline puts outside the tests, one per line: each one's first and last lines that aren't blank. */
+function outsideOf(review: BuiltReview, file: string): string {
+  const found = (review.data.model as Model).compares.base.files.find((f) => f.p === file);
+  if (!found) return 'no file';
+  return (found.outline?.out || []).map((k) => {
+    const block = found.blocks[k];
+    const lines = found.hunks[block.hunk].rows.slice(block.first, block.first + block.len).map(([, text]) => text.trim()).filter(Boolean);
+    return lines.length > 1 ? `${lines[0]} … ${lines[lines.length - 1]}` : lines[0] ?? '(blank)';
+  }).join('\n');
+}
+
 const inbox = (thens: string) => `void main() {
   group('Given a signed-in user,', () {
     group('when they open the inbox,', () {
@@ -323,6 +334,61 @@ void main() {
 
     it('then the helper\'s change is listed as outside the tests.', () => {
       assert.equal(outside, '[0]');
+    });
+  });
+});
+
+describe('Given a new test file whose titles sit on lines of their own, its tests in a labelled wrapper, with a helper after main, ', { skip: skipDart }, () => {
+  // Each change runs on to where the next one starts: main's own lines to the wrapper, and the last
+  // test's to the brace that closes main.
+  const file = `import 'package:test/test.dart';
+
+void main() {
+  final start = [1, 2];
+
+  withCart(
+    '[Cart]',
+    (cart) {
+      cart.addAll(start);
+
+      group(
+        'Given a cart with two items,',
+        () {
+          test(
+            'then the total is positive.',
+            () {
+              expect(total(cart) > 0, isTrue);
+            },
+          );
+        },
+      );
+    },
+  );
+}
+
+void withCart(String label, void Function(List<int> cart) body) => group(label, () => body([]));
+`;
+  const cart = 'int total(List<int> prices) => prices.fold(0, (sum, price) => sum + price);\n';
+  const files = {
+    base: { 'lib/cart.dart': cart },
+    head: { 'lib/cart.dart': cart, 'test/cart_test.dart': file },
+  };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then only the imports, main\'s own lines and the helper are outside the tests: not the wrapper, nor the last test with main\'s closing brace.', () => {
+      assert.equal(outsideOf(review!, 'test/cart_test.dart'), [
+        "import 'package:test/test.dart';",
+        'void main() { … final start = [1, 2];',
+        'void withCart(String label, void Function(List<int> cart) body) => group(label, () => body([]));',
+      ].join('\n'));
     });
   });
 });

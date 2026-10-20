@@ -100,6 +100,9 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
   // member of a class, mixin, extension or enum, and each test(...)/group(...) call. A unit
   // starts at its doc comments and annotations. Change blocks are split where a unit starts.
   const TEST_CALLS = /^(test|group|setUp|setUpAll|tearDown|tearDownAll|testWidgets)\s*\(/;
+  // In a test file, a call whose first argument is a string and which holds tests (Serverpod's
+  // withServerpod, say) is a group by another name, so it starts a unit too.
+  const LABELLED = /^[A-Za-z_$][\w$]*\s*(?:<[^>]*>)?\s*\(\s*r?['"]/, HOLDS_TESTS = /\b(test|testWidgets|group)\s*\(/;
   const isLead = (n) => n.type === 'comment' || n.type === 'documentation_comment' || n.type === 'annotation' || n.type === 'marker_annotation';
   const isDirective = (n) => /directive|import_or_export|library_name/.test(n.type);
   function unitStart(n) {
@@ -107,7 +110,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
     for (let p = n.previousSibling; p && isLead(p) && p.endPosition.row >= start - 1; p = p.previousSibling) start = p.startPosition.row;
     return start + 1;
   }
-  function unitStarts(tree) {
+  function unitStarts(tree, tests) {
     const out = new Set();
     if (!tree) return out;
     const visit = (n) => {
@@ -122,7 +125,7 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         } else if (n.type === 'class_body' || n.type === 'extension_body' || n.type === 'enum_body') {
           unit = c.type === 'declaration' || SIGNATURES.has(c.type) || c.type === 'enum_constant';
         } else if (n.type === 'block') {
-          unit = c.type === 'expression_statement' && TEST_CALLS.test(c.text);
+          unit = c.type === 'expression_statement' && (TEST_CALLS.test(c.text) || (tests && LABELLED.test(c.text) && HOLDS_TESTS.test(c.text)));
         }
         if (unit) {
           // A member written right under the previous one, with no blank line, doc comment or
@@ -286,7 +289,8 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
         if (f.structure && f.newTree) structures.set(f.newTree, f.structure);
         if (f.oldStructure && f.oldTree) structures.set(f.oldTree, f.oldStructure);
       }
-      const newStarts = f.newTree ? unitStarts(f.newTree) : null, oldStarts = f.oldTree ? unitStarts(f.oldTree) : null;
+      const tests = TEST_FILE.test(f.p);
+      const newStarts = f.newTree ? unitStarts(f.newTree, tests) : null, oldStarts = f.oldTree ? unitStarts(f.oldTree, tests) : null;
       C.analyzeFile(f, { split: (b) => splitPoints(b, newStarts, oldStarts) });
       files.push(f);
     }
