@@ -80,6 +80,20 @@
   const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
 
   const viewer = $('#viewer'), side = $('#vw-side'), main = $('#vw-main');
+  // A narrow window, a phone's among them: one pane at a time, the sidebar a drawer (Contents).
+  const COMPACT = window.matchMedia ? window.matchMedia('(max-width: 960px)') : { matches: false, addEventListener() {} };
+  const compact = () => COMPACT.matches;
+  // A touch screen: lines are picked from their gutter, with nothing to hover.
+  const COARSE = window.matchMedia ? window.matchMedia('(hover: none) and (pointer: coarse)') : { matches: false, addEventListener() {} };
+  const PHONE = window.matchMedia ? window.matchMedia('(max-width: 520px)') : { matches: false, addEventListener() {} };
+  // Long lines wrap, under their own indent, on a phone (or as ⋯ says, in any narrow window).
+  const wrapOn = () => compact() && (UI.wrap != null ? !!UI.wrap : PHONE.matches);
+  const codeSize = () => UI.codeSize || (PHONE.matches ? 12 : 12.5);
+  // Side by side needs the width: a narrow window shows the diff in one column.
+  const sideBySide = () => state.layout === 'split' && !compact();
+  // A line's indent, for a wrapped line's next rows to start under it (a tab as tab-size's 8).
+  const indentOf = (text) => { let i = 0, n = 0; for (; i < text.length && n < 32; i++) { if (text[i] === ' ') n++; else if (text[i] === '\t') n += 8; else break; } return Math.min(n, 32); };
+  const indentAttr = (text) => { const n = text ? indentOf(text) : 0; return n ? ` style="--i:${n}"` : ''; };
   // The page's calls to untangle say which review the page shows. A 409 answer means untangle has
   // moved on to newer commits (refreshed from another page): this one offers to reload.
   function api(path, init) {
@@ -171,6 +185,8 @@
   // as a tree or a list, and the Threads tab's folded sections.
   const UI_KEY = 'untangle:ui';
   const UI = { side: 272, sideOff: false, minimap: true, filesList: false, foldedThreads: [] };
+  // Contents, open over the view in a narrow window, and the view it was opened on.
+  const SIDE = { open: false, at: '' };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(true); });
@@ -634,7 +650,7 @@
     const oldNo = meta.t === '-' ? meta.o : null;
     const c = o.c ? (meta.t === '-' ? (o.mv ? '' : 'L:' + meta.o) : n != null ? 'R:' + n : '') : '';
     const notes = (o.badges || '') + (o.toggle || '');
-    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}${o.mark || ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
+    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}${o.mark || ''}"${indentAttr(text)}${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
   // Each move annotation stays at the moved block's position. The removed body stays
   // collapsed; the added body's annotation immediately precedes its rows.
@@ -838,7 +854,7 @@
     }
     return out;
   }
-  const anyRowsHtml = (f, hi, s, e, ctx) => (state.layout === 'split' ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
+  const anyRowsHtml = (f, hi, s, e, ctx) => (sideBySide() ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
   const BIG = 150;
 
   // ---------- more of the file
@@ -895,7 +911,7 @@
     if (s.status !== 'ok') return `<div class="ln skip${s.status === 'loading' ? ' loading' : ''}"><span class="g"></span><span class="no"></span><span class="sg"></span><span class="tx">${s.status === 'loading' ? 'Loading lines…' : esc(s.error)}</span></div>`;
     if (count == null) count = Math.max(0, s.count - (n0 - 1));
     const colors = textColors(s.text, f.p);
-    const split = state.layout === 'split' && !ctx.unified;
+    const split = sideBySide() && !ctx.unified;
     let h = '';
     for (let k = 0; k < count; k++) {
       const n = n0 + k, meta = { t: ' ', o: o0 + k, n }, text = s.lines[n - 1] != null ? s.lines[n - 1] : '', c = colors && colors[n - 1];
@@ -1045,7 +1061,7 @@
     blocks.forEach((b) => { if (!byFile.has(b.file)) byFile.set(b.file, []); byFile.get(b.file).push(b); });
     let h = '';
     [...byFile.keys()].sort((x, y) => x.idx - y.idx).forEach((f) => {
-      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code" data-p="${esc(f.p)}">`;
+      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${pathHtml(f.p)}</button></div><div class="code" data-p="${esc(f.p)}">`;
       const byHunk = new Map();
       byFile.get(f).forEach((b) => { if (!byHunk.has(b.hunk)) byHunk.set(b.hunk, []); byHunk.get(b.hunk).push(b); });
       const secs = [];
@@ -1714,6 +1730,53 @@
     });
     return items;
   }
+  // ⋯ in a narrow window's app bar: what the top bar holds in a wide one (the notes or the review,
+  // the commit, the language server), and the view's own menu.
+  function moreMenuItems() {
+    const items = [];
+    if (GH.on || NT.on) {
+      const d = GH.data, n = d && d.pending ? d.pending.comments : 0;
+      const open = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
+      items.push(localMode()
+        ? { label: open ? `Your notes · ${open} open` : 'Your notes', icon: ICON.comment, data: { act: 'review-toggle' }, title: 'Copy them for your agent, or post them to GitHub' }
+        : { label: n ? `Finish your review · ${n} pending` : 'Review the pull request', icon: ICON.comment, data: { act: 'review-toggle' } });
+    }
+    const sha = (CONFIG.head || M().raw.right || '').slice(0, 7);
+    if (hxOn()) items.push({ label: state.lens ? `Changes from ${lensLabel()}` : `Changes from every commit, at ${sha}`, icon: ICON.history, data: { act: 'menu', menu: 'lens' } });
+    if (CONFIG.served) items.push({ label: 'Look for new commits', icon: ICON.refresh, data: { act: 'refresh' } });
+    // The view's menu, but for what a narrow window doesn't show.
+    const view = viewMenuItems().filter((it) => !(it.data && (it.data.act === 'minimap' || it.data.act === 'layout')))
+      .filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i - 1].sep));
+    items.push({ sep: true }, { head: 'Code' }, { label: 'Wrap long lines', checked: wrapOn(), data: { act: 'wrap' }, title: 'Long lines wrap under their own indent, instead of running off the side' },
+      { note: `<span class="mi-size">Code size<span class="sp"></span><button type="button" class="ib" data-act="code-size" data-step="-1" aria-label="Smaller code"${codeSize() <= 10 ? ' disabled' : ''}>A−</button><b>${codeSize()}</b><button type="button" class="ib" data-act="code-size" data-step="1" aria-label="Larger code"${codeSize() >= 16 ? ' disabled' : ''}>A+</button></span>` });
+    // A chain's own action, from the header that scrolled away.
+    const ch = state.view.kind === 'chain' && M().chains[state.view.id];
+    if (ch) {
+      const st = stats(blocksOf(ch.blocks));
+      if (!outOfLens(st)) view.unshift({ label: st.open ? 'Mark the whole chain reviewed' : 'Mark the whole chain unreviewed', icon: ICON.check, data: { act: 'mark-chain', 'chain-id': ch.id } });
+    }
+    if (state.view.kind === 'tests') {
+      const mode = UI.testsMode === 'sentences' ? 'sentences' : 'nested';
+      view.unshift({ label: 'Nested, as the code nests them', checked: mode === 'nested', data: { act: 'tests-mode', v: 'nested' } }, { label: 'Sentences, each whole', checked: mode === 'sentences', data: { act: 'tests-mode', v: 'sentences' } });
+    }
+    if (view.length) items.push({ sep: true }, ...(view[0].head ? [] : [{ head: 'This view' }]), ...view);
+    const lsp = $('#vw-lsp');
+    if (lsp && !lsp.hidden) {
+      const m = (k) => esc(((lsp.querySelector(`[data-m="${k}"]`) || {}).textContent || '…').trim());
+      items.push({ sep: true }, { head: 'Language server' }, { note: `${esc(($('#lsp-state') || {}).textContent || '')}: ${m('lspRss')}, CPU ${m('lspCpu')}. untangle: ${m('rss')}, CPU ${m('cpu')}.` });
+      if (!$('#lsp-free').hidden) items.push({ label: 'Free its memory', title: $('#lsp-free').title, data: { act: 'lsp-restart' } });
+    }
+    return items;
+  }
+  // A comment's tools as a menu, each by its name: what its ⋯ opens on a touch screen.
+  function cmMenuItems(anchor) {
+    const tools = anchor.closest('.cm') && anchor.closest('.cm').querySelector('.cm-tools');
+    return tools ? [...tools.children].map((b) => {
+      const label = b.getAttribute('aria-label') || b.title;
+      const data = Object.fromEntries(Object.entries(b.dataset).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()), v]));
+      return b.tagName === 'A' ? { label, href: b.getAttribute('href'), icon: b.innerHTML } : { label, icon: b.innerHTML, data };
+    }) : [];
+  }
   function menuHtml(items) {
     return items.map((it) => {
       if (it.sep) return '<div class="mi-sep" role="separator"></div>';
@@ -1733,12 +1796,15 @@
     if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); }
     const el = MENU.el, lens = MENU.open === 'lens';
     const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
-    const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
-    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : chainsMenuItems();
-    const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
-    if (!html) {
+    const anchors = MENU.open ? [...viewer.querySelectorAll(`[data-menu="${MENU.open}"]`)] : [];
+    const anchor = anchors.find((a) => a.getClientRects().length) || anchors[0];
+    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'more' ? moreMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
+    const sheet = compact();
+    const html = !anchor ? '' : (sheet ? SHEET_HANDLE : '') + (lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '');
+    if (!html || html === SHEET_HANDLE) {
       MENU.open = null;
       MENU.html = '';
+      layerSoon();
       viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
       // It folds back into its button as it was, out of reach, then hides.
       if (MENU.shown) { MENU.shown = null; el.inert = true; pop(el, false, () => { el.hidden = true; el.inert = false; }); }
@@ -1746,9 +1812,10 @@
     }
     // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
     el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'more' ? 'More' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
     el.classList.toggle('lens-pop', lens);
+    el.classList.toggle('sheet', sheet);
     if (html !== MENU.html) {
       const list = el.querySelector('.lp-list'), top = list ? list.scrollTop : 0;
       el.innerHTML = html;
@@ -1759,6 +1826,13 @@
     el.hidden = false;
     el.inert = false;
     anchor.setAttribute('aria-expanded', 'true');
+    layerSoon();
+    // A sheet rises from the bottom of the window, wherever its button is.
+    if (sheet) {
+      el.style.left = el.style.top = '';
+      if (MENU.shown !== MENU.open) { el.style.transformOrigin = '50% 100%'; if (MENU.shown) unpop(el); MENU.shown = MENU.open; pop(el, true); }
+      return;
+    }
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
     const left = Math.max(8, Math.min(MENU.open === 'side' || MENU.open === 'chains' || lens || crumb ? r.left : r.right - w, window.innerWidth - w - 8));
     const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
@@ -1861,7 +1935,7 @@
     h += '<div class="code src">';
     s.lines.forEach((text, i) => {
       const ln = i + 1, c = changed.has(ln);
-      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}${file.lang === 'md' ? ' md' : ''}" data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
+      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}${file.lang === 'md' ? ' md' : ''}"${indentAttr(text)} data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
       if (state.peek && state.peek.src && state.peek.src.key === key && state.peek.src.line === ln) h += peekHtml(state.peek);
     });
     return h + '</div>';
@@ -2451,7 +2525,7 @@
       + (previewing ? `<div class="cmp-pre cm-body">${pre}</div>`
         : `<textarea class="cmp-ta" data-draft="${esc(key)}" placeholder="${esc(o.placeholder || (o.local ? 'A note for your agent' : 'Leave a comment'))}" rows="${o.rows || 4}">${esc(drafts.get(key) || '')}</textarea>`)
       + (err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : '') + (o.extra || '')
-      + `<div class="cmp-f"><span class="cmp-hint">${o.dest ? destHtml(o.local) + ' · ' : ''}Markdown · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busy(key)}>Cancel</button>` : ''}${btns}</div></div>`;
+      + `<div class="cmp-f"><span class="cmp-hint">${o.dest ? destHtml(o.local) + ' · ' : ''}Markdown<span class="cmp-key"> · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span></span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busy(key)}>Cancel</button>` : ''}${btns}</div></div>`;
   }
   // The buttons to send a comment: into the pending review, or (with none pending) on its own. In
   // local mode, one: Add note (on a GitHub thread, a note that quotes it).
@@ -2468,6 +2542,8 @@
   // A comment: kind 'review' (in a thread), 'issue' (the conversation) or 'pr' (the description).
   // `first`: it starts a run of comments by one author, so it says who wrote it; the others in the
   // run show only their time. Its tools show under the pointer.
+  // On a touch screen, with no pointer, they're behind a ⋯ instead, as a menu.
+  const cmMoreHtml = (key) => `<button type="button" class="ib cm-more" data-act="menu" data-menu="cm:${esc(key)}" aria-haspopup="menu" aria-expanded="${MENU.open === 'cm:' + key}" title="More" aria-label="More">${ICON.more}</button>`;
   function commentHtml(c, kind, first) {
     const editKey = 'edit:' + c.id;
     const tools = (c.canReact ? iconBtn(ICON.smiley, 'React', `data-act="react-open" data-subject="${esc(c.id)}"`) : '')
@@ -2483,7 +2559,7 @@
     const author = kind !== 'pr' && GH.data && GH.data.pr.author && c.author.login === GH.data.pr.author.login ? '<span class="cm-tag">Author</span>' : '';
     const pending = c.pending ? '<span class="cm-tag pending">Pending</span>' : '';
     const head = first ? `<div class="cm-h"><a class="cm-who" href="${esc(c.author.url)}" target="_blank" rel="noopener noreferrer">${esc(c.author.login)}</a>${author}${when}${pending}</div>` : '';
-    return `<div class="cm${first ? ' first' : ''}${c.pending ? ' pending' : ''}" data-comment="${esc(c.id)}">${first ? avatar(c.author) : '<span></span>'}<div class="cm-main">${head}${!first && c.pending ? pending : ''}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}${reactionsHtml(c)}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>` : ''}</div>`;
+    return `<div class="cm${first ? ' first' : ''}${c.pending ? ' pending' : ''}" data-comment="${esc(c.id)}">${first ? avatar(c.author) : '<span></span>'}<div class="cm-main">${head}${!first && c.pending ? pending : ''}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}${reactionsHtml(c)}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>${cmMoreHtml('gh:' + c.id)}` : ''}</div>`;
   }
   // A review thread, under its line: one quiet block with GitHub's blue on its edge. Resolved
   // threads fold, as on GitHub.
@@ -2514,7 +2590,7 @@
     const sign = (side) => (side === 'LEFT' ? '−' : '+');
     const what = c.startLine != null && (c.startLine !== c.line || c.startSide !== c.side) ? `lines ${sign(c.startSide)}${c.startLine} to ${sign(c.side)}${c.line}` : `line ${sign(c.side)}${c.line}`;
     const local = localMode();
-    return `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on ${what}</b><span class="muted">Drag the + over more lines, or shift-click it on another line of this hunk, for a range.</span></div>`
+    return `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on ${what}</b><span class="muted">${COARSE.matches ? 'Tap another line’s gutter in this hunk for a range.' : 'Drag the + over more lines, or shift-click it on another line of this hunk, for a range.'}</span></div>`
       + composerHtml(c.key, { local, dest: true, mode: true, buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
   }
   // Threads and notes on a side's line of a file, and the comment being written there.
@@ -2524,7 +2600,7 @@
     const list = GH.on && GH.data ? GH.anchors.get(k) : null, notes = NT.data ? NT.anchors.get(k) : null;
     let h = (list ? list.map((t) => threadHtml(t)).join('') : '') + (notes ? notes.map((n) => noteHtml(n)).join('') : '');
     const c = state.compose;
-    if (c && c.path === f.p && c.side === side && c.line === line) h += newThreadHtml(c);
+    if (c && !compact() && c.path === f.p && c.side === side && c.line === line) h += newThreadHtml(c);
     return h;
   }
   // Threads under a unified row: on its new line, and on its old one (a removed or unchanged line).
@@ -2650,7 +2726,7 @@
     const av = lead ? `<span class="nt-n" title="Note ${n.n}: “N${n.n}” names it to your agent">N${n.n}</span>` : mine ? '<span class="av"></span>' : AGENT_AV;
     const head = first ? `<div class="cm-h"><b class="cm-who">${mine ? 'You' : esc(c.by)}</b>${lead ? `<span>${esc(noteLines(n))}</span>` : ''}${tags}${when}</div>` : '';
     const err = NT.errors.get('del:' + id);
-    return `<div class="cm${first ? ' first' : ''}${mine ? '' : ' agent'}" data-comment="${esc(c.id)}">${first ? av : '<span></span>'}<div class="cm-main">${head}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>` : ''}</div>`;
+    return `<div class="cm${first ? ' first' : ''}${mine ? '' : ' agent'}" data-comment="${esc(c.id)}">${first ? av : '<span></span>'}<div class="cm-main">${head}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>${cmMoreHtml('nt:' + id)}` : ''}</div>`;
   }
   // A note under its lines: a thread with orchid on its edge. Resolved notes fold, saying who
   // resolved them: you, or the agent.
@@ -2856,6 +2932,8 @@
     const d = GH.data, n = d && d.pending ? d.pending.comments : 0;
     const open = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
     const label = local ? `Notes${open ? ` <span class="rv-n nt">${open}</span>` : ''}` : n ? `Finish review <span class="rv-n">${n}</span>` : 'Review';
+    const more = $('#vw-more');
+    if (more) more.classList.toggle('has', local ? !!open : !!n);
     const title = local ? 'Your notes, kept on this machine: copy them for your agent, or post them to GitHub' : n ? `Finish your review: ${n} pending comment${n === 1 ? '' : 's'}` : 'Comment on, approve or request changes to the pull request';
     let h = '';
     if (GH.reviewOpen) {
@@ -2895,11 +2973,11 @@
       box.className = `rv-pop${local ? ' local' : ''}`;
       box.setAttribute('aria-label', local ? 'Your notes' : 'Finish your review');
       box.inert = false;
-      box.innerHTML = h;
+      box.innerHTML = (compact() ? SHEET_HANDLE : '') + h;
       fitBoxes(box);
       if (opening) {
         const b = btn.getBoundingClientRect(), r = box.getBoundingClientRect();
-        box.style.transformOrigin = `${Math.round(b.left + b.width / 2 - r.left)}px 0`;
+        box.style.transformOrigin = compact() ? '50% 100%' : `${Math.round(b.left + b.width / 2 - r.left)}px 0`;
         pop(box, true);
       }
     } else if (box && !box.inert) {
@@ -2912,6 +2990,7 @@
       again.focus({ preventScroll: true });
       if (caret) { again.setSelectionRange(caret[0], caret[1]); again.scrollTop = caret[2]; }
     }
+    layerSoon();
   }
   // The menu's switch: new comments go to GitHub, or stay here as notes.
   function modeHtml() {
@@ -2983,9 +3062,10 @@
     if (NT.agentOpen && !list.some((a) => a.name === NT.agentOpen)) NT.agentOpen = null;
     const h = list.map((a) => {
       const open = NT.agentOpen === a.name, label = esc(agentLabel(a));
-      return `<span class="vw-agent-w"><button type="button" class="vw-agent st-${a.state}" data-act="nt-agent" data-agent="${esc(a.name)}" aria-expanded="${open}" aria-haspopup="dialog"><i class="dot"></i><span>${label}</span>${ICON.chevronDown}</button>`
-        + (open ? `<div class="ag-pop st-${a.state}" role="dialog" aria-label="${label}">${agentPopHtml(a)}</div>` : '') + '</span>';
+      return `<span class="vw-agent-w"><button type="button" class="vw-agent st-${a.state}" data-act="nt-agent" data-agent="${esc(a.name)}" aria-expanded="${open}" aria-haspopup="dialog"><i class="dot"></i><span class="ag-l" data-n="${esc(a.name)}">${label}</span>${ICON.chevronDown}</button>`
+        + (open ? `<div class="ag-pop st-${a.state}" role="dialog" aria-label="${label}">${compact() ? SHEET_HANDLE : ''}${agentPopHtml(a)}</div>` : '') + '</span>';
     }).join('');
+    layerSoon();
     if (el.innerHTML === h) return;
     // The button that had the focus keeps it as the labels are drawn again.
     const ae = el.contains(document.activeElement) ? document.activeElement : null;
@@ -3126,6 +3206,183 @@
   // The keyboard's click (a mouse's already opened the composer on its way up).
   addBtn.addEventListener('click', (e) => { e.stopPropagation(); if (Date.now() - dragUp > 400 && addAt) openCompose(addAt, e.shiftKey); });
 
+  // ---------- layers: in a narrow window, Contents, a sheet or Jump to over the view is a step in
+  // the browser's history of its own, so the phone's Back closes it instead of leaving the view. A
+  // view opened from it takes that step's place. A sheet's handle swipes it down.
+  const LAYER = { entry: false, skip: false, soon: false };
+  const SHEET_HANDLE = '<div class="sh-h" aria-hidden="true"></div>';
+  const sheetsOpen = () => !!MENU.open || GH.reviewOpen || !!NT.agentOpen;
+  function layerSoon() {
+    if (LAYER.soon) return;
+    LAYER.soon = true;
+    queueMicrotask(() => {
+      LAYER.soon = false;
+      viewer.classList.toggle('sheet-on', compact() && sheetsOpen());
+      const open = compact() && (SIDE.open || sheetsOpen() || PAL.open || viewer.classList.contains('composing'));
+      if (LAYER.skip || !NAV.hist) return;
+      try {
+        if (open && !LAYER.entry) { history.pushState(Object.assign({}, history.state, { layer: 1 }), ''); LAYER.entry = true; }
+        else if (!open && LAYER.entry) { LAYER.entry = false; LAYER.skip = true; history.back(); }
+      } catch (err) { /* the browser limits how often */ }
+    });
+  }
+  // Back with a layer open: the layer closes, and the view stays as it is.
+  function layersClose() {
+    LAYER.entry = false;
+    if (SIDE.open) sideDrawer(false);
+    if (PAL.open) palClose();
+    if (MENU.open) closeMenu();
+    if (NT.agentOpen) { NT.agentOpen = null; renderAgent(); }
+    if (GH.reviewOpen) { GH.reviewOpen = false; render(); }
+    if (state.compose && compact() && letGo(state.compose.key)) { state.compose = null; render(); }
+  }
+  // A sheet follows a finger down from its handle; let go far enough down, it closes.
+  let sheetDrag = null;
+  document.addEventListener('pointerdown', (e) => {
+    const h = e.target instanceof Element && e.target.closest('.sh-h');
+    const box = h && h.parentElement;
+    if (!box) return;
+    sheetDrag = { box, y: e.clientY, dy: 0, id: e.pointerId };
+    h.setPointerCapture(e.pointerId);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
+    sheetDrag.dy = Math.max(0, e.clientY - sheetDrag.y);
+    sheetDrag.box.style.transform = `translateY(${sheetDrag.dy}px)`;
+  });
+  const sheetLet = () => {
+    if (!sheetDrag) return;
+    const { box, dy } = sheetDrag;
+    sheetDrag = null;
+    box.style.transform = '';
+    if (dy < 64) return;
+    if (box === MENU.el) closeMenu();
+    else if (box.matches('.rv-pop')) { GH.reviewOpen = false; render(); }
+    else if (box.matches('.ag-pop')) { NT.agentOpen = null; renderAgent(); }
+  };
+  document.addEventListener('pointerup', sheetLet);
+  document.addEventListener('pointercancel', sheetLet);
+
+  // ---------- picking lines, on a touch screen: a tap on a line's gutter picks it, and a tap on
+  // another line's gutter in the same hunk stretches to it (as the +, dragged, does with a pointer).
+  // The review bar turns into the lines' bar: Copy, Mark, and Note (or Comment) on them.
+  const PICK = { path: null, a: null, b: null, view: '' };
+  const rowKey = (row) => row.dataset.c || (row.dataset.n ? 'n:' + row.dataset.n : '');
+  // The picked rows, in order, as the page has them now.
+  function pickRows() {
+    if (!PICK.path) return [];
+    const codes = [...main.querySelectorAll('.code[data-p]')].filter((c) => c.dataset.p === PICK.path);
+    for (const code of codes) {
+      const rows = codeRun(code).flatMap((c) => [...c.querySelectorAll(':scope > .ln')]);
+      let i = rows.findIndex((r) => rowKey(r) === PICK.a), j = rows.findIndex((r) => rowKey(r) === PICK.b);
+      if (i < 0 || j < 0) continue;
+      if (i > j) [i, j] = [j, i];
+      return rows.slice(i, j + 1);
+    }
+    return [];
+  }
+  function paintPick() {
+    const rows = new Set(pickRows());
+    main.querySelectorAll('.cm-pick').forEach((x) => { if (!rows.has(x)) x.classList.remove('cm-pick'); });
+    rows.forEach((x) => x.classList.add('cm-pick'));
+    if (PICK.path && !rows.size) pickClear();
+  }
+  function pickClear() {
+    if (!PICK.path) return;
+    PICK.path = PICK.a = PICK.b = null;
+    main.querySelectorAll('.cm-pick').forEach((x) => x.classList.remove('cm-pick'));
+    renderPill();
+  }
+  const hunkOf = (path, row) => { const [sd, line] = (row.dataset.c || '').split(':'); const r = line ? rowAt(path, sd === 'L' ? 'LEFT' : 'RIGHT', Number(line)) : null; return r ? r.hi : null; };
+  main.addEventListener('click', (e) => {
+    if (!COARSE.matches || !(e.target instanceof Element)) return;
+    const cell = e.target.closest('.ln > .g, .ln > .no, .ln > .sg');
+    if (!cell || e.target.closest('button:not(.tick), a')) return;
+    const row = cell.parentElement, code = row.closest('.code[data-p]');
+    if (!code || !rowKey(row)) return;
+    e.stopPropagation();
+    const path = code.dataset.p, key = rowKey(row);
+    const rows = pickRows();
+    if (PICK.path === path && rows.length === 1 && rows[0] === row) return pickClear();
+    if (PICK.path === path && rows.length && codeRun(code).includes(rows[0].closest('.code')) && hunkOf(path, rows[0]) === hunkOf(path, row)) PICK.b = key;
+    else Object.assign(PICK, { path, a: key, b: key, view: viewKey() });
+    paintPick();
+    renderPill();
+  }, true);
+  // The lines' bar, in the review bar's place.
+  function pickBarHtml() {
+    const rows = pickRows();
+    const nos = rows.map((r) => (r.querySelector(':scope > .no') || {}).textContent).filter(Boolean);
+    const what = nos.length > 1 ? `Lines ${nos[0]}–${nos[nos.length - 1]}` : nos.length ? `Line ${nos[0]}` : `${rows.length} lines`;
+    const can = canCommentLines() && rows.some((r) => r.dataset.c);
+    const local = localMode();
+    return `${iconBtn(ICON.close, 'Put the lines back', 'data-act="pick-clear"')}<span class="pick-what"><b>${esc(what)}</b><small>${esc(fileName(PICK.path))}</small></span><span class="sp"></span>`
+      + iconBtn(ICON.copy, 'Copy the lines', 'data-act="pick-copy"') + (pickBlocks().length ? iconBtn(ICON.check, 'Mark their changes reviewed', 'data-act="pick-mark"') : '')
+      + (can ? `<button type="button" class="pill-act pick-note${local ? ' local' : ''}" data-act="pick-note">${ICON.comment}${local ? 'Note' : 'Comment'}</button>` : '');
+  }
+  // The changes the picked rows are in: the marks among them, else the one their run starts with.
+  function pickBlocks() {
+    const rows = pickRows();
+    const ids = new Set(rows.flatMap((r) => [...r.querySelectorAll('.tick[data-block]')].map((t) => t.dataset.block)));
+    if (!ids.size && rows.length) {
+      for (let r = rows[0]; r && r.matches('.ln.add, .ln.del'); r = r.previousElementSibling) {
+        const t = r.querySelector('.tick[data-block]');
+        if (t) { ids.add(t.dataset.block); break; }
+      }
+    }
+    return blocksOf([...ids]);
+  }
+  function pickAct(act) {
+    const rows = pickRows();
+    if (act === 'pick-clear') return pickClear();
+    if (act === 'pick-copy') { copyText(rows.map((r) => (r.querySelector(':scope > .tx') || {}).textContent || '').join('\n'), `Copied ${plural(rows.length, 'line')}.`); return pickClear(); }
+    if (act === 'pick-mark') { const bl = pickBlocks(); toggleBlocks(bl); hint({ mark: bl.map((b) => b.id) }); pickClear(); return render(); }
+    if (act === 'pick-note') {
+      const path = PICK.path, cells = rows.filter((r) => r.dataset.c), at = (r) => { const [sd, line] = r.dataset.c.split(':'); return { path, side: sd === 'L' ? 'LEFT' : 'RIGHT', line: Number(line) }; };
+      if (!cells.length) return;
+      PICK.path = PICK.a = PICK.b = null;
+      main.querySelectorAll('.cm-pick').forEach((x) => x.classList.remove('cm-pick'));
+      return composeRange(at(cells[0]), at(cells[cells.length - 1]));
+    }
+  }
+  // The box you write in, in a narrow window: a sheet held at the bottom of what's visible, over
+  // the keyboard (Safari doesn't shrink the page for it; visualViewport says where it is). The view
+  // above it keeps its lines in sight.
+  let composeLast = '';
+  function renderCompose() {
+    const host = $('#vw-compose');
+    if (!host) return;
+    const c = compact() && state.compose && (GH.on || NT.on) ? state.compose : null;
+    const h = c ? newThreadHtml(c) : '';
+    viewer.classList.toggle('composing', !!h);
+    if (h === composeLast) return;
+    const opening = !composeLast && h;
+    composeLast = h;
+    host.innerHTML = h;
+    host.style.setProperty('--h', host.offsetHeight + 'px');
+    viewer.style.setProperty('--compose-h', host.offsetHeight + 'px');
+    if (opening) requestAnimationFrame(composeInView);
+    layerSoon();
+  }
+  function composeInView() {
+    if (!viewer.classList.contains('composing')) return;
+    const sel = main.querySelectorAll('.cm-sel');
+    const last = sel[sel.length - 1];
+    if (last) placeRow(last, Math.max(8, main.clientHeight - last.offsetHeight - 12));
+  }
+  const VV = window.visualViewport;
+  function keyboardInset() {
+    if (!VV) return;
+    const kb = Math.max(0, Math.round(window.innerHeight - VV.height - VV.offsetTop));
+    document.documentElement.style.setProperty('--kb', kb + 'px');
+    document.documentElement.style.setProperty('--vvh', Math.round(VV.height) + 'px');
+    document.documentElement.style.setProperty('--vvt', Math.round(VV.offsetTop) + 'px');
+    const host = $('#vw-compose');
+    if (host && host.childElementCount) viewer.style.setProperty('--compose-h', host.offsetHeight + 'px');
+    composeInView();
+  }
+  if (VV) { VV.addEventListener('resize', keyboardInset); VV.addEventListener('scroll', keyboardInset); keyboardInset(); }
+
   // ---------- going back: each view the page moves to is a step in the browser's history, so Back
   // (the header's arrow, the browser's, Alt ←, a mouse's back button) brings back the view before,
   // scrolled where it was, with its sidebar tab. Without the browser's history, the steps are the
@@ -3156,7 +3413,7 @@
         const s0 = history.state;
         if (s0 && s0.untangle && s0.at > 0) e.at = s0.at;
         history.replaceState(navState(e), '');
-      } else if (NAV.hist) history.pushState(navState(e), '');
+      } else if (NAV.hist && LAYER.entry) { history.replaceState(navState(e), ''); LAYER.entry = false; } else if (NAV.hist) history.pushState(navState(e), '');
     } catch (err) { NAV.hist = false; }
     NAV.stack[e.at] = e;
     NAV.at = e.at;
@@ -3192,7 +3449,11 @@
     const prev = NAV.stack[NAV.at - 1];
     if (prev) navGo(navState(prev));
   }
-  window.addEventListener('popstate', (e) => { if (e.state && e.state.untangle && e.state.view) navGo(e.state); });
+  window.addEventListener('popstate', (e) => {
+    if (LAYER.skip) { LAYER.skip = false; return layerSoon(); }
+    if (LAYER.entry) return layersClose();
+    if (e.state && e.state.untangle && e.state.view) navGo(e.state);
+  });
   const navBackHtml = () => {
     if (NAV.at <= 0) return '';
     const to = NAV.stack[NAV.at - 1];
@@ -3222,6 +3483,8 @@
     const path = (hide ? [crumb(hide - 1, '…')] : []).concat(dirs.slice(hide).map((d, i) => crumb(hide + i, d))).join('<i>/</i>');
     return `<button type="button" data-tab="files" title="Show the files">Files</button>${SEP}${dirs.length ? `<span class="path">${path}</span>${SEP}` : ''}<b title="${esc(p)}">${esc(fileName(p))}</b>`;
   };
+  // A file's path, its folders and its name apart: a narrow window shows the name first.
+  const pathHtml = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? `<span class="pname">${esc(p)}</span>` : `<span class="pdir">${esc(p.slice(0, i + 1))}</span><span class="pname">${esc(p.slice(i + 1))}</span>`; };
   // A chain's name with its owner apart: "BridgeMcpServer." and "logPath".
   const splitName = (name) => { const m = /^(_?[A-Z][\w$]*\.)(.+)$/.exec(name); return m ? { own: m[1], name: m[2] } : { own: '', name }; };
   // A commit's chain, and the step that gathers a commit's other changes, are named in words.
@@ -3250,7 +3513,7 @@
     shown.forEach((b) => {
       const f = b.file;
       const hunk = f.hunks[b.hunk];
-      if (f !== lastFile) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; lastFile = f; }
+      if (f !== lastFile) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${pathHtml(f.p)}</button></div>`; lastFile = f; }
       // Each edit's rows, extended to its whole syntax nodes, with one line of context.
       // Small changes are shown whole.
       const keep = new Set();
@@ -3952,7 +4215,7 @@
     if (!el || state.view.kind !== 'chain') return;
     const c = M().chains[state.view.id], i = c ? hereNode(c) : null, n = i != null && c.graph.nodes[i];
     const h = n ? `Reading <b>${esc(nodeLabels(n).l2)}</b> · ${GD.order.indexOf(i) + 1} of ${c.graph.nodes.length}` : '';
-    if (el.innerHTML !== h) el.innerHTML = h;
+    if (el.innerHTML !== h) { el.innerHTML = h; renderWhere(); }
   }
   // As the code scrolls the graph under the header, its last stretch shrinks toward the graph's
   // button, which takes it once it's gone (a pulse). Scrolling back up plays it back.
@@ -4382,7 +4645,7 @@
     h += '<div class="code">';
     let last = null;
     res.slice(0, 400).forEach(({ f, b, hunk, i }) => {
-      if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; last = f; }
+      if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${pathHtml(f.p)}</button></div>`; last = f; }
       const meta = hunk.meta[i], [, text, ranges] = hunk.rows[i];
       const n = meta.t !== '-' ? meta.n : null, oldNo = meta.t === '-' ? meta.o : null;
       // Each line as the diff shows it, its changed tokens and names that peek at their
@@ -4873,7 +5136,7 @@
     const threadsOn = GH.on || NT.on;
     const openNotes = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
     const openThreads = GH.on && !GH.data && !GH.error ? '…' : (GH.data ? GH.data.threads.filter((x) => !x.resolved).length : 0) + openNotes;
-    let h = `<div class="sb-top"><div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
+    let h = `<div class="sb-top">${compact() ? `<div class="sb-pr">${prHtml(true)}</div>` : ''}<div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
       + (t.open ? `<b>${t.open}</b><span>change${t.open === 1 ? '' : 's'} to review</span>` : `<b>${ICON.check}</b><span>All ${t.total} changes reviewed</span>`)
       + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where your marks are kept" aria-label="Marks" aria-haspopup="dialog" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
       // Four tabs fit the sidebar without their counts: they show when it's wider.
@@ -5539,7 +5802,17 @@
         prevRow = row;
       }
     });
-    root.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount));
+    if (!wrapOn()) { root.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount)); return; }
+    const cols = Math.max(16, Math.floor((main.clientWidth - 66 - 12) / (codeSize() * 0.6)));
+    root.querySelectorAll('.code').forEach((c) => {
+      let rows = 0;
+      for (const el of c.children) {
+        const tx = el.matches('.ln') && el.querySelector(':scope > .tx');
+        const len = tx ? tx.textContent.length : 0, ind = tx ? indentOf(tx.textContent) : 0;
+        rows += len <= cols ? 1 : 1 + Math.ceil((len - cols) / Math.max(8, cols - ind - 2));
+      }
+      c.style.setProperty('--rows', rows);
+    });
   }
   // ---------- a view drawn again: in place, what's the same kept as the browser drew it. Drawn
   // anew, a block of code is as tall as its rows until it shows (a hunk's divider is taller), and
@@ -5644,7 +5917,13 @@
     if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     renderTop();
-    viewer.classList.toggle('split', state.layout === 'split');
+    renderWhere();
+    renderCompose();
+    paintPick();
+    // Contents closes once what was chosen in it is open.
+    if (SIDE.open && viewKey() !== SIDE.at) sideDrawer(false);
+    if (PICK.path && PICK.view !== viewKey()) { PICK.path = PICK.a = PICK.b = null; }
+    viewer.classList.toggle('split', sideBySide());
     if (opts.line) {
       const el = main.querySelector(`[data-n="${opts.line}"]`);
       if (el) placeRow(el, headH() + 60); else main.scrollTop = opts.top ? 0 : keep;
@@ -5710,6 +5989,11 @@
   function renderTop() {
     const el = $('#vw-title');
     if (!el) return;
+    const h = prHtml();
+    if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
+  }
+  // `head`: Contents' head, in a narrow window: its state and commit on a line, then its title.
+  function prHtml(head) {
     const raw = M().raw.title || '';
     const m = /^#(\d+)\s+(.*)$/.exec(raw);
     // `code` in a title reads as code.
@@ -5717,12 +6001,25 @@
     const name = m ? `<span class="t-num">#${m[1]}</span>${words(m[2])}` : words(raw);
     const pr = GH.data && GH.data.pr;
     const st = pr ? (pr.draft ? 'draft' : String(pr.state || '').toLowerCase()) : '';
-    const head = (CONFIG.head || M().raw.right || '').slice(0, 7);
-    const h = (CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`)
-      + (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
-      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="menu" data-menu="lens" aria-haspopup="dialog" aria-expanded="${MENU.open === 'lens'}" title="${state.lens ? `Only these changes count: ${esc(lensLabel())}. Pick others, or all of them` : 'Changes from every commit: pick some to review only theirs'}"><span>${state.lens ? esc(lensLabel()) : esc(head)}</span>${ICON.chevronDown}</button>` : esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
+    const sha = (CONFIG.head || M().raw.right || '').slice(0, 7);
+    const title = CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`;
+    const facts = (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
+      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="menu" data-menu="lens" aria-haspopup="dialog" aria-expanded="${MENU.open === 'lens'}" title="${state.lens ? `Only these changes count: ${esc(lensLabel())}. Pick others, or all of them` : 'Changes from every commit: pick some to review only theirs'}"><span>${state.lens ? esc(lensLabel()) : esc(sha)}</span>${ICON.chevronDown}</button>` : esc(sha)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
       + `<span class="t-unsaved" title="${esc(unsavedWhy)}">Marks not saved</span>`;
-    if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
+    return head ? `<div class="sb-pr-row">${facts}</div>${title}` : title + facts;
+  }
+  // The app bar, in a narrow window, names where you are: the view, and under it what the
+  // header says about your place in it (the member being read), else its facts.
+  let whereHtml = '';
+  function renderWhere() {
+    const el = $('#vw-where');
+    if (!el || !compact()) return;
+    const crumbs = main.querySelector('.fv-head .crumbs'), here = main.querySelector('.fv-head .fv-here'), facts = main.querySelector('.fv-head .facts');
+    const names = crumbs ? [...crumbs.querySelectorAll('b')] : [];
+    const title = (names.length ? names[names.length - 1].textContent : crumbs ? crumbs.textContent : '').trim() || (M().raw.title || '');
+    const sub = here && here.textContent.trim() ? here.textContent.replace(/^Reading\s+/, '').trim() : facts ? facts.textContent.replace(/\s+/g, ' ').trim() : '';
+    const h = `<b>${esc(title)}</b><small>${esc(sub)}</small>`;
+    if (h !== whereHtml) { el.innerHTML = h; whereHtml = h; }
   }
   function openFile(path, line) {
     state.view = { kind: 'file', path };
@@ -5736,7 +6033,7 @@
     }
     render(line ? { line: Number(line), top: true } : { top: true });
   }
-  const headH = () => { const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
+  const headH = () => { if (compact()) return 0; const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
   // Puts a row y pixels below the top of the code pane. Rows off screen only estimate their
   // height until they're drawn (a long line wraps when side by side), so the row is put there
   // again once the rows around it have been drawn.
@@ -5960,7 +6257,9 @@
     const el = $('#vw-pill');
     if (!el) return;
     let h = '';
-    if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav], .ol-row[data-mark]')) {
+    el.classList.toggle('pick', !!PICK.path);
+    if (PICK.path) h = pickBarHtml();
+    else if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav], .ol-row[data-mark]')) {
       const marks = changeMarks(true);
       const total = marks.reduce((x, m) => x + openIn(m), 0);
       if (total) {
@@ -5968,7 +6267,7 @@
         let at = cur ? marks.indexOf(cur) : firstWhere(marks, (m) => rowOf(m).getBoundingClientRect().top >= ref - 4);
         if (at >= marks.length) at = -1;
         const n = at < 0 ? total : marks.slice(0, at).reduce((x, m) => x + openIn(m), 0) + 1;
-        h = `${iconBtn(ICON.chevronLeft, 'Previous change to review (k)', 'data-act="pill-step" data-step="-1"')}<span class="pill-n" aria-live="polite"><b>${n}</b> of ${total}</span>${iconBtn(ICON.chevronRight, 'Next change to review (j)', 'data-act="pill-step" data-step="1"')}<span class="pill-sep"></span><button type="button" class="pill-act" data-act="mark-next" title="Mark the change you’re on reviewed, and go to the next one">Mark and go to the next<kbd>Space</kbd></button>`;
+        h = `${iconBtn(ICON.chevronLeft, 'Previous change to review (k)', 'data-act="pill-step" data-step="-1"')}<span class="pill-n" aria-live="polite"><b>${n}</b> of ${total}</span>${iconBtn(ICON.chevronRight, 'Next change to review (j)', 'data-act="pill-step" data-step="1"')}<span class="pill-sep"></span>${canCommentLines() ? `<button type="button" class="ib pill-note" data-act="comment-here" title="${localMode() ? 'Write a note' : 'Comment'} on the change you’re on (c)" aria-label="${localMode() ? 'Write a note' : 'Comment'} on the change you’re on">${ICON.comment}</button>` : ''}<button type="button" class="pill-act" data-act="mark-next" title="Mark the change you’re on reviewed, and go to the next one"><span class="pill-l" data-s="Mark and next">Mark and go to the next</span><kbd>Space</kbd></button>`;
       } else {
         const nx = nextUnreviewed();
         h = `<span class="pill-msg">${lensOn() && !main.querySelector('.tick[data-block]:not(.lens-out)') ? 'Nothing in the lens here' : 'All reviewed here'}</span>${nx ? '<button type="button" class="pill-act" data-act="next-open" title="The next chain with changes to review">Next chain<kbd>n</kbd></button>' : ''}`;
@@ -6284,7 +6583,7 @@
         const i = f.p.lastIndexOf('/') + 1;
         const st = gen ? null : stats(f.blocks);
         // A match in the file's name counts more than one in its folders.
-        out.files.push({ score: r.score + (r.at.length && r.at[0] >= i ? 300 : 0) + (st && st.open ? 40 : 0) - (gen ? 200 : 0), icon: ICON.file, html: `<span class="dir">${matched(f.p.slice(0, i), r.at)}</span>${matched(f.p.slice(i), r.at, i)}`, hint: gen ? 'generated' : st.open ? `${st.open} to review` : 'reviewed', go: () => openFile(f.p) });
+        out.files.push({ score: r.score + (r.at.length && r.at[0] >= i ? 300 : 0) + (st && st.open ? 40 : 0) - (gen ? 200 : 0), icon: ICON.file, html: `<span class="dir">${matched(f.p.slice(0, i), r.at)}</span><span class="fn">${matched(f.p.slice(i), r.at, i)}</span>`, hint: gen ? 'generated' : st.open ? `${st.open} to review` : 'reviewed', go: () => openFile(f.p) });
       };
       m.files.forEach((f) => add(f, false));
       m.generated.forEach((f) => add(f, true));
@@ -6337,6 +6636,8 @@
   function palDraw() {
     const q = PAL.q.trim().toLowerCase();
     PAL.scopeBtn.textContent = SCOPE_WORD[PAL.scope];
+    const scopes = PAL.el.querySelector('.pal-scopes');
+    if (scopes) scopes.innerHTML = SCOPES.filter((k) => (k !== 'symbols' || CONFIG.served) && (k !== 'threads' || GH.on || NT.on)).map((k) => `<button type="button" class="chip-btn${PAL.scope === k ? ' on' : ''}" data-scope-to="${k}" aria-pressed="${PAL.scope === k}">${SCOPE_WORD[k]}</button>`).join('');
     const symOn = CONFIG.served && (PAL.scope === 'all' || PAL.scope === 'symbols');
     if (symOn && q.length >= 2) palSymbols(q);
     const c = palCandidates(q);
@@ -6398,8 +6699,8 @@
       el.setAttribute('role', 'dialog');
       el.setAttribute('aria-label', 'Jump to');
       el.hidden = true;
-      el.innerHTML = `<div class="pal-in">${ICON.search}<input type="text" placeholder="Jump to a chain, file, symbol or thread" aria-label="Jump to" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"><button type="button" class="pal-scope" title="Only chains, files, symbols or threads (Tab)"></button></div>`
-        + `<div class="pal-list" id="pal-list" role="listbox" aria-label="Results"></div><div class="pal-f"><span><kbd>↑</kbd><kbd>↓</kbd>choose</span><span><kbd>Enter</kbd>open</span><span><kbd>Tab</kbd>only chains, files, symbols or threads</span><span><kbd>Esc</kbd>close</span></div>`;
+      el.innerHTML = `<div class="pal-in"><button type="button" class="ib pal-back" title="Close" aria-label="Close">${ICON.back}</button>${ICON.search}<input type="text" placeholder="Jump to a chain, file, symbol or thread" aria-label="Jump to" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"><button type="button" class="pal-scope" title="Only chains, files, symbols or threads (Tab)"></button></div>`
+        + `<div class="pal-scopes" role="group" aria-label="Look in"></div><div class="pal-list" id="pal-list" role="listbox" aria-label="Results"></div><div class="pal-f"><span><kbd>↑</kbd><kbd>↓</kbd>choose</span><span><kbd>Enter</kbd>open</span><span><kbd>Tab</kbd>only chains, files, symbols or threads</span><span><kbd>Esc</kbd>close</span></div>`;
       viewer.appendChild(el);
       Object.assign(PAL, { el, input: el.querySelector('input'), list: el.querySelector('.pal-list'), scopeBtn: el.querySelector('.pal-scope') });
       PAL.input.addEventListener('input', () => { PAL.q = PAL.input.value; PAL.active = 0; palDraw(); });
@@ -6412,6 +6713,8 @@
         else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); palClose(); }
       });
       PAL.scopeBtn.addEventListener('click', () => { palScope(1); PAL.input.focus(); });
+      el.querySelector('.pal-back').addEventListener('click', palClose);
+      el.querySelector('.pal-scopes').addEventListener('click', (e) => { const b = e.target.closest('[data-scope-to]'); if (b) { PAL.scope = b.dataset.scopeTo; PAL.active = 0; palDraw(); } });
       PAL.list.addEventListener('mousemove', (e) => { const r = e.target.closest('[data-pi]'); if (r && Number(r.dataset.pi) !== PAL.active) { PAL.active = Number(r.dataset.pi); palMark(); } });
       PAL.list.addEventListener('click', (e) => { const r = e.target.closest('[data-pi]'); if (r) palGo(Number(r.dataset.pi)); });
     }
@@ -6426,12 +6729,14 @@
     palDraw();
     PAL.input.focus();
     PAL.input.select();
+    layerSoon();
   }
   function palClose() {
     if (!PAL.open) return;
     PAL.open = false;
     PAL.el.hidden = true;
     scrim(null);
+    layerSoon();
   }
 
   // ---------- events
@@ -6696,7 +7001,7 @@
   });
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],[data-detail],.ref');
-    if (t && t.closest('.menu') && t.dataset.act !== 'crumb-dir') closeMenu();
+    if (t && t.closest('.menu') && t.dataset.act !== 'crumb-dir' && t.dataset.act !== 'code-size') closeMenu();
     if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
     const m = M();
@@ -6888,6 +7193,8 @@
     }
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
+    if (act === 'comment-here') return commentHere();
+    if (act && act.startsWith('pick-')) return pickAct(act);
     if (act === 'graph') {
       // In the page at the top, the click folds it; anywhere else it drops it, kept, or folds it back.
       clearTimeout(GD.enterT); GD.enterT = 0;
@@ -6928,6 +7235,9 @@
     }
     if (act === 'minimap') { UI.minimap = !UI.minimap; saveUI(); return mini.update(); }
     if (act === 'side-toggle') return toggleSide();
+    if (act === 'wrap') { UI.wrap = !wrapOn(); saveUI(); applyCode(); return render(); }
+    if (act === 'code-size') { UI.codeSize = Math.min(16, Math.max(10, Math.round(codeSize()) + Number(d.step))); saveUI(); applyCode(); MENU.html = ''; renderMenu(); return render(); }
+    if (act === 'shade') { if (SIDE.open) sideDrawer(false); return; }
     if (act === 'threads-fold') {
       const folded = new Set(Array.isArray(UI.foldedThreads) ? UI.foldedThreads : []);
       folded.has(d.key) ? folded.delete(d.key) : folded.add(d.key);
@@ -7059,6 +7369,7 @@
     if (mod && (e.key === 'b' || e.key === 'B') && !typingIn(e.target)) { e.preventDefault(); return toggleSide(); }
     if (e.altKey && e.key === 'ArrowLeft' && !NAV.hist && NAV.at > 0 && !typingIn(e.target)) { e.preventDefault(); return navBack(); }
     if (e.key === 'Escape') {
+      if (SIDE.open) return sideDrawer(false);
       if (keysEl && !keysEl.hidden) return toggleKeys(false);
       if (PAL.open) return palClose();
       if (MENU.open) return closeMenu();
@@ -7066,6 +7377,7 @@
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
       if (NT.agentOpen) { NT.agentOpen = null; return renderAgent(); }
       if (state.peek) { state.peek = null; return render(); }
+      if (PICK.path) return pickClear();
       if (HX && HX.detail && state.view.kind === 'history') { HX.detail = null; return render(); }
       if (state.card && state.view.kind === 'chain' && main.querySelector('.hs-detail')) { state.card = null; return render(); }
       if (state.lens) return setLens(null);
@@ -7142,10 +7454,36 @@
     split.title = UI.sideOff ? 'Drag to show the sidebar' : 'Drag to resize the sidebar; double-click to hide it';
   }
   function toggleSide() {
+    if (compact()) return sideDrawer(!SIDE.open);
     UI.sideOff = !UI.sideOff;
     saveUI();
     applySide();
     mini.update();
+  }
+  // Contents, over the view in a narrow window: out of reach while it's closed, and closed again
+  // once the window is wide.
+  function sideDrawer(open) {
+    SIDE.open = open && compact();
+    SIDE.at = viewKey();
+    viewer.classList.toggle('side-on', SIDE.open);
+    side.inert = compact() && !SIDE.open;
+    const btn = $('#vw-contents');
+    if (btn) btn.setAttribute('aria-expanded', String(SIDE.open));
+    if (SIDE.open) {
+      renderSide();
+      const cur = side.querySelector('[aria-current="true"]');
+      if (cur) cur.scrollIntoView({ block: 'center' });
+      (cur || side.querySelector('[role="tab"][aria-selected="true"]') || side).focus({ preventScroll: true });
+    } else if (side.contains(document.activeElement)) ($('#vw-contents') || main).focus({ preventScroll: true });
+    layerSoon();
+  }
+  COMPACT.addEventListener('change', () => { sideDrawer(false); applyCode(); render(); });
+  PHONE.addEventListener('change', () => { applyCode(); render(); });
+  // Code's settings in a narrow window: wrapped or not, and its size (the rows follow it).
+  function applyCode() {
+    viewer.classList.toggle('wrap', wrapOn());
+    if (compact() && UI.codeSize) viewer.style.setProperty('--code-fs', UI.codeSize + 'px');
+    else viewer.style.removeProperty('--code-fs');
   }
   let resizing = null;
   split.addEventListener('pointerdown', (e) => {
@@ -7188,6 +7526,8 @@
   });
   window.addEventListener('resize', () => { applySide(); mini.update(); });
   applySide();
+  sideDrawer(false);
+  applyCode();
 
   // ---------- the minimap: the view's rows drawn small at the right of the code, with the diff's
   // colors, amber for what's left to review and blue for threads, and the part on screen. A click

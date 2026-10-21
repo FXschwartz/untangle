@@ -5,6 +5,14 @@ export async function rest(page: Browser): Promise<void> {
   for (let i = 0; i < 4; i += 1) await page.key('Escape');
 }
 
+/** In a narrow window the sidebar is Contents, a drawer: opens it there, unless it's open already. */
+export async function contents(page: Browser): Promise<void> {
+  const shut = await page.eval(`getComputedStyle(document.querySelector('#vw-contents')).display !== 'none' && !document.querySelector('#viewer').classList.contains('side-on')`);
+  if (!shut) return;
+  await page.click('#vw-contents');
+  await page.until(`document.querySelector('#viewer').classList.contains('side-on')`);
+}
+
 export async function read(page: Browser, expression: string): Promise<string> {
   return String(await page.eval(expression));
 }

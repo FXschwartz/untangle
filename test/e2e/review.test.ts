@@ -9,7 +9,7 @@ import { reviewClient, waitForReview, type ReviewClient } from '../helpers/http.
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
-import { read, rest, waitForSave } from './page.ts';
+import { contents, read, rest, waitForSave } from './page.ts';
 
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
@@ -62,6 +62,7 @@ const fits = `(() => { const root = document.documentElement; const box = docume
 const tail = `[(document.querySelector('.hh-tail .hh-tx')?.textContent ?? ''), (document.querySelector('.hh-tail .mo')?.textContent ?? '')].join('\\n')`;
 
 async function chain(page: Browser, name: string): Promise<void> {
+  await contents(page);
   await page.click('[data-tab="chains"]');
   await page.until(`!!document.querySelector('[data-chain]')`);
   const id = await read(page, `([...document.querySelectorAll('[data-chain]')].find((el) => (el.textContent || '').includes(${JSON.stringify(name)})) || {}).dataset?.chain ?? ''`);
@@ -87,6 +88,7 @@ async function jump(page: Browser, query: string): Promise<void> {
 }
 
 async function openFile(page: Browser, file: string): Promise<void> {
+  await contents(page);
   await page.click('[data-tab="files"]');
   await page.until(`!!document.querySelector(${JSON.stringify(`[data-open="${file}"]`)})`);
   await page.click(`[data-open="${file}"]`);
