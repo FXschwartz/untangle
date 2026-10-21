@@ -809,6 +809,8 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .vw-main .code { content-visibility: auto; contain-intrinsic-width: auto 0px; contain-intrinsic-height: auto calc(var(--rows, 40) * 20.625px); }
 .ln { display: flex; align-items: flex-start; }
 .code > .ln, .code > .sl { content-visibility: auto; contain-intrinsic-size: auto 20.625px; }
+/* A test's code is short, and opens under its sentence: it shows on its first frame. */
+.vw-main .code.ol-code, .code.ol-code > .ln, .code.ol-code > .sl { content-visibility: visible; }
 .code > .ln :focus-visible, .code > .sl :focus-visible { outline-offset: -2px; }
 .ln .g, .sl .g { display: flex; align-items: center; justify-content: center; width: var(--gut); height: var(--row); flex: none; background: var(--sheet); }
 /* Scrolled sideways, the gutter stays at the left edge, over the code. Only then: a gutter stuck

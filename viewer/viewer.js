@@ -1114,7 +1114,7 @@
     // Still opening: it carries on to its height from where it got to.
     el.getAnimations().forEach((a) => a.finish());
     const h1 = el.getBoundingClientRect().height;
-    if (moving() && Math.abs(h1 - h0) > 3) el.animate([{ height: h0 + 'px' }, { height: h1 + 'px' }], { duration: 200, easing: EASE });
+    if (moving() && Math.abs(h1 - h0) > 3) unanchored(el.animate([{ height: h0 + 'px' }, { height: h1 + 'px' }], { duration: 200, easing: EASE }));
     mini.update();
   }
   function cachedPeekTarget(p, t, side) {
@@ -5261,6 +5261,17 @@
     for (const x of now) { if (had.has(x.k)) { growRows(grow, 0, wait); grow = []; } else grow.push(x.el); }
     growRows(grow, 0, wait);
   }
+  // While the page's own motion opens or closes something, the browser doesn't move the page to
+  // keep what's below it in place. It anchors on what isn't sticky, and an outline's rows and a
+  // test's code are (they stay put as the pane scrolls sideways): opening a test with its row half
+  // under the header, the page would follow the code past it, and jump by the test's height.
+  let unanchoring = 0;
+  function unanchored(a) {
+    if (!unanchoring++) main.style.overflowAnchor = 'none';
+    const back = () => { if (!--unanchoring) main.style.overflowAnchor = ''; };
+    a.finished.then(back, back);
+    return a;
+  }
   // A gap that closes: the space something left, shrinking to nothing (with what was there, fading).
   function closeGap(after, h, content, delay) {
     const ghost = document.createElement('div');
@@ -5277,10 +5288,13 @@
     }
     after.after(ghost);
     const done = () => { ghost.remove(); mini.update(); };
-    ghost.animate([{ height: h + 'px' }, { height: '0px' }], { duration: 280, delay: delay || 0, easing: EASE, fill: 'backwards' }).finished.then(done, done);
+    unanchored(ghost.animate([{ height: h + 'px' }, { height: '0px' }], { duration: 280, delay: delay || 0, easing: EASE, fill: 'backwards' })).finished.then(done, done);
     return ghost;
   }
-  // Rows that just appeared open downward from what's above them, and fade in as they do.
+  // Code new to the page paints its rows a frame late (they skip painting off screen, see .code), so
+  // it fades in, once it's there. A test's code and anything else show as their space opens.
+  const late = (el) => (el.matches('.code, .ln, .sl') && !el.closest('.ol-code')) || !!el.querySelector('.code:not(.ol-code)');
+  // Rows that just appeared open downward from what's above them.
   function growRows(rows, fromH, delay) {
     if (!rows.length) return;
     const wrap = document.createElement('div');
@@ -5290,8 +5304,8 @@
     const h = wrap.getBoundingClientRect().height;
     if (h - (fromH || 0) < 3) { wrap.replaceWith(...wrap.childNodes); return; }
     const unwrap = () => { if (wrap.isConnected) wrap.replaceWith(...wrap.childNodes); mini.update(); };
-    wrap.animate([{ height: (fromH || 0) + 'px' }, { height: h + 'px' }], { duration: 280, delay: delay || 0, easing: EASE, fill: 'backwards' }).finished.then(unwrap, unwrap);
-    if (!fromH) wrap.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 80 + (delay || 0), easing: EASE, fill: 'backwards' });
+    unanchored(wrap.animate([{ height: (fromH || 0) + 'px' }, { height: h + 'px' }], { duration: 280, delay: delay || 0, easing: EASE, fill: 'backwards' })).finished.then(unwrap, unwrap);
+    if (!fromH && rows.some(late)) wrap.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 80 + (delay || 0), easing: EASE, fill: 'backwards' });
   }
   const popTick = (t) => t.animate([{ backgroundColor: '#58C597', transform: 'scale(1.2)' }, { backgroundColor: 'rgba(88, 197, 151, 0)', transform: 'scale(1)' }], { duration: 420, easing: EASE });
   // A section after its changes were marked: folded (its old rows settle as reviewed, then fold into
@@ -5333,11 +5347,11 @@
     const el = main.querySelector(PEEK);
     if (state.peek && el && snap.peek && snap.peek.anchor === peekKey(state.peek)) {
       const h = el.getBoundingClientRect().height;
-      if (Math.abs(h - snap.peek.h) > 3) el.animate([{ height: snap.peek.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE });
+      if (Math.abs(h - snap.peek.h) > 3) unanchored(el.animate([{ height: snap.peek.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE }));
     } else if (state.peek && el && state.peek !== shownPeek) {
       const r = el.getBoundingClientRect();
       if (clickX != null) el.style.transformOrigin = `${Math.max(0, Math.min(r.width, clickX - r.left))}px 0`;
-      el.animate([{ height: '0px', opacity: 0, transform: 'scale(.97) translateY(-4px)' }, { height: r.height + 'px', opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
+      unanchored(el.animate([{ height: '0px', opacity: 0, transform: 'scale(.97) translateY(-4px)' }, { height: r.height + 'px', opacity: 1, transform: 'none' }], { duration: 200, easing: EASE }));
     } else if (!state.peek && snap.peek) {
       const at = snap.peek.place();
       if (at) {
@@ -5359,7 +5373,7 @@
       const h = el.getBoundingClientRect().height;
       el.style.overflow = 'hidden';
       const open = () => { el.style.overflow = ''; };
-      el.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 200, easing: EASE }).finished.then(open, open);
+      unanchored(el.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 200, easing: EASE })).finished.then(open, open);
     }
     if (was && was !== now) {
       const row = main.querySelector(`.hs-main[data-detail="${CSS.escape(was)}"]`)?.closest('.hs-row') || (!snap.detail.el.matches('.solo') ? null : snap.detail.place());
@@ -5410,9 +5424,9 @@
       b.body[0].before(g);
       fadeOut(g);
     } else if (!a.body.length && b.body.length) {
-      el.animate([{ height: was.h + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE });
+      unanchored(el.animate([{ height: was.h + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE }));
       b.body.forEach(fadeIn);
-    } else el.animate([{ height: was.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE });
+    } else unanchored(el.animate([{ height: was.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE }));
   }
   // A file's threads or notes off its diff: what follows their toggle, up to the next one.
   function awayOf(btn) {
@@ -5430,7 +5444,7 @@
     else if (h - a.h > 3 && items.length && !a.items.length) {
       box.style.overflow = 'hidden';
       const open = () => { box.style.overflow = ''; };
-      box.animate([{ height: a.h + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE }).finished.then(open, open);
+      unanchored(box.animate([{ height: a.h + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE })).finished.then(open, open);
       items.forEach(fadeIn);
     }
   }

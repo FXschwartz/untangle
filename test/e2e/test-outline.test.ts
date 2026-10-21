@@ -966,3 +966,73 @@ describe('Given a served review by commit: a discount with its tests, more tests
     });
   });
 });
+
+// Ten tests and a helper outside them, all new in one commit: in the commit's chain the helper's
+// code follows the tests' rows, which are sticky (they stay put as the pane scrolls sideways), so
+// the browser would keep that code in place, rather than a row, as a test opens.
+const expects = (n: number) => Array.from({ length: 24 }, (_, k) => `    expect(twice(${n} + ${k}), ${2 * n} + ${2 * k});\n`).join('');
+const tenTests = Array.from({ length: 10 }, (_, i) => `  test('when ${i + 1} is doubled, then it is ${2 * (i + 1)}.', () {\n${expects(i + 1)}  });\n`).join('');
+const helper = (body: string) => `\nint twice(int x) {\n${body}}\n`;
+const helperLines = (n: number) => Array.from({ length: n }, (_, i) => `  // step ${i + 1}\n`).join('') + '  return x * 2;\n';
+
+describe('Given a served review of a commit with ten tests and a helper after them, with motion on, ', { skip, timeout: 180_000 }, () => {
+  let repo: TempRepo | undefined;
+  let run: UntangleRun | undefined;
+  let page: Browser | undefined;
+  let cache = '';
+
+  before(async () => {
+    repo = TempRepo.create();
+    repo.write('pubspec.yaml', pubspec);
+    repo.write('lib/cart.dart', cart());
+    repo.write('test/twice_test.dart', `void main() {\n}\n${helper('  return x + x;\n')}`);
+    const start = ada('2020-10-01T15:00:00Z');
+    repo.commit({ subject: 'Start the doubling', author: start, committer: start });
+    repo.branch('feature');
+    repo.write('test/twice_test.dart', `void main() {\n${tenTests}}\n${helper(helperLines(160))}`);
+    const next = ada('2020-10-02T15:00:00Z');
+    repo.commit({ subject: 'test: Double ten numbers', author: next, committer: next });
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, args: ['-chains', 'history'] });
+    await waitForReview(reviewClient(run.url));
+    page = await launchBrowser(1400, 800);
+    await page.reducedMotion(false);
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('.t-head')`, 30_000);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when a test opens with its row half under the header, the helper’s code on screen below, ', () => {
+    let opening = '';
+    let moved = '';
+
+    before(async () => {
+      await openChain(page!, 'Double ten numbers');
+      const row = await rowSelector(page!, 'when 6 is doubled, then it is 12.');
+      // Its top 10 px under the header, once the chain's graph has folded into it.
+      const place = `(() => { const main = document.querySelector('#vw-main'), r = document.querySelector('${row}'); main.scrollTop += r.getBoundingClientRect().top - main.getBoundingClientRect().top - document.querySelector('.fv-head').offsetHeight + 10; return Math.round(r.getBoundingClientRect().top); })()`;
+      let top = await read(page!, place);
+      for (let i = 0; i < 5; i++) {
+        await page!.eval(`new Promise((done) => setTimeout(done, 300))`);
+        const again = await read(page!, place);
+        if (again === top) break;
+        top = again;
+      }
+      const shown = await read(page!, `(() => { const out = document.querySelector('#vw-main .ol-out .code'); const r = out.getBoundingClientRect(), m = document.querySelector('#vw-main').getBoundingClientRect(); return r.top < m.bottom && r.bottom > m.top ? 'on screen' : 'off screen'; })()`);
+      await page!.clickRatio(row, 0.3, 0.8, { scroll: false });
+      opening = 'the helper’s code ' + shown + ', ' + await read(page!, `(() => { const g = document.querySelector('#vw-main .grow'); if (!g) return 'no opening'; return g.getAnimations().some((a) => a.effect.getKeyframes().some((k) => k.opacity != null)) ? 'the test’s code fading in' : 'the test’s code showing as it opens'; })()`);
+      await page!.until(`!document.querySelector('#vw-main .grow') && !!document.querySelector('${row}.open')`);
+      moved = await read(page!, `(() => { const d = Math.round(document.querySelector('${row}').getBoundingClientRect().top) - ${top}; return d ? 'moved ' + d + ' px' : 'stays where it was'; })()`);
+    });
+
+    it('then its code shows as it opens, and the row stays where it was.', () => {
+      assert.equal(`${opening}\n${moved}`, 'the helper’s code on screen, the test’s code showing as it opens\nstays where it was');
+    });
+  });
+});

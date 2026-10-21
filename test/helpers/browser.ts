@@ -63,7 +63,7 @@ export interface Browser {
   /** Presses on `from` and releases on `onto`. */
   dragOnto(from: string, onto: string): Promise<void>;
   /** Clicks at a fraction of the element's box, 0 to 1 from the top left. */
-  clickRatio(selector: string, xRatio: number, yRatio: number): Promise<void>;
+  clickRatio(selector: string, xRatio: number, yRatio: number, opts?: { scroll?: boolean }): Promise<void>;
   hover(selector: string, opts?: { scroll?: boolean }): Promise<void>;
   /** Moves the pointer to the element's center and, two frames later, turns the wheel `dy` pixels there. */
   wheel(selector: string, dy: number): Promise<void>;
@@ -372,8 +372,8 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
       await at(points.x2, points.y2, 'mouseMoved', 0, 0, 1);
       await at(points.x2, points.y2, 'mouseReleased', 0, 1, 0);
     },
-    async clickRatio(selector: string, xRatio: number, yRatio: number) {
-      const box = await boxOf(selector, true);
+    async clickRatio(selector: string, xRatio: number, yRatio: number, opts: { scroll?: boolean } = {}) {
+      const box = await boxOf(selector, opts.scroll !== false);
       await clickAt(box.left + box.width * xRatio, box.top + box.height * yRatio, 0, 1);
     },
     async hover(selector: string, opts: { scroll?: boolean } = {}) {
