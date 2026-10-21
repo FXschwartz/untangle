@@ -3425,7 +3425,8 @@
     const fam = m.byCommit && c.kind === 'commit' ? m.families.find((x) => x.id === c.family) : null;
     return fam && fam.commit ? fam.commit.sha : null;
   }
-  const olChip = (c, key) => { const sha = chainSha(c); return `<button type="button" class="ol-chip" data-act="ol-chain" data-chain-id="${c.id}" data-ol="${esc(key)}" title="Written in ${esc(c.name)}: open it there">${sha ? `<code>${esc(shortSha(sha))}</code>` : esc(trunc(c.name, 28))}</button>`; };
+  // hover: shown with the row's other details, as in the Tests view, where most rows have one.
+  const olChip = (c, key, hover) => { const sha = chainSha(c); return `<button type="button" class="ol-chip${hover ? ' ol-hov' : ''}" data-act="ol-chain" data-chain-id="${c.id}" data-ol="${esc(key)}" title="Written in ${esc(c.name)}: open it there">${sha ? `<code>${esc(shortSha(sha))}</code>` : esc(trunc(c.name, 28))}</button>`; };
   // Whether a fold of an outline is open: code is open by default in a chain (it's the chain's code)
   // and closed in the Tests view; a click flips it.
   const olFold = (sc, key) => (sc.chain ? !state.olUnfold.has(key + '@' + sc.chain.id) : state.olUnfold.has(key));
@@ -3512,7 +3513,7 @@
     if (body) tags.push(olTag(`body ${olPm(s.adds, s.dels)}`, 'Its body changed; its sentence didn’t'));
     const shown = s.s === 'new' || s.s === 'renamed' || (s.s === 'reworded' && was);
     const writer = (o.chips && shown) || (sc.chain && !shown) ? olWriter(f, n) : null;
-    const chip = writer && (!sc.chain || (writer.id !== sc.chain.id && !(sc.chain.sha && chainSha(writer) === sc.chain.sha))) ? olChip(writer, key) : '';
+    const chip = writer && (!sc.chain || (writer.id !== sc.chain.id && !(sc.chain.sha && chainSha(writer) === sc.chain.sha))) ? olChip(writer, key, o.chips) : '';
     const marks = s.s ? s.all : [];
     const st = stats(marks), todo = stats(s.own).open > 0;
     const open = state.olOpen.has(key);
@@ -3524,7 +3525,7 @@
     return `<div class="ol-row ${cls}${n.l ? ' lbl' : ''}${open ? ' open' : ''}${muted ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:${n.depth}" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span>`
       + `<span class="ol-tt">${n.l ? esc(n.t) : olWords(n.t, was)}${olNoSetup(n)}</span>`
-      + `<span class="ol-meta">${tags.join('')}${olExpects(n)}${body ? '' : olDiff(sc, n)}${chip}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${tick}</span></div>`
+      + `<span class="ol-meta">${olExpects(n)}${body ? '' : olDiff(sc, n)}${chip}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${tags.join('')}${tick}</span></div>`
       + (open ? olCodeHtml(sc, n) : '');
   }
   // A review mark for what a row covers: on when all of it is reviewed, a dash when some of it is.
@@ -3548,7 +3549,7 @@
     const prefix = r.parent ? olPath(r.parent).filter((x) => !x.l).map((x) => x.t.trim()).join(' ').length + 1 : 0;
     let h = `<div class="ol-row del${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${marks.length ? ` data-mark="${esc(marks.map((b) => b.id).join(' '))}" data-block="${esc(marks[0].id)}"${st.open ? ' data-nav="1"' : ''}` : ''} style="--d:${d}" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">−</span><span class="ol-tt">${r.l ? esc(r.t) : olWords(r.t)}</span>`
-      + `<span class="ol-meta">${olTag('removed')}${olDiff(sc, r)}<span class="ol-go-sp"></span>${marks.length ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark the removal reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>'}</span></div>`;
+      + `<span class="ol-meta">${olDiff(sc, r)}<span class="ol-go-sp"></span>${olTag('removed')}${marks.length ? `<button type="button" class="tick ol-tick${st.open ? '' : ' on'}" data-act="mark-blocks" data-blocks="${esc(marks.map((b) => b.id).join(' '))}" title="${st.open ? 'Mark the removal reviewed' : 'Mark unreviewed'}" aria-pressed="${!st.open}"></button>` : '<span class="ol-tick-sp"></span>'}</span></div>`;
     for (const leaf of r.leaves) {
       const rest = leaf.slice(prefix + r.t.trim().length).trim();
       if (rest) h += `<div class="ol-row del sub" style="--d:${d + 1}"><span class="ol-mk"></span><span class="ol-tt">${olWords(rest)}</span><span class="ol-meta"></span></div>`;
@@ -3575,7 +3576,7 @@
     const nav = s.own.length ? ` data-mark="${esc(s.own.map((b) => b.id).join(' '))}" data-block="${esc(s.own[0].id)}"${stats(s.own).open ? ' data-nav="1"' : ''}` : '';
     return `<div class="ol-row sent ${cls}${open ? ' open' : ''}${marks.length && !st.open ? ' done' : ''}" data-act="ol-open" data-ol="${esc(key)}"${nav} style="--d:0" role="button" tabindex="0" aria-expanded="${open}">`
       + `<span class="ol-mk" aria-hidden="true">${OL_MARK[cls] || ''}</span><span class="ol-tt">${groups} <span class="own">${olWords(n.t, was)}</span></span>`
-      + `<span class="ol-meta">${s.s === 'regrouped' ? olTag('regrouped', `It read: ${n.was || ''}`) : ''}${olExpects(n)}${olDiff(sc, n)}${writer ? olChip(writer, key) : ''}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${tick}</span></div>`
+      + `<span class="ol-meta">${olExpects(n)}${olDiff(sc, n)}${writer ? olChip(writer, key, o.chips) : ''}<button type="button" class="ol-go" data-open="${esc(f.p)}" data-line="${n.s}" title="Open in the file, at line ${n.s}" aria-label="Open in the file">${ICON.intoFile}</button>${s.s === 'regrouped' ? olTag('regrouped', `It read: ${n.was || ''}`) : ''}${tick}</span></div>`
       + (open ? olCodeHtml(sc, n) : '');
   }
   // Which tests a filter keeps.

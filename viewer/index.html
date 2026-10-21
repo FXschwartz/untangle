@@ -752,6 +752,10 @@ button.sb-group:hover { color: var(--text-2); }
 .ol-df { font: 500 11.5px/1 var(--code); }
 .ol-xp { font: 500 11px/1 var(--ui); color: var(--text-4); }
 .ol-row:hover .ol-df, .ol-row:focus-within .ol-df, .ol-row.open .ol-df, .ol-row:hover .ol-xp, .ol-row:focus-within .ol-xp, .ol-row.open .ol-xp { opacity: 1; }
+/* The commit that wrote a test, in the Tests view: with the row's other details, on hover. They all
+   come before its tags, so the tags line up beside the mark, row after row. */
+.ol-chip.ol-hov { opacity: 0; transition: opacity var(--fast) var(--ease); }
+.ol-row:hover .ol-chip.ol-hov, .ol-row:focus-within .ol-chip.ol-hov, .ol-row.open .ol-chip.ol-hov { opacity: 1; }
 .ol-nosu { display: inline-block; width: 6px; height: 6px; margin-left: 7px; border-radius: 50%; background: var(--del-ink); vertical-align: 2px; }
 .ol-row.ctx .ol-nosu, .ol-row.done .ol-nosu, .ol-row.sent .g .ol-nosu { opacity: .7; }
 .ol-tick-sp { width: 14px; }

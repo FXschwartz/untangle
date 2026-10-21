@@ -453,6 +453,7 @@ describe('Given a served review by commit: a discount with its tests, more tests
 
   describe('when a test in the Tests view is hovered, ', () => {
     let shown = '';
+    let order = '';
 
     before(async () => {
       await rest(page!);
@@ -462,11 +463,16 @@ describe('Given a served review by commit: a discount with its tests, more tests
       const row = await rowSelector(page!, 'then it is positive.');
       const other = await rowSelector(page!, 'when nothing is bought, then nothing comes off.');
       await page!.hover(row);
-      shown = await read(page!, `['${row}', '${other}'].map((sel) => ['.ol-xp', '.ol-df'].map((part) => getComputedStyle(document.querySelector(sel + ' ' + part)).opacity).join(' ')).join(' | ')`);
+      shown = await read(page!, `['${row}', '${other}'].map((sel) => ['.ol-xp', '.ol-df', '.ol-chip'].map((part) => getComputedStyle(document.querySelector(sel + ' ' + part)).opacity).join(' ')).join(' | ')`);
+      order = await read(page!, `[...document.querySelector('${await rowSelector(page!, 'then it adds the prices.')} .ol-meta').children].map((el) => el.classList[0]).join(' · ')`);
     });
 
-    it('then its expect calls and lines show beside its commit, and the other rows\' stay hidden.', () => {
-      assert.equal(shown, '1 1 | 0 0');
+    it('then its expect calls, its lines and the commit that wrote it show, and the other rows\' stay hidden.', () => {
+      assert.equal(shown, '1 1 1 | 0 0 0');
+    });
+
+    it('then a row\'s tag sits beside its mark\'s place, after what shows on hover, so the tags line up.', () => {
+      assert.equal(order, 'ol-xp · ol-go · ol-tag · ol-tick-sp');
     });
   });
 
