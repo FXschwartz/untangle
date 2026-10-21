@@ -502,6 +502,39 @@ describe('Given a served review by commit: a discount with its tests, more tests
     });
   });
 
+  describe('when a then is open in the Tests view, and another opens under it, then closes, ', () => {
+    let shown = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      const first = await rowSelector(page!, 'then it is positive.');
+      const second = await rowSelector(page!, 'when nothing is bought, then nothing comes off.');
+      await page!.click(first);
+      await page!.until(`!!document.querySelector('${first} + .ol-code')`);
+      await page!.eval(`window.__code = document.querySelector('${first} + .ol-code')`);
+      const look = `(() => { const code = document.querySelector('${first} + .ol-code'); return (code === window.__code ? 'its code as drawn' : 'other code') + ' at ' + Math.round(code.getBoundingClientRect().top) + ' px'; })()`;
+      const seen = [await read(page!, look)];
+      await page!.click(second);
+      await page!.until(`!!document.querySelector('${second} + .ol-code')`);
+      seen.push(await read(page!, look));
+      await page!.click(second);
+      await page!.until(`!document.querySelector('${second} + .ol-code')`);
+      seen.push(await read(page!, look));
+      await page!.click(first);
+      await page!.until(`!document.querySelector('${first} + .ol-code')`);
+      shown = seen.join('\n');
+    });
+
+    it('then the code open stays as it was drawn, where it was.', () => {
+      const [first] = shown.split('\n');
+      assert.match(first, /^its code as drawn at \d+ px$/);
+      assert.equal(shown, [first, first, first].join('\n'));
+    });
+  });
+
   describe('when a then opens and closes with motion on, ', () => {
     let opening = '';
     let closing = '';

@@ -5205,7 +5205,8 @@
     ghost.inert = true;
     ghost.style.height = h + 'px';
     if (content) {
-      content.forEach((el) => ghost.appendChild(el));
+      // What the page kept (drawn again in place) stays where it is.
+      content.forEach((el) => { if (!el.isConnected) ghost.appendChild(el); });
       // What's in it is a picture: nothing in it is found or pressed.
       const attrs = ['id', 'data-block', 'data-sec', 'data-n', 'data-c', 'data-thread', 'data-note', 'data-comment', 'data-draft', 'data-act', 'data-nav', 'data-mark', 'data-ol', 'data-key', 'data-olf', 'data-open', 'data-blocks'];
       ghost.querySelectorAll(attrs.map((a) => `[${a}]`).join(', ')).forEach((el) => attrs.forEach((a) => el.removeAttribute(a)));
@@ -5435,8 +5436,8 @@
   // each thing it holds until it's first drawn. (A test's code in its outline stays whole: the
   // outline's motion knows it as one piece.)
   const CUT = 100;
-  function cutCode() {
-    main.querySelectorAll('.code:not(.ol-code)').forEach((code) => {
+  function cutCode(root) {
+    root.querySelectorAll('.code:not(.ol-code)').forEach((code) => {
       let at = code, rows = 0, prevRow = false;
       for (const el of [...code.children]) {
         const row = el.matches('.ln, .sl');
@@ -5452,7 +5453,52 @@
         prevRow = row;
       }
     });
-    main.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount));
+    root.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount));
+  }
+  // ---------- a view drawn again: in place, what's the same kept as the browser drew it. Drawn
+  // anew, a block of code is as tall as its rows until it shows (a hunk's divider is taller), and
+  // its rows show a frame after it: the page would move, and the code flash. So what's the same
+  // stays; a block of code that changed, or what holds one, is brought up to date where it is;
+  // anything else that changed is replaced, as the motion expects (what went out of the page
+  // closes up, where it was).
+  const LOOK = 40;
+  const field = (n) => n.nodeType === 1 && (n.tagName === 'INPUT' || n.tagName === 'TEXTAREA' || n.tagName === 'SELECT');
+  const same = (a, b) => !field(a) && a.isEqualNode(b);
+  // The same element with other insides: its tag and attributes are.
+  const alike = (a, b) => {
+    if (a.nodeType !== 1 || b.nodeType !== 1 || a.tagName !== b.tagName || a.attributes.length !== b.attributes.length) return false;
+    for (const { name, value } of b.attributes) if (a.getAttribute(name) !== value) return false;
+    return true;
+  };
+  // Brought up to date in place: a block of code, as another block; what holds one, or comes to
+  // hold one, as what holds one.
+  const isCode = (n) => n.classList.contains('code');
+  const patchable = (a, b) => a.nodeType === 1 && b.nodeType === 1 && a.tagName === b.tagName && !field(a)
+    && (isCode(a) && isCode(b) || !isCode(a) && !isCode(b) && (!!a.querySelector('.code') || !!b.querySelector('.code')));
+  function drawIn(live, next) {
+    const was = [...live.childNodes], now = [...next.childNodes];
+    // Where x is among a list's next few, or -1.
+    const ahead = (list, from, x) => { for (let k = from; k < Math.min(list.length, from + LOOK); k++) if (same(list[k], x)) return k; return -1; };
+    let i = 0;
+    for (let j = 0; j < now.length;) {
+      const a = was[i], b = now[j];
+      if (a && same(a, b)) { i++; j++; continue; }
+      // The same a little further on, one side or the other: what's before it went, or came.
+      if (a && !alike(a, b)) {
+        const k = ahead(was, i + 1, b), n = ahead(now, j + 1, a);
+        if (k >= 0 && (n < 0 || k - i <= n - j)) { while (i < k) was[i++].remove(); continue; }
+        if (n >= 0) { while (j < n) live.insertBefore(now[j++], a); continue; }
+      }
+      if (a && patchable(a, b)) {
+        for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+        for (const { name, value } of b.attributes) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+        drawIn(a, b);
+      } else if (a) a.replaceWith(b);
+      else live.appendChild(b);
+      i++;
+      j++;
+    }
+    while (i < was.length) was[i++].remove();
   }
   // What follows (precedes) an element in its block of code, across the cuts.
   const nextIn = (el) => el.nextElementSibling || (el.parentElement && el.parentElement.nextElementSibling && el.parentElement.nextElementSibling.matches('.code.cont') ? el.parentElement.nextElementSibling.firstElementChild : null);
@@ -5472,7 +5518,8 @@
     // A graph scrolled within its box stays scrolled as it's drawn again.
     const gs = main.querySelector('.graph-scroll'), graphAt = gs && { view: viewKey(), x: gs.scrollLeft, y: gs.scrollTop };
     const gds = main.querySelector('.gd:not([hidden]) .gd-scroll'), gdAt = gds && { x: gds.scrollLeft, y: gds.scrollTop };
-    if (viewKey() !== GD.view) { GD.view = viewKey(); GD.folded = null; if (state.gdrop && state.gdrop.view !== GD.view) state.gdrop = null; }
+    const fresh = viewKey() !== GD.view;
+    if (fresh) { GD.view = viewKey(); GD.folded = null; if (state.gdrop && state.gdrop.view !== GD.view) state.gdrop = null; }
     // A comment being typed keeps its focus, caret and scroll through the new page.
     const ae = document.activeElement;
     const typing = ae && ae.dataset && ae.dataset.draft != null && viewer.contains(ae) ? { key: ae.dataset.draft, s: ae.selectionStart, e: ae.selectionEnd, top: ae.scrollTop } : null;
@@ -5482,16 +5529,30 @@
     const v = state.view;
     MARKS = null;
     lit = '';
+    const page = document.createElement('template');
     try {
-      main.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : v.kind === 'history' ? renderHistory() : v.kind === 'tests' ? renderTests() : renderFile(v.path);
+      page.innerHTML = v.kind === 'chain' ? renderChain(v.id) : v.kind === 'map' ? renderMap(v.family) : v.kind === 'standalone' ? renderStandalone() : v.kind === 'group' ? renderGroup(v.id) : v.kind === 'search' ? renderSearch() : v.kind === 'source' ? renderSource(v) : v.kind === 'conversation' ? renderConversation() : v.kind === 'history' ? renderHistory() : v.kind === 'tests' ? renderTests() : renderFile(v.path);
     } catch (e) {
-      main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
+      page.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
     }
-    cutCode();
+    // Cut as it shows, with the pinned groups' and the graph's places under its header. Another
+    // view takes the last one's place; the same view is drawn again in place.
+    cutCode(page.content);
+    const fvHead = page.content.querySelector('.fv-head');
+    if (fvHead) {
+      const under = document.createElement('template');
+      under.innerHTML = '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>' + (gdHas() ? '<div class="gd-w"><div class="gd" role="dialog" aria-label="The chain’s graph" hidden></div></div>' : '');
+      fvHead.after(under.content);
+    }
+    if (fresh) main.replaceChildren(page.content);
+    else {
+      // Motion under way ends first: what was opening is open, what was closing is gone.
+      main.querySelectorAll('.ghost').forEach((g) => g.remove());
+      main.querySelectorAll('.grow').forEach((w) => w.replaceWith(...w.childNodes));
+      drawIn(main, page.content);
+    }
     fitBoxes(main);
-    const fvHead = main.querySelector('.fv-head');
-    if (fvHead) fvHead.insertAdjacentHTML('afterend', '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>' + (gdHas() ? '<div class="gd-w"><div class="gd" role="dialog" aria-label="The chain’s graph" hidden></div></div>' : ''));
     restorePeekScroll();
     const gs2 = graphAt && graphAt.view === viewKey() && main.querySelector('.graph-scroll');
     if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }

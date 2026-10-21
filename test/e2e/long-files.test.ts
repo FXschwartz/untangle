@@ -190,6 +190,35 @@ describe('Given a served review of a long file that changes every fifth line, an
     });
   });
 
+  describe('when the Notes menu opens and closes over a line of the third block, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await openFile('lib/long.dart');
+      // Past the first two blocks, which the browser has drawn: their heights are known now.
+      await page!.eval(`(() => { const main = document.querySelector('#vw-main'); const row = main.querySelector('.code[data-p="lib/long.dart"] .ln[data-n="215"]'); main.scrollTop += row.getBoundingClientRect().top - main.getBoundingClientRect().top - main.querySelector('.fv-head').offsetHeight - 100; })()`);
+      await page!.eval(frames(2));
+      await page!.eval(`window.__blocks = ${blocks('lib/long.dart')}`);
+      const look = `(() => { const main = document.querySelector('#vw-main'), list = ${blocks('lib/long.dart')}, row = main.querySelector('.ln[data-n="215"]'); return [list.length === window.__blocks.length && list.every((b, i) => b === window.__blocks[i]) ? 'the blocks as drawn' : 'other blocks', 'line 215 at ' + Math.round(row.getBoundingClientRect().top - main.getBoundingClientRect().top) + ' px'].join(', '); })()`;
+      const seen = [await read(page!, look)];
+      await page!.click('[data-act="review-toggle"]');
+      await page!.until(`!!document.querySelector('.rv-pop')`);
+      await page!.eval(frames(2));
+      seen.push(await read(page!, look));
+      await page!.click('[data-act="review-toggle"]');
+      await page!.until(`!document.querySelector('.rv-pop')`);
+      await page!.eval(frames(2));
+      seen.push(await read(page!, look));
+      shown = seen.join('\n');
+    });
+
+    it('then the code stays as it was drawn, and doesn\'t move.', () => {
+      const [first] = shown.split('\n');
+      assert.match(first, /^the blocks as drawn, line 215 at \d+ px$/);
+      assert.equal(shown, [first, first, first].join('\n'));
+    });
+  });
+
   describe('when the layout goes side by side, with a line of the second block at the top, ', () => {
     let before0: string;
     let after1: string;
@@ -213,4 +242,5 @@ describe('Given a served review of a long file that changes every fifth line, an
       assert.deepEqual([before0, after1], ['130', '130']);
     });
   });
+
 });
