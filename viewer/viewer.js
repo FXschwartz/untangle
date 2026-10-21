@@ -43,6 +43,7 @@
     comment: svg('<path d="M14.5 2h-13l-.5.5v9l.5.5H4v2.5l.854.354L7.707 12H14.5l.5-.5v-9l-.5-.5zm-.5 9H7.5l-.354.146L5 13.293V11.5l-.5-.5H2V3h12v8z"/>'),
     discussion: path1('M4 11.29l1-1v1.42l-1.15 1.14L3 12.5V10H1.5L1 9.5v-8l.5-.5h12l.5.5V6h-1V2H2v7h1.5l.5.5v1.79zM10.29 13l1.86 1.85.85-.35V13h1.5l.5-.5v-5l-.5-.5h-8l-.5.5v5l.5.5h3.79zm.21-1H7V8h7v4h-1.5l-.5.5v.79l-1.15-1.14-.35-.15z'),
     edit: svg('<path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l8-8 1.77 1.77-8 8z"/>'),
+    copy: svg('<path fill-rule="evenodd" clip-rule="evenodd" d="M4 4l1-1h5.414L14 6.586V14l-1 1H5l-1-1V4zm9 3l-3-3H5v10h8V7z"/><path fill-rule="evenodd" clip-rule="evenodd" d="M3 1L2 2v10l1 1V2h6.414l-1-1H3z"/>'),
     trash: path1('M10 3h3v1h-1v9l-1 1H4l-1-1V4H2V3h3V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zM9 2H6v1h3V2zM4 13h7V4H4v9zm2-8H5v7h1V5zm1 0h1v7H7V5zm2 0h1v7H9V5z'),
     smiley: path1('M4.111 2.18a7 7 0 1 1 7.778 11.64A7 7 0 0 1 4.11 2.18zm.556 10.809a6 6 0 1 0 6.666-9.978 6 6 0 0 0-6.666 9.978zM6.5 7a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm5 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM8 11a3 3 0 0 1-2.65-1.58l-.87.48a4 4 0 0 0 7.12-.16l-.9-.43A3 3 0 0 1 8 11z'),
     external: svg('<path d="M1.5 1H6v1H2v12h12v-4h1v4.5l-.5.5h-13l-.5-.5v-13l.5-.5z"/><path d="M15 1.5V8h-1V2.707L7.243 9.465l-.707-.708L13.293 2H8V1h6.5l.5.5z"/>'),
@@ -2566,8 +2567,10 @@
     const mine = c.by == null;
     const id = n.n + ':' + c.id, key = 'nedit:' + id;
     // Your comments can be edited and deleted; an agent's note, deleted (its answers stay its own).
+    // What an agent wrote copies as it wrote it, to post or keep elsewhere.
     const trash = iconBtn(ICON.trash, lead ? 'Delete the note' : 'Delete', `data-act="nt-delete" data-n="${n.n}" data-id="${esc(c.id)}"${ntBusyAttr('del:' + id)}`);
-    const tools = mine ? iconBtn(ICON.edit, 'Edit', `data-act="nt-edit-open" data-n="${n.n}" data-id="${esc(c.id)}"`) + trash : lead ? trash : '';
+    const copy = iconBtn(ICON.copy, lead ? 'Copy the note’s text' : 'Copy its text', `data-act="nt-copy-text" data-n="${n.n}" data-id="${esc(c.id)}"`);
+    const tools = mine ? iconBtn(ICON.edit, 'Edit', `data-act="nt-edit-open" data-n="${n.n}" data-id="${esc(c.id)}"`) + trash : copy + (lead ? trash : '');
     const body = NT.editing === id
       ? composerHtml(key, { local: true, buttons: [[lead ? 'Update note' : 'Update reply', `data-act="nt-edit" data-n="${n.n}" data-id="${esc(c.id)}"`, true]], cancel: 'nt-edit-cancel' })
       : `<div class="cm-body">${noteMd(c.body)}</div>`;
@@ -6438,6 +6441,11 @@
     if (act === 'nt-open') return openNote(n);
     if (act === 'nt-copy1') {
       if (note) copyText(ntExport([note]), `N${n} copied for your agent`).then((ok) => { if (ok && !note.copied) ntCopied([n]); });
+      return;
+    }
+    if (act === 'nt-copy-text') {
+      const i = note ? note.comments.findIndex((x) => x.id === d.id) : -1;
+      if (i >= 0) copyText(note.comments[i].body, `${note.comments[i].by}’s ${i ? 'reply' : `note, N${n},`} copied`);
       return;
     }
     if (act === 'nt-copy') {

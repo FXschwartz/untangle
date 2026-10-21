@@ -164,6 +164,22 @@ describe('Given a review a Claude chat in an Orca terminal holds, ', { skip, tim
     });
   });
 
+  describe('when Claude’s note is copied from its tools, ', () => {
+    let copied = '';
+
+    before(async () => {
+      await page!.eval(`navigator.clipboard.writeText = (text) => { window.__copied = text; return Promise.resolve(); }`);
+      await page!.click('.th.note[data-note="3"] .cm.first [data-act="nt-copy-text"]');
+      await page!.until(`typeof window.__copied === 'string'`);
+      copied = await read(page!, `window.__copied + ' | ' + (document.querySelector('#vw-toast')?.textContent ?? '')`);
+      await page!.eval('delete window.__copied');
+    });
+
+    it('then its words are on the clipboard as Claude wrote them, and a toast says so.', () => {
+      assert.equal(copied, 'Name the parameter person? | Claude’s note, N3, copied');
+    });
+  });
+
   describe('when the chat ends, ', () => {
     let shown = '';
 

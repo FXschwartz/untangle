@@ -178,6 +178,28 @@ describe('Given a served review of pull request 7, and an agent’s commands, ',
     });
   });
 
+  describe('when the agent’s answer is copied from its tools, ', () => {
+    let tools: string;
+    let copied: string;
+
+    before(async () => {
+      await page!.eval(`navigator.clipboard.writeText = (text) => { window.__copied = text; return Promise.resolve(); }`);
+      tools = await read(page!, `[...document.querySelectorAll('.th.note[data-note="1"] .cm')].map((cm) => [...cm.querySelectorAll('.cm-tools .ib')].map((b) => b.getAttribute('aria-label')).join(', ') || 'none').join(' / ')`);
+      await page!.click('.th.note[data-note="1"] .cm.agent [data-act="nt-copy-text"]');
+      await page!.until(`typeof window.__copied === 'string'`);
+      copied = await read(page!, `window.__copied + ' | ' + (document.querySelector('#vw-toast')?.textContent ?? '')`);
+      await page!.eval('delete window.__copied');
+    });
+
+    it('then what the agent wrote has a copy, and yours has edit and delete.', () => {
+      assert.equal(tools, 'Edit, Delete the note / Copy its text');
+    });
+
+    it('then its words are on the clipboard as it wrote them, and a toast says whose.', () => {
+      assert.equal(copied, 'Because ada is the first user. | Codex’s reply copied');
+    });
+  });
+
   describe('when the agent resolves it, ', () => {
     let shown: string;
 
