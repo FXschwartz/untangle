@@ -1560,10 +1560,11 @@
   const editorLabel = () => CONFIG.editor && CONFIG.editor.mode === 'orca' ? 'Open in Orca' : 'Open in editor';
   const editorItem = (loc) => { const t = editorTarget(loc); return t ? { label: editorLabel(), icon: ICON.goToFile, href: t.href, title: t.title, data: t.data } : null; };
 
-  // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains, the head commit's "Changes
-  // from". One at a time, under the button that opened it; items are the page's usual buttons
-  // (data-act, data-chain, …).
-  const MENU = { open: null, el: null, html: '' };
+  // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains, a folder of its breadcrumb,
+  // the head commit's "Changes from". One at a time, under the button that opened it; items are
+  // the page's usual buttons (data-act, data-chain, …).
+  // crumb: the folder a breadcrumb's menu went to, from the folder it opened on.
+  const MENU = { open: null, el: null, html: '', crumb: null };
   const chainItem = (c) => { const st = stats(blocksOf(c.blocks)); const n = splitName(c.name); return { label: n.name, own: n.own, mono: !proseName(c), icon: ICON.chain, data: { chain: c.id }, key: st.open ? `${st.open} to review` : 'reviewed' }; };
   // What a view's ⋯ holds: how it shows the code, and where else to go from it.
   function viewMenuItems() {
@@ -1639,6 +1640,38 @@
     });
     return items;
   }
+  // A breadcrumb's folder: its folders (one holding only a folder shows with it, as in the Files
+  // tab) and the review's files in it, each with its mark. A folder opens in the menu, and ..
+  // goes up; what leads to the file open is current.
+  const parentOf = (dir) => dir.slice(0, Math.max(0, dir.lastIndexOf('/')));
+  const crumbDir = () => (MENU.crumb != null ? MENU.crumb : (state.view.path || '').split('/').slice(0, Number(MENU.open.slice('crumb:'.length)) + 1).join('/'));
+  function crumbMenuItems() {
+    const m = M(), path = state.view.path || '', dir = crumbDir();
+    const root = fileTree(m.files.concat(m.generated));
+    const at = (p) => (p ? p.split('/') : []).reduce((node, name) => node && node.dirs.get(name), root);
+    const node = at(dir), items = [{ head: dir ? shortDir(dir) + '/' : 'Top level' }];
+    if (dir) {
+      // Up past the folders that hold only this one: they show with it.
+      let up = parentOf(dir);
+      for (let n = at(up); up && n && n.dirs.size === 1 && !n.files.length; n = at(up)) up = parentOf(up);
+      items.push({ label: '..', icon: ICON.up, title: `Up to ${up ? up + '/' : 'the top level'}`, data: { act: 'crumb-dir', folder: up, up: 1 } });
+    }
+    if (!node) return items.concat({ note: 'None of this review’s files are in it.' });
+    const gen = new Set(m.generated.map((f) => f.p));
+    // Generated files have no changes to review: their mark is a ring.
+    const markOf = (files) => { const own = files.filter((f) => !gen.has(f.p)); const st = own.length ? stats(own.flatMap((f) => f.blocks)) : null; return { icon: st ? markHtml(st) : '<i class="mk gen"></i>', key: st && st.open ? String(st.open) : '', words: st ? leftWords(st) : 'generated, not reviewed' }; };
+    [...node.dirs.values()].sort((x, y) => byName(x.name, y.name)).forEach((d) => {
+      let name = d.name;
+      while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
+      const k = markOf(filesIn(d));
+      items.push({ label: name + '/', mono: true, icon: k.icon, key: k.key, current: path.startsWith(d.path + '/'), title: `${d.path}/: ${k.words}`, data: { act: 'crumb-dir', folder: d.path } });
+    });
+    node.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => {
+      const k = markOf([f]);
+      items.push({ label: fileName(f.p), mono: true, icon: k.icon, key: k.key, current: f.p === path, title: `${f.p}: ${k.words}`, data: { open: f.p } });
+    });
+    return items;
+  }
   function menuHtml(items) {
     return items.map((it) => {
       if (it.sep) return '<div class="mi-sep" role="separator"></div>';
@@ -1648,7 +1681,7 @@
       const role = it.checked != null ? 'menuitemcheckbox' : 'menuitem';
       const inner = `<span class="ic">${it.checked != null ? (it.checked ? ICON.check : '') : it.icon || ''}</span><span${it.mono ? ' class="nm"' : ''}>${it.own ? `<span class="own">${esc(it.own)}</span>` : ''}${esc(it.label)}</span><span class="k">${esc(it.key || '')}</span>`;
       if (it.href) return `<a class="mi" role="${role}" href="${esc(it.href)}"${/^https?:/.test(it.href) ? ' target="_blank" rel="noopener noreferrer"' : ''}${it.title ? ` title="${esc(it.title)}"` : ''}>${inner}</a>`;
-      return `<button type="button" class="mi" role="${role}"${it.checked != null ? ` aria-checked="${it.checked}"` : ''}${it.title ? ` title="${esc(it.title)}"` : ''}${dataAttrs(it.data)}>${inner}</button>`;
+      return `<button type="button" class="mi" role="${role}"${it.checked != null ? ` aria-checked="${it.checked}"` : ''}${it.current ? ' aria-current="true"' : ''}${it.title ? ` title="${esc(it.title)}"` : ''}${dataAttrs(it.data)}>${inner}</button>`;
     }).join('');
   }
   // Draws the open menu under its button (found again after each render), or closes it when the
@@ -1659,11 +1692,12 @@
     const el = MENU.el, lens = MENU.open === 'lens';
     // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
     el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : 'More');
+    const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
     el.classList.toggle('lens-pop', lens);
     const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
-    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : chainsMenuItems();
+    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : chainsMenuItems();
     const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
     if (!html) { MENU.open = null; MENU.html = ''; el.hidden = true; viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false')); return; }
     if (html !== MENU.html) {
@@ -1676,18 +1710,19 @@
     el.hidden = false;
     anchor.setAttribute('aria-expanded', 'true');
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
-    const left = MENU.open === 'side' || MENU.open === 'chains' || lens ? r.left : r.right - w;
+    const left = MENU.open === 'side' || MENU.open === 'chains' || lens || crumb ? r.left : r.right - w;
     el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - w - 8))}px`;
     el.style.top = `${r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
   }
   function toggleMenu(kind) {
     MENU.open = MENU.open === kind ? null : kind;
     MENU.html = '';
+    MENU.crumb = null;
     if (MENU.open === 'lens') loadCommits();
     renderMenu();
-    // A menu's first item takes the focus, "Changes from" the scope it has; the marks' panel takes
-    // none (its one button resets).
-    const first = MENU.open && (MENU.open === 'lens' ? MENU.el.querySelector('[aria-pressed="true"]') || MENU.el.querySelector('button') : MENU.el.querySelector('.mi'));
+    // A menu's current item takes the focus, else its first; "Changes from" the scope it has; the
+    // marks' panel takes none (its one button resets).
+    const first = MENU.open && (MENU.open === 'lens' ? MENU.el.querySelector('[aria-pressed="true"]') || MENU.el.querySelector('button') : MENU.el.querySelector('.mi[aria-current="true"]') || MENU.el.querySelector('.mi'));
     if (first) {
       first.focus({ preventScroll: true });
       const list = first.closest('.lp-list');
@@ -3071,9 +3106,15 @@
     while (parts.length && out.length + parts[parts.length - 1].length < 40) out = parts.pop() + '/' + out;
     return '…/' + out;
   }
+  // A file's folders, each a button listing the review's files in it, as a folder of GitHub's
+  // breadcrumbs opens. The first ones, when they're long, fold into "…": the deepest of them.
+  // Squeezed, the farthest give way first, each before the next (--far).
   const fileCrumbs = (p) => {
-    const i = p.lastIndexOf('/'), dir = i > 0 ? p.slice(0, i) : '';
-    return `<button type="button" data-tab="files" title="Show the files">Files</button>${SEP}${dir ? `<span class="path" title="${esc(dir)}">${esc(shortDir(dir))}</span>${SEP}` : ''}<b title="${esc(p)}">${esc(fileName(p))}</b>`;
+    const dirs = p.split('/').slice(0, -1), short = shortDir(dirs.join('/'));
+    const hide = short.startsWith('…/') ? dirs.length - short.split('/').length + 1 : 0;
+    const crumb = (k, label) => `<button type="button" data-act="menu" data-menu="crumb:${k}" aria-haspopup="menu" aria-expanded="${MENU.open === 'crumb:' + k}" ${label === '…' ? 'class="fold"' : `style="--far:${10 ** Math.min(6, dirs.length - 1 - k)}"`} title="${esc(dirs.slice(0, k + 1).join('/'))}/: the files in it">${esc(label)}</button>`;
+    const path = (hide ? [crumb(hide - 1, '…')] : []).concat(dirs.slice(hide).map((d, i) => crumb(hide + i, d))).join('<i>/</i>');
+    return `<button type="button" data-tab="files" title="Show the files">Files</button>${SEP}${dirs.length ? `<span class="path">${path}</span>${SEP}` : ''}<b title="${esc(p)}">${esc(fileName(p))}</b>`;
   };
   // A chain's name with its owner apart: "BridgeMcpServer." and "logPath".
   const splitName = (name) => { const m = /^(_?[A-Z][\w$]*\.)(.+)$/.exec(name); return m ? { own: m[1], name: m[2] } : { own: '', name }; };
@@ -6429,12 +6470,24 @@
   });
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],[data-detail],.ref');
-    if (t && t.closest('.menu')) closeMenu();
+    if (t && t.closest('.menu') && t.dataset.act !== 'crumb-dir') closeMenu();
     if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
     const m = M();
     const d = t.dataset;
     if (d.act === 'menu') return toggleMenu(d.menu);
+    if (d.act === 'crumb-dir') {
+      const was = crumbDir(), to = d.folder;
+      MENU.crumb = to;
+      MENU.html = '';
+      renderMenu();
+      // Up, the folder it came from takes the focus; down, what leads to the file open, else the first.
+      const items = [...MENU.el.querySelectorAll('.mi:not([data-up])')];
+      const up = !to || was.startsWith(to + '/');
+      const back = up && items.find((x) => x.dataset.folder != null && ((was + '/').startsWith(x.dataset.folder + '/') || (x.dataset.folder + '/').startsWith(was + '/')));
+      (back || items.find((x) => x.getAttribute('aria-current') === 'true') || items[0] || MENU.el.querySelector('.mi'))?.focus({ preventScroll: true });
+      return;
+    }
     if (d.compare) {
       if (state.compare === d.compare) return;
       state.compare = d.compare; state.peek = null; state.lens = null; lensMemo = null;

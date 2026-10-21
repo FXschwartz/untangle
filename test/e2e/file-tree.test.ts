@@ -253,3 +253,134 @@ describe('Given a file added, one changed and one deleted, ', { skip: browserSki
     });
   });
 });
+
+// The open menu: its folder, then each item: its mark, its name, its count, whether it's where the
+// file open is, and whether it has the focus.
+const menuShown = `(() => {
+  const menu = document.querySelector('.menu:not([hidden])');
+  if (!menu) return 'no menu';
+  return [menu.querySelector('.mi-h').textContent, ...[...menu.querySelectorAll('.mi')].map((item) => {
+    const mk = item.querySelector('.ic .mk');
+    const mark = !mk ? '-' : mk.classList.contains('gen') ? 'ring' : mk.classList.contains('ok') ? 'check' : 'dot';
+    const count = item.querySelector('.k').textContent;
+    return [mark, item.children[1].textContent, count && '(' + count + ')', item.getAttribute('aria-current') && 'current', item === document.activeElement && 'focused'].filter(Boolean).join(' ');
+  })].join('\\n');
+})()`;
+
+describe('Given a file deep in folders, beside another, with a generated folder and a file one folder up, ', { skip: browserSkip(), timeout: 120_000 }, () => {
+  let repo: TempRepo;
+  let run: UntangleRun;
+  let page: Browser;
+  let cache: string;
+  const deep = 'packages/long_package_name_here/lib/src/feature';
+
+  before(async () => {
+    const author = { name: 'Ada Review', email: 'ada@example.com', date: '2020-10-01T00:00:00Z' };
+    repo = TempRepo.create();
+    repo.write('.review.yaml', 'generated:\n  - "**/generated/**"\n');
+    repo.write(`${deep}/model.txt`, 'Model\n');
+    repo.commit({ subject: 'Start', author, committer: author });
+    repo.branch('feature');
+    repo.write(`${deep}/widgets/button.txt`, 'Button\n');
+    repo.write(`${deep}/widgets/card.txt`, 'Card\n');
+    repo.write(`${deep}/model.txt`, 'Model, changed\n');
+    repo.write(`${deep}/generated/model.g.txt`, 'Generated\n');
+    repo.commit({ subject: 'Add widgets', author, committer: author });
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache });
+    await waitForReview(reviewClient(run.url));
+    page = await launchBrowser();
+    await page.reducedMotion(true);
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('[data-tab="files"]')`);
+    await page.click('[data-tab="files"]');
+    await page.until(`!!document.querySelector('[data-open="${deep}/widgets/button.txt"]')`);
+    await page.click(`[data-open="${deep}/widgets/button.txt"]`);
+    await page.until(`document.querySelector('.crumbs b')?.title === '${deep}/widgets/button.txt'`);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when the file is open, ', () => {
+    let crumbs: string;
+
+    before(async () => {
+      crumbs = await page.eval(`[...document.querySelectorAll('.crumbs .path button')].map((b) => b.textContent + ' ' + b.title).join('\\n')`) as string;
+    });
+
+    it('then each of its last folders is a button, and the first ones fold into one, the deepest of them.', () => {
+      assert.equal(crumbs, [
+        '… packages/long_package_name_here/: the files in it',
+        `lib packages/long_package_name_here/lib/: the files in it`,
+        `src packages/long_package_name_here/lib/src/: the files in it`,
+        `feature ${deep}/: the files in it`,
+        `widgets ${deep}/widgets/: the files in it`,
+      ].join('\n'));
+    });
+  });
+
+  describe('when its folder is clicked, then .. twice, then the first folded folder, ', () => {
+    let own: string;
+    let up: string;
+    let top: string;
+    let folded: string;
+
+    before(async () => {
+      await page.click('.crumbs [data-menu="crumb:5"]');
+      await page.until(`!!document.querySelector('.menu:not([hidden]) .mi')`);
+      own = await page.eval(menuShown) as string;
+      await page.click('.menu .mi[data-up]');
+      await page.until(`document.querySelector('.menu .mi-h')?.textContent === '…/long_package_name_here/lib/src/feature/'`);
+      up = await page.eval(menuShown) as string;
+      await page.click('.menu .mi[data-up]');
+      await page.until(`document.querySelector('.menu .mi-h')?.textContent === 'Top level'`);
+      top = await page.eval(menuShown) as string;
+      await page.click('.crumbs [data-menu="crumb:1"]');
+      await page.until(`document.querySelector('.menu .mi-h')?.textContent === 'packages/long_package_name_here/'`);
+      folded = await page.eval(menuShown) as string;
+    });
+
+    it('then its menu lists the files beside it, the file open current and focused.', () => {
+      assert.equal(own, ['…/lib/src/feature/widgets/', '- ..', 'dot button.txt (1) current focused', 'dot card.txt (1)'].join('\n'));
+    });
+
+    it('then up, the folder above lists its folders first, the generated one ringed, and the folder it came from has the focus.', () => {
+      assert.equal(up, ['…/long_package_name_here/lib/src/feature/', '- ..', 'ring generated/', 'dot widgets/ (2) current focused', 'dot model.txt (1)'].join('\n'));
+    });
+
+    it('then up again, it passes the folders that hold only one folder, to the top, where they show with it.', () => {
+      assert.equal(top, ['Top level', `dot ${deep}/ (3) current focused`].join('\n'));
+    });
+
+    it('then the folded folders open on the deepest of them.', () => {
+      assert.equal(folded, ['packages/long_package_name_here/', '- ..', 'dot lib/src/feature/ (3) current focused'].join('\n'));
+    });
+  });
+
+  describe('when a folder in the menu is clicked, then a file in it, ', () => {
+    let inside: string;
+    let opened: string;
+
+    before(async () => {
+      await page.click('.menu .mi[data-act="crumb-dir"]:not([data-up])');
+      await page.until(`document.querySelector('.menu .mi-h')?.textContent === '…/long_package_name_here/lib/src/feature/'`);
+      inside = await page.eval(menuShown) as string;
+      await page.click(`.menu .mi[data-open="${deep}/model.txt"]`);
+      await page.until(`document.querySelector('.crumbs b')?.title === '${deep}/model.txt'`);
+      opened = await page.eval(`[document.querySelector('.crumbs b').title, document.querySelector('.menu:not([hidden])') ? 'menu open' : 'menu closed'].join('\\n')`) as string;
+    });
+
+    it('then the menu opens that folder, what leads to the file open current and focused.', () => {
+      assert.equal(inside, ['…/long_package_name_here/lib/src/feature/', '- ..', 'ring generated/', 'dot widgets/ (2) current focused', 'dot model.txt (1)'].join('\n'));
+    });
+
+    it('then the file opens, and the menu closes.', () => {
+      assert.equal(opened, [`${deep}/model.txt`, 'menu closed'].join('\n'));
+    });
+  });
+});
