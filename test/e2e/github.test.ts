@@ -60,6 +60,9 @@ function posted(gh: GhStub, mutation: string): string {
   return JSON.stringify(body.variables.input);
 }
 
+// A thread as the page shows it: open or folded, and its header.
+const threadShown = (id: string) => `(() => { const th = document.querySelector('.th[data-thread="${id}"]'); if (!th) return 'none'; const head = th.querySelector(':scope > .th-fold')?.textContent.replace(/\\s+/g, ' ').trim(); return (th.querySelector(':scope > .cm') ? 'open' : 'folded') + (head ? ': ' + head : ''); })()`;
+
 describe('Given a served review of pull request 7, with an open thread on the call and a resolved thread on the print, ', { skip, timeout: 300_000 }, () => {
   let repo: TempRepo | undefined;
   let gh: GhStub | undefined;
@@ -286,6 +289,41 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     it('then the thread opens again.', () => {
       assert.equal(opened, 'open');
+    });
+  });
+
+  describe('when the thread is resolved again, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.click('[data-act="gh-resolve"][data-thread="THREAD_1"]');
+      await page!.until(`(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved')`);
+      shown = await read(page!, threadShown('THREAD_1'));
+    });
+
+    it('then it folds, though it was unfolded before.', () => {
+      assert.equal(shown, `folded: Resolved by ada· line ${callLine} · 1 comment`);
+    });
+  });
+
+  describe('when the open thread is opened from the Threads tab and resolved, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await page!.click('[data-tab="comments"]');
+      await page!.until(`!!document.querySelector('[data-act="thread-open"][data-thread="THREAD_1"]')`);
+      await page!.click('[data-act="thread-open"][data-thread="THREAD_1"]');
+      await page!.until(`!!document.querySelector('[data-act="gh-resolve"][data-thread="THREAD_1"]')`);
+      await page!.click('[data-act="gh-resolve"][data-thread="THREAD_1"]');
+      await page!.until(`(document.querySelector('[data-thread="THREAD_1"] .th-fold')?.textContent || '').includes('Resolved')`);
+      shown = await read(page!, threadShown('THREAD_1'));
+    });
+
+    it('then it folds.', () => {
+      assert.equal(shown, `folded: Resolved by ada· line ${callLine} · 1 comment`);
     });
   });
 

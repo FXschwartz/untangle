@@ -2624,7 +2624,7 @@
   function openThread(id) {
     const t = GH.data && GH.data.threads.find((x) => x.id === id);
     if (!t) return;
-    GH.opened.add(t.id);
+    if (t.resolved) GH.opened.add(t.id);
     state.peek = null;
     const inModel = M().files.some((f) => f.p === t.path) || M().generated.some((f) => f.p === t.path);
     state.view = inModel ? { kind: 'file', path: t.path } : { kind: 'conversation' };
@@ -6147,7 +6147,7 @@
       if (!confirm('Delete this comment on GitHub?')) return;
       return ghAct('del:' + d.id, { action: 'delete', kind: d.kind, id: d.id }, () => toast('Comment deleted'));
     }
-    if (act === 'gh-resolve') return ghAct('resolve:' + d.thread, { action: 'resolve', thread: d.thread, resolved: d.on === 'true' });
+    if (act === 'gh-resolve') return ghAct('resolve:' + d.thread, { action: 'resolve', thread: d.thread, resolved: d.on === 'true' }, () => GH.opened.delete(d.thread));
     if (act === 'gh-comment') {
       const body = bodyOf('issue');
       if (!body) return;
@@ -6185,11 +6185,12 @@
   function ntCopied(ns) {
     api('notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'copied', ns }) }).then(okJson).then((j) => { ntSet(j); render(); }).catch(() => {});
   }
-  // A note, from the Threads tab or Ctrl K: its file, opened at its lines, and the note pulsing.
+  // A note, from the Threads tab or Ctrl K: its file, opened at its lines, and the note pulsing
+  // (unfolded, if it's resolved).
   function openNote(n) {
     const note = NT.byN.get(n);
     if (!note) return;
-    NT.opened.add(n);
+    if (note.resolved) NT.opened.add(n);
     state.peek = null;
     if (!M().files.some((f) => f.p === note.path) && !M().generated.some((f) => f.p === note.path)) return toast(`${note.path} isn’t in this review`);
     state.view = { kind: 'file', path: note.path };
@@ -6259,7 +6260,7 @@
       if (!confirm(lead ? `Delete N${n}${more ? ` and its ${more} repl${more === 1 ? 'y' : 'ies'}` : ''}? This can’t be undone.` : 'Delete this reply?')) return;
       return ntAct('del:' + n + ':' + d.id, { action: 'delete', n, id: lead ? undefined : d.id }, () => toast(lead ? `N${n} deleted` : 'Reply deleted'));
     }
-    if (act === 'nt-resolve') { if (note) ntAct('res:' + n, { action: 'resolve', n, resolved: !note.resolved }); return; }
+    if (act === 'nt-resolve') { if (note) ntAct('res:' + n, { action: 'resolve', n, resolved: !note.resolved }, () => NT.opened.delete(n)); return; }
     if (act === 'nt-fold') { NT.opened.has(n) ? NT.opened.delete(n) : NT.opened.add(n); return render(); }
     if (act === 'nt-was') { NT.was.has(n) ? NT.was.delete(n) : NT.was.add(n); return render(); }
     if (act === 'nt-away') { NT.folded.has(d.p) ? NT.folded.delete(d.p) : NT.folded.add(d.p); return render(); }
