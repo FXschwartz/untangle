@@ -55,7 +55,7 @@ export interface Browser {
   eval(expression: string): Promise<unknown>;
   click(selector: string, opts?: { scroll?: boolean; ctrl?: boolean; meta?: boolean; shift?: boolean }): Promise<void>;
   /** Clicks the element whose own text is `name` and whose line contains `line`. */
-  clickIn(selector: string, name: string, line: string): Promise<void>;
+  clickIn(selector: string, name: string, line: string, opts?: { ctrl?: boolean }): Promise<void>;
   shiftClick(selector: string): Promise<void>;
   doubleClick(selector: string): Promise<void>;
   /** Presses at the element's center, moves by `dx`/`dy`, and releases. */
