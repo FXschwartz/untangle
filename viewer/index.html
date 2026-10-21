@@ -944,6 +944,9 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .pk-use[aria-current="true"] .pk-up::after { color: var(--accent); }
 .pk-use .pk-up { color: var(--text-2); overflow-wrap: anywhere; }
 .pk-use code { overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: 12px; }
+/* The type an implementing member is in, before its line. */
+.pk-use .pk-in { color: var(--text-2); }
+.pk-use .pk-in::after { content: " › "; color: var(--text-3); }
 .pk-use.done { opacity: .55; }
 .pk-use.done .pk-up::before { content: "✓ "; color: var(--done); }
 

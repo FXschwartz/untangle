@@ -31,7 +31,7 @@ export interface LiveTarget {
   code: string[];
 }
 
-/** A line that uses a name, as the page lists it. */
+/** A line that uses a name, or that declares what implements it, as the page lists it. */
 export interface LiveUsage {
   side: Side | null;
   p: string;
@@ -41,6 +41,8 @@ export interface LiveUsage {
   l: number;
   c: number;
   text: string;
+  /** For a member that implements a name: the class (or mixin, enum, extension type) it's in. */
+  in?: string;
 }
 
 const MAX_FILE = 4 << 20;
@@ -170,6 +172,17 @@ export class LiveSession {
    * name in a file outside the repository is looked up from the head.
    */
   async usages(where: { side?: string; p?: string; ext?: number }, line: number, col: number, files: string[]): Promise<{ usages: LiveUsage[]; truncated: boolean }> {
+    const { list, truncated } = await this.lines(where, files, (server, file, load) => server.references(file, line - 1, col, load));
+    return { usages: list, truncated };
+  }
+
+  /** The declarations that implement the name at a position (a class's subtypes, a member's overrides), found as its usages are. */
+  async implementations(where: { side?: string; p?: string; ext?: number }, line: number, col: number, files: string[]): Promise<{ implementations: LiveUsage[]; truncated: boolean }> {
+    const { list, truncated } = await this.lines(where, files, (server, file, load) => server.implementations(file, line - 1, col, load), true);
+    return { implementations: list, truncated };
+  }
+
+  private async lines(where: { side?: string; p?: string; ext?: number }, files: string[], ask: (server: DartServer, file: string, load: boolean) => Promise<Location[]>, members = false): Promise<{ list: LiveUsage[]; truncated: boolean }> {
     const file = await this.resolve(where);
     if (!file) throw new Error('not a file of this review');
     const server = await this.ensure();
@@ -177,7 +190,7 @@ export class LiveSession {
     const roots = await this.checkouts();
     const root = side === 'head' ? roots.headDir : roots.baseDir;
     await server.loadAll(files.filter((p) => p.endsWith('.dart')).map((p) => path.join(root, p)).filter((f) => fs.existsSync(f)));
-    const found = await server.references(file, line - 1, col, where.ext == null);
+    const found = await ask(server, file, where.ext == null);
     const texts = new Map<string, string[]>();
     const textOf = (abs: string, at: number) => {
       if (!texts.has(abs)) {
@@ -189,6 +202,16 @@ export class LiveSession {
       }
       return (texts.get(abs)![at] || '').replace(/\r$/, '').slice(0, 400);
     };
+    // A member's type: the nearest declaration above it at the margin, where Dart's formatter puts them.
+    const typeOf = (abs: string, at: number): string | undefined => {
+      const all = texts.get(abs) || [];
+      if (!/^\s/.test(all[at] || '')) return undefined;
+      for (let i = at - 1; i >= 0; i--) {
+        if (!/^[^\s}/@*]/.test(all[i])) continue;
+        return /^(?:(?:abstract|sealed|base|interface|final)\s+)*(?:mixin\s+)?(?:class|mixin|enum|extension\s+type(?:\s+const)?)\s+([A-Za-z_$][\w$]*)/.exec(all[i])?.[1];
+      }
+      return undefined;
+    };
     // One row a line, at its first use; the review's side first, then files outside the repository.
     const seen = new Set<string>();
     const out: LiveUsage[] = [];
@@ -198,10 +221,11 @@ export class LiveSession {
       seen.add(key);
       const at = await this.place(loc.path);
       if (at.side && at.side !== side) continue;
-      out.push({ side: at.side, p: at.p, ...(at.ext != null ? { ext: at.ext } : {}), w: at.w, l: loc.line + 1, c: loc.col, text: textOf(loc.path, loc.line) });
+      const text = textOf(loc.path, loc.line), type = members ? typeOf(loc.path, loc.line) : undefined;
+      out.push({ side: at.side, p: at.p, ...(at.ext != null ? { ext: at.ext } : {}), w: at.w, l: loc.line + 1, c: loc.col, text, ...(type ? { in: type } : {}) });
     }
     out.sort((a, b) => Number(!a.side) - Number(!b.side) || (a.p < b.p ? -1 : a.p > b.p ? 1 : 0) || a.l - b.l);
-    return { usages: out.slice(0, USAGES_MAX), truncated: out.length > USAGES_MAX };
+    return { list: out.slice(0, USAGES_MAX), truncated: out.length > USAGES_MAX };
   }
 
   /**

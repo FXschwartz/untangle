@@ -1156,37 +1156,41 @@
     if (L.status !== 'ok') return `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(L.error || 'The language server knows no definition for this name.')}</span><span class="sp"></span>${back}${close}</div>`;
     const t = L.target;
     const where = placeWords(t);
-    let h = `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>${back}`
+    let h = `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>${back}${implButton(p)}`
       + sourceButton({ side: t.side, p: t.side ? t.p : null, ext: t.ext, line: t.l, label: t.w !== 'repo' ? t.p : null, where }, 'Open file', 'btn xs')
       + editorHtml({ side: t.side, p: t.p, abs: t.abs, line: t.l, col: t.c }) + close + '</div>'
       + peekCodeHtml(t);
     if (t.side === 'head' && M().head.has(t.p + ':' + t.l)) h += `<div class="pk-foot"><button type="button" class="linkish" data-open="${esc(t.p)}" data-line="${t.l}">Go to it in this diff</button></div>`;
     return h;
   }
-  // The lines that use a name, asked live where it's declared: as with changed usages, the one
-  // picked shows above the list.
+  // The lines that use a name, asked live where it's declared, or the declarations that implement
+  // it: as with changed usages, the one picked shows above the list.
   const USES_WAIT = `<div class="pk-wait pk-few" aria-busy="true" aria-label="Looking them up">${'<i class="pk-sk"></i>'.repeat(4)}</div>`;
+  const LIST_WORDS = { usages: ['Usage', 'usage'], implementations: ['Implementation', 'implementation'] };
+  // The way from a peek to what implements its name, where it can have implementations.
+  const implButton = (p) => (CONFIG.served && peekSubject(p) ? '<button type="button" class="btn xs" data-act="peek-impl" title="What extends, implements or overrides it, from the language server">Implementations</button>' : '');
   function usesPeekHtml(p) {
     const U = p.uses;
+    const [One, one] = LIST_WORDS[U.kind];
     const back = peekBack(p);
     const close = '<button type="button" class="pk-x" data-act="close-peek">Close</button>';
     const name = `<span class="pk-loc">${esc(U.name)}</span>`;
-    if (U.status === 'loading') return `<div class="pk-h"><b>Usages</b>${name}<span class="pk-src">looking them up…</span><span class="sp"></span>${back}${close}</div>${USES_WAIT}`;
-    if (U.status !== 'ok') return `<div class="pk-h"><b>Usages</b><span class="pk-loc">${esc(U.error)}</span><span class="sp"></span>${back}${close}</div>`;
+    if (U.status === 'loading') return `<div class="pk-h"><b>${One}s</b>${name}<span class="pk-src">looking them up…</span><span class="sp"></span>${back}${close}</div>${USES_WAIT}`;
+    if (U.status !== 'ok') return `<div class="pk-h"><b>${One}s</b><span class="pk-loc">${esc(U.error)}</span><span class="sp"></span>${back}${close}</div>`;
     const n = U.list.length;
     const scope = 'in the packages this review changes';
-    if (!n) return `<div class="pk-h"><b>No usages</b>${name}<span class="pk-src">${scope}</span><span class="sp"></span>${back}${close}</div>`;
+    if (!n) return `<div class="pk-h"><b>No ${one}s</b>${name}<span class="pk-src">${scope}</span><span class="sp"></span>${back}${implButton(p)}${close}</div>`;
     const sel = p.sel != null ? U.list[p.sel] : null;
     let h = '';
     if (sel) {
-      h += `<div class="pk-h"><b>Usage ${p.sel + 1} of ${n}</b><span class="pk-loc">${esc(sel.p)}:${sel.l}</span><span class="pk-src">${placeWords(sel)}</span><span class="sp"></span>${back}`
+      h += `<div class="pk-h"><b>${One} ${p.sel + 1} of ${n}</b><span class="pk-loc">${esc(sel.p)}:${sel.l}</span><span class="pk-src">${placeWords(sel)}</span><span class="sp"></span>${back}`
         + `<button type="button" class="btn xs primary" data-act="peek-go">Go to it</button>${close}</div>`
         + peekCodeHtml({ side: sel.side, p: sel.p, ext: sel.ext, l: sel.l, s: sel.l, code: [sel.text] }, null, sel.side === 'head');
     }
-    h += `<div class="pk-h${sel ? ' pk-h2' : ''}"><b>${U.truncated ? 'The first ' : ''}${n} usage${n === 1 ? '' : 's'}</b>${name}<span class="pk-src">${scope}</span><span class="pk-hint">Click one to show it above, again to go to it</span><span class="sp"></span>${sel ? '' : back + close}</div><div class="pk-list">`;
+    h += `<div class="pk-h${sel ? ' pk-h2' : ''}"><b>${U.truncated ? 'The first ' : ''}${n} ${one}${n === 1 ? '' : 's'}</b>${name}<span class="pk-src">${scope}</span><span class="pk-hint">Click one to show it above, again to go to it</span><span class="sp"></span>${sel ? implButton(p) : back + implButton(p) + close}</div><div class="pk-list">`;
     const names = shortNames(U.list.map((u) => u.p));
     U.list.forEach((u, i) => {
-      h += `<button type="button" class="pk-use" data-act="peek-use" data-i="${i}" aria-current="${p.sel === i}" title="${p.sel === i ? 'Go to it' : 'Show it above'}"><span class="pk-up">${esc(names.get(u.p))}:${u.l}</span><code>${codeHtml({ p: u.p, lang: C.langOf(u.p) }, u.text.trim(), null, {})}</code></button>`;
+      h += `<button type="button" class="pk-use" data-act="peek-use" data-i="${i}" aria-current="${p.sel === i}" title="${p.sel === i ? 'Go to it' : 'Show it above'}"><span class="pk-up">${esc(names.get(u.p))}:${u.l}</span><code>${u.in ? `<span class="pk-in">${esc(u.in)}</span>` : ''}${codeHtml({ p: u.p, lang: C.langOf(u.p) }, u.text.trim(), null, {})}</code></button>`;
     });
     return h + '</div>';
   }
@@ -1269,7 +1273,7 @@
       const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : defsNow().targets[p.ti];
       const where = (p.old ? `old side · ${M().raw.left} · ` : '') + (t.w === 'repo' ? 'this repo' : t.w === 'sdk' ? 'Dart SDK' : 'package');
       const side = t.w === 'repo' ? (p.old ? 'base' : 'head') : null;
-      h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>`
+      h += `<div class="pk-h"><b>Definition</b><span class="pk-loc">${esc(t.p)}:${t.l}</span><span class="pk-src">${where}</span><span class="sp"></span>${implButton(p)}`
         + (side ? sourceButton({ side, p: t.p, line: t.l }, 'Open file', 'btn xs') + editorHtml({ side, p: t.p, line: t.l }) : CONFIG.served ? '<button type="button" class="btn xs" data-act="open-def">Open file</button>' : '')
         + `<button type="button" class="pk-x" data-act="close-peek">Close</button></div>`
         + peekCodeHtml(cachedPeekTarget(p, t, side));
@@ -1784,12 +1788,12 @@
       .then((j) => (j.target ? { q, status: 'ok', target: j.target } : { q, status: 'none' }))
       .catch((e) => ({ q, status: 'error', error: e.message }));
   }
-  // The lines that use a name, asked of the language server: { q, status: 'ok', list, truncated },
-  // or status 'error'.
-  function askUsages(q) {
-    return askAt('usages', q)
-      .then((j) => ({ q, status: 'ok', list: j.usages, truncated: j.truncated }))
-      .catch((e) => ({ q, status: 'error', error: e.message }));
+  // The lines that use a name (kind 'usages') or that implement it ('implementations'), asked of
+  // the language server: { q, kind, status: 'ok', list, truncated }, or status 'error'.
+  function askList(kind, q) {
+    return askAt(kind, q)
+      .then((j) => ({ q, kind, status: 'ok', list: j[kind], truncated: j.truncated }))
+      .catch((e) => ({ q, kind, status: 'error', error: e.message }));
   }
   // Whether the language server's definition of a name is that name itself: it was clicked where
   // it's declared.
@@ -1826,11 +1830,80 @@
     showUsages(q, el);
   }
   function fillUsages(peek, q, el) {
-    const name = el.textContent.replace(/^@/, '');
     delete peek.live;
-    peek.uses = { q, name, status: 'loading' };
+    fillList(peek, 'usages', q, nameOf(el));
+  }
+  // A peek's list of the lines that use a name or implement it, loading, then answered.
+  function fillList(peek, kind, q, name) {
+    peek.uses = { q, kind, name, status: 'loading' };
     peek.sel = null;
-    askUsages(q).then((answer) => { peek.uses = { ...answer, name }; if (state.peek === peek) updatePeek(); });
+    askList(kind, q).then((answer) => { peek.uses = { ...answer, name }; if (state.peek === peek) updatePeek(); });
+  }
+  const nameOf = (el) => el.textContent.replace(/^@/, '');
+  const nameIn = (text, col) => (/^[A-Za-z_$][\w$]*/.exec(text.slice(col)) || [''])[0];
+  // What implements the name a peek is about (a class's subtypes, a member's overrides), listed in
+  // the peek's place: Back returns.
+  function showImplementations() {
+    const cur = state.peek, about = cur && peekSubject(cur);
+    if (!about) return;
+    const peek = { ...anchorOf(cur), back: [...(cur.back || []), cur] };
+    fillList(peek, 'implementations', about.q, about.name);
+    state.peek = peek;
+    updatePeek();
+  }
+  // The name a peek is about, as a question to the language server, when it can have
+  // implementations: the declaration its usages are listed for, or the one its definition shows.
+  // That's known once the declaration's file is in (the peek loads it).
+  function peekSubject(p) {
+    if (!CONFIG.served) return null;
+    let q, name, at;
+    if (p.uses) {
+      if (p.uses.kind !== 'usages') return null;
+      ({ q, name } = p.uses);
+      at = { side: q.side, p: q.p, ext: q.ext, l: q.l, c: q.c };
+    } else if (p.live) {
+      if (p.live.status !== 'ok') return null;
+      ({ q } = p.live);
+      at = p.live.target;
+      name = p.name || '';
+    } else {
+      if (p.ti == null || Number.isNaN(p.ti) || p.sel != null || !p.name) return null;
+      const t = p.old ? DEFS_OLD[state.compare].targets[p.ti] : defsNow().targets[p.ti];
+      if (!t) return null;
+      q = { side: p.old ? 'base' : 'head', p: p.path, ext: null, l: p.old ? p.o : p.n, c: p.col };
+      name = p.name;
+      // A definition answered ahead keeps no column; one outside the repository is asked again.
+      at = t.w === 'repo' ? { ...t, side: p.old ? 'base' : 'head', c: null } : p.resolved;
+      if (!at) return null;
+    }
+    const s = at.side || at.ext != null ? loadSource({ side: at.side, path: at.p, ext: at.ext }, 'peek') : null;
+    if (!s || s.status !== 'ok') return null;
+    const line = s.lines[at.l - 1] || '';
+    let col = at.c;
+    if (col == null) {
+      const m = new RegExp(`(^|[^\\w$])${name.replace(/\$/g, '\\$')}(?![\\w$])`).exec(line);
+      col = m ? m.index + m[1].length : -1;
+    }
+    return implementable(s.lines, at.l, col) ? { q, name: name || nameIn(line, col) } : null;
+  }
+  // Whether the name at a column of a line (1-based) of a file declares what can be implemented:
+  // a class or a mixin, or an instance member of one. Dart's formatter puts members one level in,
+  // under the class at the margin, and locals deeper or under a function.
+  function implementable(lines, l, col) {
+    const line = lines[l - 1];
+    if (line == null || col == null || col < 0) return false;
+    const before = line.slice(0, col);
+    if (/\b(?:class|mixin)\s+$/.test(before)) return true;
+    if (!/^(?: {1,2}|\t)\S/.test(line)) return false;
+    // Not a parameter, a static member, a factory or a constructor, which nothing overrides.
+    const open = (before.match(/\(/g) || []).length - (before.match(/\)/g) || []).length;
+    if (open > 0 || /\b(?:static|factory|const)\s/.test(before) || /\.\s*$/.test(before) || /^[A-Z]/.test(nameIn(line, col))) return false;
+    for (let i = l - 2; i >= 0; i--) {
+      // The declaration it's in: the nearest line above at the margin, past comments and annotations.
+      if (!/^[^\s}/@*]/.test(lines[i])) continue;
+      return /^(?:(?:abstract|sealed|base|interface|final)\s+)*(?:mixin\s+)?class\b|^(?:base\s+)?mixin\b/.test(lines[i]);
+    }
+    return false;
   }
   // The definition a peek shows, to tell whether a name in it leads back there.
   function shownTarget(p) {
@@ -1867,13 +1940,13 @@
         el.classList.remove('asking');
         if (state.peek !== cur) return;
         if (live.status !== 'ok') return toast(live.status === 'none' ? 'The language server knows no definition for this name.' : live.error);
-        if (declares(q, live.target)) return cur.uses && sameQ(cur.uses.q) ? undefined : showUsages(q, el);
+        if (declares(q, live.target)) return cur.uses && cur.uses.kind === 'usages' && sameQ(cur.uses.q) ? undefined : showUsages(q, el);
         if (sameTarget(shownTarget(cur), live.target)) {
           const hit = main.querySelector(PEEK + ' .pk-ln.hit');
           if (hit) { hit.classList.remove('flash'); void hit.offsetWidth; hit.classList.add('flash'); }
           return;
         }
-        state.peek = { ...anchorOf(cur), live, back: [...(cur.back || []), cur] };
+        state.peek = { ...anchorOf(cur), live, back: [...(cur.back || []), cur], name: nameOf(el) };
         updatePeek();
       });
       return;
@@ -1884,6 +1957,7 @@
     if (state.view.kind === 'source') peek = { src: { key: srcKey(state.view), line: q.l }, live: { q, status: 'loading' } };
     else if (q.side === 'base') peek = { old: true, path: q.p, o: q.l, col: q.c, live: { q, status: 'loading' } };
     else peek = { path: q.p, n: q.l, col: q.c, live: { q, status: 'loading' } };
+    peek.name = nameOf(el);
     state.peek = peek;
     render();
     askDefinition(q).then((live) => {
@@ -6307,14 +6381,14 @@
     if (t.classList.contains('ref') && d.o !== undefined) {
       const path = d.path, o = Number(d.o), col = Number(d.col);
       const same = state.peek && state.peek.old && state.peek.path === path && state.peek.o === o && state.peek.col === col;
-      state.peek = same ? null : { old: true, path, o, col, ti: Number(d.ti) };
+      state.peek = same ? null : { old: true, path, o, col, ti: Number(d.ti), name: nameOf(t) };
       return render();
     }
     if (t.classList.contains('ref')) {
       const path = d.path, n = Number(d.n), col = Number(d.col);
       const key = `${path}:${n}:${col}`;
       const same = state.peek && state.peek.path === path && state.peek.n === n && state.peek.col === col;
-      state.peek = same ? null : { path, n, col, ti: Number(d.ti), usageKey: REFS[state.compare][key] ? key : null };
+      state.peek = same ? null : { path, n, col, ti: Number(d.ti), usageKey: REFS[state.compare][key] ? key : null, name: nameOf(t) };
       return render();
     }
     if (d.usage && !d.act) {
@@ -6322,7 +6396,8 @@
       const path = d.usage.slice(0, i0), n = Number(d.usage.slice(i0 + 1, i1)), col = Number(d.usage.slice(i1 + 1));
       const defs = lineDefs(path, n);
       const same = state.peek && state.peek.usageKey === d.usage;
-      state.peek = same ? null : { path, n, col, ti: defs ? defs.get(col) : undefined, usageKey: d.usage };
+      const hl = M().head.get(path + ':' + n);
+      state.peek = same ? null : { path, n, col, ti: defs ? defs.get(col) : undefined, usageKey: d.usage, name: hl ? nameIn(hl.f.hunks[hl.hi].rows[hl.ri][1], col) : '' };
       return render();
     }
     // A commit: its changes become the lens (Shift: the commits from the last one clicked).
@@ -6481,6 +6556,7 @@
     }
     if (act === 'close-peek') { state.peek = null; return render(); }
     if (act === 'peek-back') { const prev = state.peek.back.slice(-1)[0]; state.peek = prev; return render(); }
+    if (act === 'peek-impl') return showImplementations();
     if (act === 'open-source') return openSource(d);
     if (act === 'open-def') {
       // Ask the server where the peeked name is defined, then open that file whole.

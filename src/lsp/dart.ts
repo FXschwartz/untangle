@@ -140,6 +140,13 @@ export class DartServer {
     return (res || []).filter((x) => x.uri.startsWith('file:')).map((x) => ({ path: uriPath(x.uri), line: x.range.start.line, col: x.range.start.character }));
   }
 
+  /** What implements the name at a position, in the packages analyzed so far: a class's subtypes, a member's overrides. */
+  async implementations(file: string, line: number, col: number, load = true): Promise<Location[]> {
+    if (load) this.load(file);
+    const res = await this.query<Array<{ uri: string; range: LspRange }> | null>('textDocument/implementation', { textDocument: { uri: fileUri(file) }, position: { line, character: col } });
+    return (res || []).filter((x) => x.uri.startsWith('file:')).map((x) => ({ path: uriPath(x.uri), line: x.range.start.line, col: x.range.start.character }));
+  }
+
   /** Declarations whose name matches a query, in the packages analyzed so far (workspace/symbol). */
   async symbols(query: string): Promise<Array<{ name: string; kind: number; container: string | null; location: Location }>> {
     type Info = { name: string; kind: number; containerName?: string; location: { uri: string; range?: LspRange } };

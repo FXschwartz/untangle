@@ -266,10 +266,11 @@ export class ReviewSession {
       const target = await this.live.definition(where(), Number(q.get('l')), Number(q.get('c')));
       return { data: { target } };
     }
-    if (route === 'usages' && method === 'GET') {
+    if ((route === 'usages' || route === 'implementations') && method === 'GET') {
       const gone = q.get('side') === 'base' ? 'A' : 'D';
       const files = this.data.model.compares.base.files.filter((f: { s: string }) => f.s !== gone).map((f: { p: string }) => f.p);
-      return { data: await this.live.usages(where(), Number(q.get('l')), Number(q.get('c')), files) };
+      const l = Number(q.get('l')), c = Number(q.get('c'));
+      return { data: route === 'usages' ? await this.live.usages(where(), l, c, files) : await this.live.implementations(where(), l, c, files) };
     }
     if (route === 'commit-file' && method === 'GET') {
       const p = q.get('p') || '';
