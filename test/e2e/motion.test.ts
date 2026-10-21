@@ -223,4 +223,48 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
       assert.equal(motion, 'the details grow\na stand-in after its row with 1 details in it');
     });
   });
+
+  describe('when the Notes menu, then a breadcrumb\'s folder, opens and closes, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      await openFile('lib/notes.dart');
+      // Asked and read at once: the motion has just begun. Its origin is where the button is.
+      const ask = (pop: string, button: string, act: string) => `(() => {
+        ${act};
+        const el = document.querySelector(${JSON.stringify(pop)});
+        if (!el || el.hidden) return 'gone';
+        const a = el.getAnimations()[0];
+        if (!a) return el.inert ? 'still, out of reach' : 'open';
+        const b = document.querySelector(${JSON.stringify(button)}).getBoundingClientRect();
+        const left = el.offsetLeft + (el.offsetParent ? el.offsetParent.getBoundingClientRect().left + el.offsetParent.clientLeft : 0);
+        const from = Math.abs(left + parseFloat(el.style.transformOrigin) - (b.left + b.width / 2)) <= 1 ? 'its button' : 'elsewhere';
+        return (a.playbackRate > 0 ? 'opening from ' : 'closing into ') + from + (el.inert ? ', out of reach' : '');
+      })()`;
+      const escape = `document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`;
+      const seen: string[] = [];
+      const play = async (name: string, pop: string, button: string) => {
+        const steps = [await read(page!, ask(pop, button, `document.querySelector(${JSON.stringify(button)}).click()`))];
+        await page!.until(`document.getAnimations().length === 0`);
+        steps.push(await read(page!, ask(pop, button, '')));
+        steps.push(await read(page!, ask(pop, button, escape)));
+        await page!.until(`document.getAnimations().length === 0`);
+        steps.push(await read(page!, ask(pop, button, '')));
+        seen.push(`${name}: ${steps.join(' | ')}`);
+      };
+      await play('Notes', '.rv-pop', '[data-act="review-toggle"]');
+      await play('lib/', '.menu', '.crumbs [data-menu="crumb:0"]');
+      shown = seen.join('\n');
+    });
+
+    it('then each grows from its button as it fades in, and folds back into it, out of reach, before it goes.', () => {
+      assert.equal(shown, [
+        'Notes: opening from its button | open | closing into its button, out of reach | gone',
+        'lib/: opening from its button | open | closing into its button, out of reach | gone',
+      ].join('\n'));
+    });
+  });
 });

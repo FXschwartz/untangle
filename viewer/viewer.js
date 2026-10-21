@@ -1567,8 +1567,8 @@
   // the head commit's "Changes from". One at a time, under the button that opened it; items are
   // the page's usual buttons (data-act, data-chain, …).
   // crumb: the folder a breadcrumb's menu went to, from the folder it opened on; want: the menu
-  // that opens once what it lists has come.
-  const MENU = { open: null, el: null, html: '', crumb: null, want: null };
+  // that opens once what it lists has come; shown: the menu on screen, while it opens and after.
+  const MENU = { open: null, el: null, html: '', crumb: null, want: null, shown: null };
   const chainItem = (c) => { const st = stats(blocksOf(c.blocks)); const n = splitName(c.name); return { label: n.name, own: n.own, mono: !proseName(c), icon: ICON.chain, data: { chain: c.id }, key: st.open ? `${st.open} to review` : 'reviewed' }; };
   // What a view's ⋯ holds: how it shows the code, and where else to go from it.
   function viewMenuItems() {
@@ -1718,16 +1718,23 @@
   function renderMenu() {
     if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); }
     const el = MENU.el, lens = MENU.open === 'lens';
-    // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
-    el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
     const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
-    el.classList.toggle('panel', MENU.open === 'side');
-    el.classList.toggle('lens-pop', lens);
     const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
     const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : chainsMenuItems();
     const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
-    if (!html) { MENU.open = null; MENU.html = ''; el.hidden = true; viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false')); return; }
+    if (!html) {
+      MENU.open = null;
+      MENU.html = '';
+      viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+      // It folds back into its button as it was, out of reach, then hides.
+      if (MENU.shown) { MENU.shown = null; el.inert = true; pop(el, false, () => { el.hidden = true; el.inert = false; }); }
+      return;
+    }
+    // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
+    el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
+    el.classList.toggle('panel', MENU.open === 'side');
+    el.classList.toggle('lens-pop', lens);
     if (html !== MENU.html) {
       const list = el.querySelector('.lp-list'), top = list ? list.scrollTop : 0;
       el.innerHTML = html;
@@ -1736,11 +1743,20 @@
       if (again) again.scrollTop = top;
     }
     el.hidden = false;
+    el.inert = false;
     anchor.setAttribute('aria-expanded', 'true');
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
-    const left = MENU.open === 'side' || MENU.open === 'chains' || lens || crumb ? r.left : r.right - w;
-    el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - w - 8))}px`;
-    el.style.top = `${r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
+    const left = Math.max(8, Math.min(MENU.open === 'side' || MENU.open === 'chains' || lens || crumb ? r.left : r.right - w, window.innerWidth - w - 8));
+    const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    // Opened, or another menu in its place: it grows from its button.
+    if (MENU.shown !== MENU.open) {
+      el.style.transformOrigin = `${Math.round(r.left + r.width / 2 - left)}px ${top < r.top ? '100%' : '0'}`;
+      if (MENU.shown) unpop(el);
+      MENU.shown = MENU.open;
+      pop(el, true);
+    }
   }
   function toggleMenu(kind) {
     // A breadcrumb's folder opens once untangle has said what else is in it: asked as the
@@ -2826,9 +2842,9 @@
     const open = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
     const label = local ? `Notes${open ? ` <span class="rv-n nt">${open}</span>` : ''}` : n ? `Finish review <span class="rv-n">${n}</span>` : 'Review';
     const title = local ? 'Your notes, kept on this machine: copy them for your agent, or post them to GitHub' : n ? `Finish your review: ${n} pending comment${n === 1 ? '' : 's'}` : 'Comment on, approve or request changes to the pull request';
-    let h = `<button type="button" class="btn rv-btn${local ? ' local' : ''}" data-act="review-toggle" aria-expanded="${GH.reviewOpen}" aria-haspopup="dialog" title="${esc(title)}">${label}${ICON.chevronDown}</button>`;
+    let h = '';
     if (GH.reviewOpen) {
-      h += `<div class="rv-pop${local ? ' local' : ''}" role="dialog" aria-label="${local ? 'Your notes' : 'Finish your review'}">${modeHtml()}`;
+      h += modeHtml();
       if (local) h += notesPopHtml();
       else if (!d) h += `<p class="rv-sub">${GH.error ? esc(GH.error) : 'Loading the conversation from GitHub…'}</p>`;
       else {
@@ -2844,15 +2860,38 @@
           })
           + (kept ? `<p class="rv-sub">Your ${kept} local note${kept === 1 ? '' : 's'} stay${kept === 1 ? 's' : ''} here. Switch to Local notes to copy them.</p>` : '');
       }
-      h += '</div>';
     }
     // What had the focus in the menu keeps it as the menu is drawn again: a radio, the switch, the
     // line for the agent (with its caret). Drafts get theirs back from render.
     const ae = el.contains(document.activeElement) ? document.activeElement : null;
     const sel = !ae ? null : ae.name ? `[name="${ae.name}"]${ae.type === 'radio' ? `[value="${ae.value}"]` : ''}` : ae.matches('[data-nt-opening]') ? '[data-nt-opening]' : ae.dataset.act && ae.dataset.draft == null ? `[data-act="${ae.dataset.act}"]${ae.dataset.mode ? `[data-mode="${ae.dataset.mode}"]` : ''}` : null;
     const caret = ae && ae.matches('[data-nt-opening]') ? [ae.selectionStart, ae.selectionEnd, ae.scrollTop] : null;
-    el.innerHTML = h;
-    fitBoxes(el);
+    // The button, and its menu while it's open: one element as it opens and is drawn again, and
+    // as it closes into the button, out of reach, before it goes.
+    let btn = el.querySelector(':scope > .rv-btn'), box = el.querySelector(':scope > .rv-pop');
+    if (!btn) { el.insertAdjacentHTML('afterbegin', '<button type="button" class="btn rv-btn" data-act="review-toggle" aria-haspopup="dialog"></button>'); btn = el.firstElementChild; }
+    btn.className = `btn rv-btn${local ? ' local' : ''}`;
+    btn.setAttribute('aria-expanded', String(GH.reviewOpen));
+    btn.title = title;
+    btn.innerHTML = label + ICON.chevronDown;
+    if (GH.reviewOpen) {
+      const opening = !box || box.inert;
+      if (!box) { box = document.createElement('div'); box.setAttribute('role', 'dialog'); el.appendChild(box); }
+      box.className = `rv-pop${local ? ' local' : ''}`;
+      box.setAttribute('aria-label', local ? 'Your notes' : 'Finish your review');
+      box.inert = false;
+      box.innerHTML = h;
+      fitBoxes(box);
+      if (opening) {
+        const b = btn.getBoundingClientRect(), r = box.getBoundingClientRect();
+        box.style.transformOrigin = `${Math.round(b.left + b.width / 2 - r.left)}px 0`;
+        pop(box, true);
+      }
+    } else if (box && !box.inert) {
+      const gone = box;
+      gone.inert = true;
+      pop(gone, false, () => gone.remove());
+    }
     const again = sel && el.querySelector(sel);
     if (again) {
       again.focus({ preventScroll: true });
@@ -5065,6 +5104,31 @@
   }
   const EASE = 'cubic-bezier(.2, 0, 0, 1)';
   const easeOut = (p) => 1 - Math.pow(1 - p, 4);
+  // A menu, or Review's, opens from its button (its transform-origin), growing as it fades in,
+  // and closes back into it: the same motion, reversed. Turned around midway, it goes back from
+  // where it is. `closed` runs once it's out of sight.
+  const POP_FRAMES = [{ opacity: 0, transform: 'scale(.96)' }, { opacity: 1, transform: 'none' }];
+  const POP_MS = 150;
+  const popping = new WeakMap();
+  function pop(el, open, closed) {
+    let a = popping.get(el);
+    if (!moving()) { unpop(el); if (!open) closed(); return; }
+    if (!a) {
+      a = el.animate(POP_FRAMES, { duration: POP_MS, easing: EASE, fill: 'both' });
+      popping.set(el, a);
+      // Open without motion so far: it closes from open.
+      if (!open) a.finish();
+    }
+    a.onfinish = () => {
+      if (popping.get(el) !== a) return;
+      popping.delete(el);
+      a.cancel();
+      if (a.playbackRate < 0) closed();
+    };
+    a.playbackRate = open ? 1 : -1;
+    a.play();
+  }
+  function unpop(el) { const a = popping.get(el); if (a) { popping.delete(el); a.cancel(); } }
   // What the next render is for: { mark: [block ids] } (changes marked or unmarked, sections
   // folded), { more: { key, side, n } } (lines shown from a divider), or { away: { act, p } } (a
   // file's threads or notes off its diff, folded or unfolded).
