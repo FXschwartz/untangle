@@ -269,6 +269,42 @@ describe('Given a served review that adds two tests, on a phone of 390 by 844 pi
     });
   });
 
+  describe('when ⋯ is swiped down from one of its items, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.click('#vw-more');
+      await page!.until(`!document.querySelector('.menu').hidden && !!document.querySelector('.menu [data-act="revdiff"]')`);
+      await page!.swipe('.menu [data-act="revdiff"]', 200);
+      await page!.until(`document.querySelector('.menu').hidden`);
+      await page!.click('#vw-more');
+      await page!.until(`!document.querySelector('.menu').hidden`);
+      shown = await read(page!, `document.querySelector('.menu [data-act="revdiff"]').textContent + ' ' + document.querySelector('.menu [data-act="revdiff"]').getAttribute('aria-checked')`);
+    });
+
+    it('then it closes, and the item it started on stays as it was.', () => {
+      assert.equal(shown, 'Diffs of reviewed code false');
+    });
+  });
+
+  describe('when ⋯ has further up to go and is swiped down, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.eval(`(() => { const m = document.querySelector('.menu'); m.style.maxHeight = '200px'; m.scrollTop = 120; })()`);
+      await page!.swipe('.menu', 60);
+      await new Promise((r) => setTimeout(r, 300));
+      shown = await read(page!, `(() => { const m = document.querySelector('.menu'); return (m.hidden ? 'closed' : 'open') + ', ' + (m.scrollTop < 120 ? 'scrolled up' : 'not scrolled'); })()`);
+      await page!.eval(`document.querySelector('.menu').style.maxHeight = ''`);
+      await page!.eval('history.back()');
+      await page!.until(`document.querySelector('.menu').hidden`);
+    });
+
+    it('then it scrolls up, and stays open.', () => {
+      assert.equal(shown, 'open, scrolled up');
+    });
+  });
+
   describe('when a test opens, ', () => {
     let shown: string;
 

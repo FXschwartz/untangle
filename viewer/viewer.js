@@ -1797,7 +1797,7 @@
   // button is gone. Drawn again only when it changed: what has the focus, and the commits' list
   // scrolled, stay.
   function renderMenu() {
-    if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); }
+    if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); sheetTouch(MENU.el); }
     const el = MENU.el, lens = MENU.open === 'lens';
     const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
     const anchors = MENU.open ? [...viewer.querySelectorAll(`[data-menu="${MENU.open}"]`)] : [];
@@ -2973,7 +2973,7 @@
     btn.innerHTML = label + ICON.chevronDown;
     if (GH.reviewOpen) {
       const opening = !box || box.inert;
-      if (!box) { box = document.createElement('div'); box.setAttribute('role', 'dialog'); el.appendChild(box); }
+      if (!box) { box = document.createElement('div'); box.setAttribute('role', 'dialog'); el.appendChild(box); sheetTouch(box); }
       box.className = `rv-pop${local ? ' local' : ''}`;
       box.setAttribute('aria-label', local ? 'Your notes' : 'Finish your review');
       box.inert = false;
@@ -3061,6 +3061,7 @@
   function renderAgent() {
     const el = $('#vw-agent');
     if (!el) return;
+    sheetTouch(el);
     const list = agentsNow();
     el.hidden = !list.length;
     if (NT.agentOpen && !list.some((a) => a.name === NT.agentOpen)) NT.agentOpen = null;
@@ -3264,8 +3265,40 @@
     else if (box.matches('.rv-pop')) { GH.reviewOpen = false; render(); }
     else if (box.matches('.ag-pop')) { NT.agentOpen = null; renderAgent(); }
   };
-  document.addEventListener('pointerup', sheetLet);
-  document.addEventListener('pointercancel', sheetLet);
+  const pointerLet = (e) => { if (sheetDrag && sheetDrag.id === e.pointerId) sheetLet(); };
+  document.addEventListener('pointerup', pointerLet);
+  document.addEventListener('pointercancel', pointerLet);
+  // And down from anywhere else on it, when what's under the finger is scrolled to its top: a
+  // finger that goes up, sideways, or down a list that has further up to go scrolls it instead. The
+  // listener is the sheet's own (it has to be able to stop the scroll), so the view's scrolling
+  // never waits on one.
+  const sheetsTouched = new WeakSet();
+  const atTop = (from, box) => { for (let n = from; n && n !== box.parentElement; n = n.parentElement) if (n.scrollTop > 0) return false; return true; };
+  function sheetTouch(el) {
+    if (sheetsTouched.has(el)) return;
+    sheetsTouched.add(el);
+    let t = null;
+    el.addEventListener('touchstart', (e) => {
+      const box = e.target instanceof Element && !e.target.closest('.sh-h') && e.target.closest('.menu.sheet, .rv-pop, .ag-pop');
+      t = box && compact() && e.touches.length === 1 ? { box, x: e.touches[0].clientX, y: e.touches[0].clientY, top: atTop(e.target, box), on: false } : null;
+    }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      if (!t) return;
+      const p = e.touches[0], dx = p.clientX - t.x, dy = p.clientY - t.y;
+      if (!t.on) {
+        if (!(dy > 0 && dy >= Math.abs(dx) && t.top && e.cancelable)) { t = null; return; }
+        t.on = true;
+        sheetDrag = { box: t.box, y: p.clientY, dy: 0, id: 'touch' };
+      }
+      e.preventDefault();
+      if (!sheetDrag) return;
+      sheetDrag.dy = Math.max(0, p.clientY - sheetDrag.y);
+      sheetDrag.box.style.transform = `translateY(${sheetDrag.dy}px)`;
+    }, { passive: false });
+    const end = () => { if (t && t.on && sheetDrag && sheetDrag.id === 'touch') sheetLet(); t = null; };
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', end);
+  }
 
   // ---------- picking lines, on a touch screen: a tap on a line's gutter picks it, and a tap on
   // another line's gutter in the same hunk stretches to it (as the +, dragged, does with a pointer).

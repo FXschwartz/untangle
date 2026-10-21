@@ -72,6 +72,8 @@ export interface Browser {
   setViewport(width: number, height: number): Promise<void>;
   /** A phone's screen, its width and height in CSS pixels, with its pixel ratio and touch. */
   phone(width: number, height: number): Promise<void>;
+  /** A finger put down on the element's middle, moved down by dy pixels, and lifted. */
+  swipe(selector: string, dy: number): Promise<void>;
   reducedMotion(on: boolean): Promise<void>;
   /** Installs a fake clock before the next document's scripts run. */
   installClock(): Promise<void>;
@@ -381,6 +383,14 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     async hover(selector: string, opts: { scroll?: boolean } = {}) {
       const box = await boxOf(selector, opts.scroll !== false);
       await at(box.left + box.width / 2, box.top + box.height / 2, 'mouseMoved', 0, 0);
+    },
+    async swipe(selector: string, dy: number) {
+      const box = await boxOf(selector, false);
+      const x = box.left + box.width / 2, y = box.top + box.height / 2;
+      const touch = (type: string, ty: number) => session('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y: ty }] });
+      await touch('touchStart', y);
+      for (let i = 1; i <= 10; i++) await touch('touchMove', y + (dy * i) / 10);
+      await touch('touchEnd', y + dy);
     },
     async wheel(selector: string, dy: number) {
       // Measured once, not settled: the wheel turns while the page may still be moving.
