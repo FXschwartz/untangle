@@ -2345,6 +2345,14 @@
     const a = agentFirst(), live = !NT.data || NT.data.live;
     return `<span class="cmp-dest local"><i></i><b>Saved locally${!live ? ', held until you send it' : a && a.state !== 'deaf' && a.state !== 'left' ? `, sent to ${esc(a.name)}` : ''}</b></span>`;
   }
+  // A box's switch between a note for your agent and a comment on GitHub: the Review menu's, at
+  // hand. It sets where new comments go, this one too; what's written stays.
+  function modeSwitchHtml(local, key) {
+    const why = `GitHub didn’t answer: ${GH.error || ''}`;
+    return `<span class="mini-seg cmp-mode" role="group" aria-label="Note or comment">`
+      + `<button type="button" data-act="nt-mode" data-mode="local" data-key="${esc(key)}" aria-pressed="${local}" title="A note for your agent, kept on this machine"><i class="sw"></i>Note</button>`
+      + `<button type="button" data-act="nt-mode" data-mode="github" data-key="${esc(key)}" aria-pressed="${!local}" title="${ghCan() ? 'A comment on the pull request, on GitHub' : esc(why)}"${ghCan() ? '' : ' disabled'}><i class="sw gh"></i>Comment</button></span>`;
+  }
   // A text box for writing grows with what's in it, up to most of the window, and scrolls past that.
   function fitBox(ta) {
     const keep = main.scrollTop, max = Math.round(innerHeight * 0.6);
@@ -2356,7 +2364,8 @@
   }
   const fitBoxes = (el) => el.querySelectorAll('.cmp-ta, .rv-ta').forEach(fitBox);
   // A text box for markdown: Write and Preview, an error, and its buttons ([label, attrs, primary]).
-  // A note's (o.local) previews here and sends to untangle; o.dest says where it sends.
+  // A note's (o.local) previews here and sends to untangle; o.dest says where it sends, and o.mode
+  // switches it between a note and a comment when the review has both.
   function composerHtml(key, o) {
     const B = o.local ? NT : GH;
     const previewing = GH.preview.has(key);
@@ -2367,6 +2376,7 @@
     const pane = `data-act="cmp-pane" data-key="${esc(key)}"${o.local ? ' data-local="1"' : ''}`;
     const pre = o.local ? (noteMd(drafts.get(key) || '') || '<p class="muted">Nothing to preview.</p>') : p && p.html != null ? clean(p.html) : p && p.error ? `<p class="cmp-err">${esc(p.error)}</p>` : '<p class="muted">Rendering…</p>';
     return `<div class="cmp${o.local ? ' local' : ''}" data-cmp="${esc(key)}"><div class="cmp-tabs"><button type="button" ${pane} data-pane="write" aria-pressed="${!previewing}">Write</button><button type="button" ${pane} data-pane="preview" aria-pressed="${previewing}">Preview</button><span class="sp"></span>`
+      + (o.mode && NT.on && GH.on && NT.data ? modeSwitchHtml(o.local, key) : '')
       + (o.suggest ? iconBtn(ICON.suggest, 'Suggest a change: the lines, to edit into what they should be', `data-act="cmp-suggest" data-key="${esc(key)}"`) : '') + '</div>'
       + (previewing ? `<div class="cmp-pre cm-body">${pre}</div>`
         : `<textarea class="cmp-ta" data-draft="${esc(key)}" placeholder="${esc(o.placeholder || (o.local ? 'A note for your agent' : 'Leave a comment'))}" rows="${o.rows || 4}">${esc(drafts.get(key) || '')}</textarea>`)
@@ -2424,7 +2434,7 @@
     const key = 'reply:' + t.id, err = GH.errors.get('resolve:' + t.id);
     const res = t.resolved ? (t.canUnresolve ? 'Unresolve' : '') : t.canResolve ? 'Resolve' : '';
     const resBtn = res ? `<button type="button" class="btn" data-act="gh-resolve" data-thread="${esc(t.id)}" data-on="${!t.resolved}" title="${t.resolved ? 'Open the conversation again' : 'Resolve the conversation'}"${busyAttr('resolve:' + t.id)}>${GH.busy === 'resolve:' + t.id ? 'Saving…' : res}</button>` : '';
-    const reply = GH.replying.has(t.id) || drafts.has(key) ? composerHtml(key, { local: localMode(), dest: true, placeholder: localMode() ? 'A note on this thread, for your agent' : 'Reply…', rows: 3, buttons: sendButtons('gh-reply', `data-thread="${esc(t.id)}"`), cancel: 'reply-cancel' })
+    const reply = GH.replying.has(t.id) || drafts.has(key) ? composerHtml(key, { local: localMode(), dest: true, mode: true, placeholder: localMode() ? 'A note on this thread, for your agent' : 'Reply…', rows: 3, buttons: sendButtons('gh-reply', `data-thread="${esc(t.id)}"`), cancel: 'reply-cancel' })
       : t.canReply ? `<button type="button" class="th-reply" data-act="reply-open" data-thread="${esc(t.id)}">Reply…</button>` : '';
     if (reply || resBtn || err) h += `<div class="th-f">${reply}${resBtn}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>`;
     return h + '</div>';
@@ -2435,7 +2445,7 @@
     const what = c.startLine != null && (c.startLine !== c.line || c.startSide !== c.side) ? `lines ${sign(c.startSide)}${c.startLine} to ${sign(c.side)}${c.line}` : `line ${sign(c.side)}${c.line}`;
     const local = localMode();
     return `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on ${what}</b><span class="muted">Drag the + over more lines, or shift-click it on another line of this hunk, for a range.</span></div>`
-      + composerHtml(c.key, { local, dest: true, buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
+      + composerHtml(c.key, { local, dest: true, mode: true, buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
   }
   // Threads and notes on a side's line of a file, and the comment being written there.
   function threadsAt(f, side, line) {
@@ -2500,7 +2510,7 @@
     let h = '';
     if (GH.fileCompose === f.p) {
       const key = 'file:' + f.p, local = localMode();
-      h += `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on the file</b></div>${composerHtml(key, { local, dest: true, buttons: sendButtons('gh-thread', 'data-file="1"'), cancel: 'file-cancel' })}</div>`;
+      h += `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on the file</b></div>${composerHtml(key, { local, dest: true, mode: true, buttons: sendButtons('gh-thread', 'data-file="1"'), cancel: 'file-cancel' })}</div>`;
     }
     h += e.file.map((t) => threadHtml(t, { head: '<b>On the file</b>' })).join('');
     h += nt.file.map((n) => noteHtml(n, { head: '<b>On the file</b>' })).join('');
@@ -6357,7 +6367,12 @@
   // Notes: where comments go, writing and answering notes, and the two ways out (copy, post).
   function ntClick(act, d) {
     const n = d.n != null ? Number(d.n) : null, note = n != null ? NT.byN.get(n) : null;
-    if (act === 'nt-mode') { if (NT.data && d.mode !== (localMode() ? 'local' : 'github')) ntSettings({ mode: d.mode }); return; }
+    if (act === 'nt-mode') {
+      if (!NT.data || d.mode === (localMode() ? 'local' : 'github')) return;
+      // From a box, its text keeps the focus.
+      if (d.key) GH.focus = d.key;
+      return ntSettings({ mode: d.mode });
+    }
     if (act === 'nt-add') {
       const c = state.compose;
       if (!d.file && !c) return;
@@ -6459,6 +6474,8 @@
   document.addEventListener('click', (e) => { if (GH.reviewOpen && !e.target.closest('.vw-review, [data-act="review-toggle"]') && document.contains(e.target)) { GH.reviewOpen = false; render(); } });
   // So does an agent's menu.
   document.addEventListener('click', (e) => { if (NT.agentOpen && !e.target.closest('.vw-agent-w') && document.contains(e.target)) { NT.agentOpen = null; renderAgent(); } });
+  // A press on a box's switch leaves the focus, and the caret, where you're writing.
+  viewer.addEventListener('mousedown', (e) => { if (e.target.closest && e.target.closest('.cmp-mode button')) e.preventDefault(); });
   viewer.addEventListener('input', (e) => {
     if (e.target.matches && e.target.matches('.cmp-ta, .rv-ta')) fitBox(e.target);
     const k = e.target.dataset && e.target.dataset.draft;

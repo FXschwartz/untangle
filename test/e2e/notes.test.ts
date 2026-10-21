@@ -287,4 +287,35 @@ describe('Given a served review of pull request 7, and an agent’s commands, ',
       assert.equal(shown, 'a comment | Posts to GitHub · Markdown · Ctrl+Enter: Add review comment | Cancel | Add review comment');
     });
   });
+
+  describe('when a line’s box, with words in it, is switched to a note from the box itself, then back, ', () => {
+    const box = `(() => { const th = document.querySelector('.th.new'); const ta = th.querySelector('textarea'); return [th.matches('.note') ? 'a note' : 'a comment', th.querySelector('.th-new-h b').textContent, [...th.querySelectorAll('.cmp-mode button')].map((b) => b.textContent + (b.getAttribute('aria-pressed') === 'true' ? ' (on)' : '')).join(' '), ta.value, document.activeElement === ta ? 'caret at ' + ta.selectionStart : 'not focused', document.querySelector('.rv-btn').textContent.trim()].join(' | '); })()`;
+    let note: string;
+    let comment: string;
+
+    before(async () => {
+      await rest(page!);
+      await showAdd(page!, callLine);
+      await page!.click('.cm-add');
+      await page!.until(`!!document.querySelector('.th.new textarea')`);
+      await fill(page!, '.th.new textarea', 'Why greet ada?');
+      await page!.eval(`document.querySelector('.th.new textarea').setSelectionRange(4, 4)`);
+      await page!.click('.th.new .cmp-mode [data-mode="local"]');
+      await page!.until(`!!document.querySelector('.th.new.note')`);
+      note = await read(page!, box);
+      await page!.click('.th.new .cmp-mode [data-mode="github"]');
+      await page!.until(`!!document.querySelector('.th.new:not(.note)')`);
+      comment = await read(page!, box);
+      await page!.click('.th.new [data-act="compose-cancel"]');
+      await page!.until(`!document.querySelector('.th.new')`);
+    });
+
+    it('then it\'s a note, its words and the caret kept, and the bar says Notes.', () => {
+      assert.equal(note, `a note | Note on line +${callLine} | Note (on) Comment | Why greet ada? | caret at 4 | Notes 1`);
+    });
+
+    it('then back, it\'s a comment for GitHub again, as it was.', () => {
+      assert.equal(comment, `a comment | Comment on line +${callLine} | Note Comment (on) | Why greet ada? | caret at 4 | Finish review 1`);
+    });
+  });
 });
