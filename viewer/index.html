@@ -1272,9 +1272,39 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 .ln.glow, .sl.glow { animation: glow 1.8s var(--ease) 1; }
 @keyframes glow { 0%, 30% { box-shadow: inset 0 0 0 999px rgba(233, 180, 76, .13); } 100% { box-shadow: inset 0 0 0 999px transparent; } }
 
+/* A comment's tools on a touch screen: behind a ⋯, as a menu. */
+.cm-more { display: none; position: absolute; right: 8px; top: 3px; }
+.cm.first .cm-more { top: 9px; }
+/* Touch screens: no pointer to hover with. What waits for the pointer shows, a line to review shows
+   its mark, a text box is 16 pixels (or the phone zooms the page in as it takes the focus), and
+   keys aren't hinted. */
+@media (hover: none) {
+  .hov, .hh-x, .ol-go, .ol-df, .ol-xp, .ol-chip.ol-hov { opacity: 1; }
+  .cm-tools { display: none; }
+  .cm-more { display: grid; }
+  .cm-t { right: 44px; }
+  .ln .tick:not(.on), .sl .tick:not(.on) { box-shadow: inset 0 0 0 1.5px var(--accent); }
+}
+@media (pointer: coarse) {
+  .cmp-ta, .rv-ta, .pal-in input { font-size: 16px; }
+  .vw-jump kbd, .pill-act kbd, .pal-f, .mi .k { display: none; }
+}
+/* A narrow view of the tests: a test's sentence takes the row, its details go on a line under it,
+   its mark stays at the row's end, and the filters scroll sideways. */
+@container (max-width: 640px) {
+  .ol-row { grid-template-columns: 14px minmax(0, 1fr) 24px; }
+  .ol-meta { grid-column: 2 / 4; grid-row: 2; justify-self: start; flex-wrap: wrap; row-gap: 4px; }
+  .ol-meta > .tick, .ol-meta > .ol-tick-sp { position: absolute; right: 8px; top: 7px; }
+  .ol-bar > .mini-seg:first-child { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+}
+
 /* Narrow windows: one column that scrolls as a page. */
 @media (max-width: 960px) {
   body { overflow: auto; }
+  /* What opens from the top bar opens under it, inside the window. */
+  .vw-bar { position: relative; }
+  .vw-review, .vw-agent-w, .vw-lsp { position: static; }
+  .rv-pop, .ag-pop, .lsp-pop { left: auto; right: 8px; }
   .vw { height: auto; min-height: 100vh; grid-template-rows: auto auto; }
   .vw-bar { flex-wrap: wrap; padding: 8px 12px; row-gap: 8px; }
   .vw-bar > .sp:first-of-type { display: none; }

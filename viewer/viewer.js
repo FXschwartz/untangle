@@ -1714,6 +1714,15 @@
     });
     return items;
   }
+  // A comment's tools as a menu, each by its name: what its ⋯ opens on a touch screen.
+  function cmMenuItems(anchor) {
+    const tools = anchor.closest('.cm') && anchor.closest('.cm').querySelector('.cm-tools');
+    return tools ? [...tools.children].map((b) => {
+      const label = b.getAttribute('aria-label') || b.title;
+      const data = Object.fromEntries(Object.entries(b.dataset).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()), v]));
+      return b.tagName === 'A' ? { label, href: b.getAttribute('href'), icon: b.innerHTML } : { label, icon: b.innerHTML, data };
+    }) : [];
+  }
   function menuHtml(items) {
     return items.map((it) => {
       if (it.sep) return '<div class="mi-sep" role="separator"></div>';
@@ -1734,7 +1743,7 @@
     const el = MENU.el, lens = MENU.open === 'lens';
     const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
     const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
-    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : chainsMenuItems();
+    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
     const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
     if (!html) {
       MENU.open = null;
@@ -2468,6 +2477,8 @@
   // A comment: kind 'review' (in a thread), 'issue' (the conversation) or 'pr' (the description).
   // `first`: it starts a run of comments by one author, so it says who wrote it; the others in the
   // run show only their time. Its tools show under the pointer.
+  // On a touch screen, with no pointer, they're behind a ⋯ instead, as a menu.
+  const cmMoreHtml = (key) => `<button type="button" class="ib cm-more" data-act="menu" data-menu="cm:${esc(key)}" aria-haspopup="menu" aria-expanded="${MENU.open === 'cm:' + key}" title="More" aria-label="More">${ICON.more}</button>`;
   function commentHtml(c, kind, first) {
     const editKey = 'edit:' + c.id;
     const tools = (c.canReact ? iconBtn(ICON.smiley, 'React', `data-act="react-open" data-subject="${esc(c.id)}"`) : '')
@@ -2483,7 +2494,7 @@
     const author = kind !== 'pr' && GH.data && GH.data.pr.author && c.author.login === GH.data.pr.author.login ? '<span class="cm-tag">Author</span>' : '';
     const pending = c.pending ? '<span class="cm-tag pending">Pending</span>' : '';
     const head = first ? `<div class="cm-h"><a class="cm-who" href="${esc(c.author.url)}" target="_blank" rel="noopener noreferrer">${esc(c.author.login)}</a>${author}${when}${pending}</div>` : '';
-    return `<div class="cm${first ? ' first' : ''}${c.pending ? ' pending' : ''}" data-comment="${esc(c.id)}">${first ? avatar(c.author) : '<span></span>'}<div class="cm-main">${head}${!first && c.pending ? pending : ''}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}${reactionsHtml(c)}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>` : ''}</div>`;
+    return `<div class="cm${first ? ' first' : ''}${c.pending ? ' pending' : ''}" data-comment="${esc(c.id)}">${first ? avatar(c.author) : '<span></span>'}<div class="cm-main">${head}${!first && c.pending ? pending : ''}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}${reactionsHtml(c)}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>${cmMoreHtml('gh:' + c.id)}` : ''}</div>`;
   }
   // A review thread, under its line: one quiet block with GitHub's blue on its edge. Resolved
   // threads fold, as on GitHub.
@@ -2650,7 +2661,7 @@
     const av = lead ? `<span class="nt-n" title="Note ${n.n}: “N${n.n}” names it to your agent">N${n.n}</span>` : mine ? '<span class="av"></span>' : AGENT_AV;
     const head = first ? `<div class="cm-h"><b class="cm-who">${mine ? 'You' : esc(c.by)}</b>${lead ? `<span>${esc(noteLines(n))}</span>` : ''}${tags}${when}</div>` : '';
     const err = NT.errors.get('del:' + id);
-    return `<div class="cm${first ? ' first' : ''}${mine ? '' : ' agent'}" data-comment="${esc(c.id)}">${first ? av : '<span></span>'}<div class="cm-main">${head}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>` : ''}</div>`;
+    return `<div class="cm${first ? ' first' : ''}${mine ? '' : ' agent'}" data-comment="${esc(c.id)}">${first ? av : '<span></span>'}<div class="cm-main">${head}${body}${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>${first ? '' : `<span class="cm-t">${when}</span>`}${tools ? `<span class="cm-tools">${tools}</span>${cmMoreHtml('nt:' + id)}` : ''}</div>`;
   }
   // A note under its lines: a thread with orchid on its edge. Resolved notes fold, saying who
   // resolved them: you, or the agent.
