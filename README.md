@@ -104,7 +104,9 @@ replays your marks onto the new base.
 
 Click a name on any line, added or removed, to read its definition in place. Names on changed
 lines answer at once; any other name asks the Dart language server, from the base or the head.
-A click inside the peek follows the next name. Ctrl K jumps to a chain, a file, a thread or any
+A click inside the peek follows the next name. A name clicked where it's declared lists its usages
+instead, and a class's or a method's peek lists its implementations: the classes that extend or
+implement it, or the methods that override it. Ctrl K jumps to a chain, a file, a thread or any
 declaration in the repository, and searches the code.
 
 ![A peek: the definition of spaceIdFor, opened under the line that calls it](docs/images/peek.png)
