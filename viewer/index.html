@@ -1372,7 +1372,10 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
   /* Menus and cards rise from the bottom as sheets, full width, over a shade, with a handle to
      swipe them down. The app bar's cards stay above the shade with it. */
   .vw.sheet-on .vw-shade { opacity: 1; pointer-events: auto; }
-  .vw.sheet-on .vw-bar { z-index: 55; }
+  /* The app bar goes back under the shade once the shade has faded: at once, it would flash dark
+     as a sheet closes. */
+  .vw-bar { transition: z-index 0s var(--slow); }
+  .vw.sheet-on .vw-bar { z-index: 55; transition: none; }
   .menu.sheet, .rv-pop, .ag-pop { position: fixed; top: auto; right: 0; bottom: 0; left: 0; z-index: 60; width: auto; min-width: 0; max-width: none; max-height: 85dvh; overflow: auto; overscroll-behavior: contain; border-radius: 16px 16px 0 0; box-shadow: 0 -1px 0 var(--hair-2), 0 -24px 48px rgba(0, 0, 0, .6); }
   .menu.sheet { padding: 0 8px calc(12px + env(safe-area-inset-bottom)); }
   .menu.sheet.panel { width: auto; padding: 0 12px calc(16px + env(safe-area-inset-bottom)); }

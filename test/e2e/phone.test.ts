@@ -305,6 +305,32 @@ describe('Given a served review that adds two tests, on a phone of 390 by 844 pi
     });
   });
 
+  describe('with motion, when ⋯ is swiped down far enough, then opened again and closed with Back, ', () => {
+    let swiped: string;
+    let closing: string;
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await page!.click('#vw-more');
+      await page!.until(`!document.querySelector('.menu').hidden && !document.querySelector('.menu').getAnimations().length`);
+      await page!.swipe('.menu .mi-h', 200);
+      // Where it is as it goes: down where the finger left it (the finger's first step takes it), or below, not back up.
+      swiped = await read(page!, `(() => { const m = document.querySelector('.menu'); const y = new DOMMatrix(getComputedStyle(m).transform).m42; return y >= 180 ? 'on down, out of sight' : 'at ' + Math.round(y); })()`);
+      await page!.until(`document.querySelector('.menu').hidden`);
+      await page!.click('#vw-more');
+      await page!.until(`!document.querySelector('.menu').hidden && !document.querySelector('.menu').getAnimations().length`);
+      await page!.eval('history.back()');
+      await page!.until(`!document.querySelector('#viewer').classList.contains('sheet-on')`);
+      closing = await read(page!, `(() => { const shade = Number(getComputedStyle(document.querySelector('.vw-shade')).opacity); return (shade > 0 ? 'the shade fading' : 'no shade') + ', the app bar ' + (getComputedStyle(document.querySelector('.vw-bar')).zIndex === '55' ? 'over it' : 'under it'); })()`);
+      await page!.until(`document.querySelector('.menu').hidden && getComputedStyle(document.querySelector('.vw-shade')).opacity === '0'`);
+      await page!.reducedMotion(true);
+    });
+
+    it('then a swipe sends it on down from where the finger left it, and as it closes, the app bar stays over the fading shade.', () => {
+      assert.deepEqual([swiped, closing], ['on down, out of sight', 'the shade fading, the app bar over it']);
+    });
+  });
+
   describe('when a test opens, ', () => {
     let shown: string;
 

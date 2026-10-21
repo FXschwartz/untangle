@@ -3255,15 +3255,27 @@
     sheetDrag.dy = Math.max(0, e.clientY - sheetDrag.y);
     sheetDrag.box.style.transform = `translateY(${sheetDrag.dy}px)`;
   });
+  // Let go short of that, it settles back up; far enough, it goes on down out of sight from where the
+  // finger left it, as it closes, rather than coming back up to fade.
+  const sliding = new WeakMap();
   const sheetLet = () => {
     if (!sheetDrag) return;
     const { box, dy } = sheetDrag;
     sheetDrag = null;
     box.style.transform = '';
-    if (dy < 64) return;
+    if (dy < 64) {
+      if (dy && moving()) box.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 180, easing: EASE });
+      return;
+    }
+    const away = moving() ? box.animate([{ transform: `translateY(${dy}px)` }, { transform: `translateY(${box.offsetHeight + 24}px)` }], { duration: 200, easing: EASE, fill: 'forwards' }) : null;
+    if (away) sliding.set(box, away);
     if (box === MENU.el) closeMenu();
     else if (box.matches('.rv-pop')) { GH.reviewOpen = false; render(); }
-    else if (box.matches('.ag-pop')) { NT.agentOpen = null; renderAgent(); }
+    // The agent's card is drawn again as it closes: it goes once it's out of sight.
+    else if (box.matches('.ag-pop')) {
+      const close = () => { if (NT.agentOpen) { NT.agentOpen = null; renderAgent(); } };
+      if (away) away.finished.then(close, () => {}); else close();
+    }
   };
   const pointerLet = (e) => { if (sheetDrag && sheetDrag.id === e.pointerId) sheetLet(); };
   document.addEventListener('pointerup', pointerLet);
@@ -5425,6 +5437,14 @@
   const POP_MS = 150;
   const popping = new WeakMap();
   function pop(el, open, closed) {
+    // Swiped down, it closes out of sight, where the finger sent it; opened again meanwhile, it's back.
+    const away = sliding.get(el);
+    if (away && !open) {
+      unpop(el);
+      away.finished.then(() => { if (sliding.get(el) !== away) return; sliding.delete(el); closed(); away.cancel(); }, () => {});
+      return;
+    }
+    if (away) { sliding.delete(el); away.cancel(); }
     let a = popping.get(el);
     if (!moving()) { unpop(el); if (!open) closed(); return; }
     if (!a) {
