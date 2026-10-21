@@ -1277,8 +1277,9 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 .cm.first .cm-more { top: 9px; }
 /* Touch screens: no pointer to hover with. What waits for the pointer shows, a line to review shows
    its mark, a text box is 16 pixels (or the phone zooms the page in as it takes the focus), and
-   keys aren't hinted. */
-@media (hover: none) {
+   keys aren't hinted. A browser without a mouse that isn't touched either (a headless one) is
+   neither. */
+@media (hover: none) and (pointer: coarse) {
   .hov, .hh-x, .ol-go, .ol-df, .ol-xp, .ol-chip.ol-hov { opacity: 1; }
   .cm-tools { display: none; }
   .cm-more { display: grid; }
