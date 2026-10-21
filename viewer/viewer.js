@@ -4143,8 +4143,8 @@
     const res = [];
     m.files.forEach((f) => f.blocks.forEach((b) => {
       if (!b.edits.length || (state.search.scope === 'unreviewed' && done(b))) return;
-      const h = f.hunks[b.hunk];
-      for (let i = b.first; i < b.first + b.len; i++) if (h.rows[i][1].toLowerCase().includes(q)) res.push({ f, meta: h.meta[i], text: h.rows[i][1] });
+      const hunk = f.hunks[b.hunk];
+      for (let i = b.first; i < b.first + b.len; i++) if (hunk.rows[i][1].toLowerCase().includes(q)) res.push({ f, b, hunk, i });
     }));
     let h = headerHtml({
       crumbs: `<span>Search</span>${SEP}<b class="ui">“${esc(state.search.q)}”</b>`,
@@ -4153,11 +4153,15 @@
     });
     h += '<div class="code">';
     let last = null;
-    res.slice(0, 400).forEach(({ f, meta, text }) => {
+    res.slice(0, 400).forEach(({ f, b, hunk, i }) => {
       if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; last = f; }
-      const i = text.toLowerCase().indexOf(q);
-      const line = meta.t !== '-' ? meta.n : meta.o;
-      h += `<div class="ln ${meta.t === '+' ? 'add' : 'del'}${f.lang === 'md' ? ' md' : ''}"><span class="g"></span><span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${meta.t !== '-' ? meta.n : ''}">${line}</button></span><span class="sg">${meta.t === '+' ? '+' : '−'}</span><span class="tx">${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}</span></div>`;
+      const meta = hunk.meta[i], [, text, ranges] = hunk.rows[i];
+      const n = meta.t !== '-' ? meta.n : null, oldNo = meta.t === '-' ? meta.o : null;
+      // Each line as the diff shows it, its changed tokens and names that peek at their
+      // definitions; a peek opens under its line.
+      const code = codeHtml(f, text, ranges, { emphasis: b.adds > 0 && b.dels > 0, n, o: oldNo, refs: true, colors: rowColors(hunk.rows, f.p, i), find: q });
+      h += `<div class="ln ${meta.t === '+' ? 'add' : 'del'}${f.lang === 'md' ? ' md' : ''}"><span class="g"></span><span class="no wide"><button type="button" class="linkish" data-open="${esc(f.p)}" data-line="${n != null ? n : ''}">${n != null ? n : oldNo}</button></span><span class="sg">${meta.t === '+' ? '+' : '−'}</span><span class="tx">${code}</span></div>`
+        + (n != null ? peekAfter(f, n) : peekAfterOld(f, oldNo));
     });
     if (!res.length) h += `<div class="empty">No changed line matches.${CONFIG.served ? ' “Repository” searches every file.' : ''}</div>`;
     return h + '</div>';
