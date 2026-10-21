@@ -66,14 +66,24 @@ describe('Given two sibling folders with a file in each, ', { skip: browserSkip(
 
   describe('when the last folder is collapsed, ', () => {
     let guides: unknown;
+    let folders: unknown;
 
     before(async () => {
       await page.click('[data-dir="lib/last"]');
       guides = await page.eval(`[...document.querySelectorAll('#vw-side [data-dir="lib/last"] .ig')].map(line => [line.style.left, line.classList.contains('elbow')])`);
+      folders = await page.eval(`[...document.querySelectorAll('#vw-side .sb-row.dir')].map(row => [row.dataset.dir, row.querySelector('.cnt > .mk') ? 'mark' : 'no mark', row.querySelector('.cnt').textContent, row.title])`);
     });
 
     it('then the outer guide still closes at that folder.', () => {
       assert.deepEqual(guides, [['14px', true]]);
+    });
+
+    it('then it keeps the mark of the change to review inside it, by its count, and says so when hovered; the open folders show their files\' marks instead.', () => {
+      assert.deepEqual(folders, [
+        ['lib', 'no mark', '2', 'lib/'],
+        ['lib/first', 'no mark', '1', 'lib/first/'],
+        ['lib/last', 'mark', '1', 'lib/last/: 1 change to review inside'],
+      ]);
     });
   });
 
@@ -210,6 +220,36 @@ describe('Given a file added, one changed and one deleted, ', { skip: browserSki
 
     it('then they keep their hues, dimmed as the names of reviewed files are.', () => {
       assert.equal(files, ['added.txt add-no', 'changed.txt text', 'deleted.txt del-no, struck'].join('\n'));
+    });
+  });
+
+  describe('when the folder is collapsed with the changed file left to review, then again once it\'s reviewed too, ', () => {
+    const folder = `(() => { const row = document.querySelector('[data-dir="lib"]'); const count = row.querySelector('.cnt').textContent; return (row.querySelector('.cnt > .mk') ? 'mark' : 'no mark') + (count ? ' ' + count : '') + ' · ' + row.title; })()`;
+    const closed = `document.querySelector('[data-dir="lib"]')?.getAttribute('aria-expanded') === 'false'`;
+    let left: string;
+    let none: string;
+
+    before(async () => {
+      await page.click('[data-dir="lib"]');
+      await page.until(closed);
+      left = await page.eval(folder) as string;
+      await page.click('[data-dir="lib"]');
+      await page.until(`!!document.querySelector('[data-open="lib/changed.txt"]')`);
+      await page.click('[data-open="lib/changed.txt"]');
+      await page.until(`document.querySelector('.crumbs b')?.title === 'lib/changed.txt'`);
+      await page.click('[data-act="mark-file"]');
+      await page.until(`document.querySelector('[data-open="lib/changed.txt"]')?.classList.contains('done')`);
+      await page.click('[data-dir="lib"]');
+      await page.until(closed);
+      none = await page.eval(folder) as string;
+    });
+
+    it('then, with the change left, the folder has its mark, by its count.', () => {
+      assert.equal(left, 'mark 1 · lib/: 1 change to review inside');
+    });
+
+    it('then, all reviewed, it has none.', () => {
+      assert.equal(none, 'no mark · lib/');
     });
   });
 });

@@ -4813,7 +4813,7 @@
   const sideKey = (r) => { const d = r.dataset; return d.chain != null ? 'c' + d.chain : d.open != null ? 'f' + d.open : d.standalone ? 's' : d.thread ? 't' + d.thread : d.map != null ? 'map' : d.dir != null ? 'd' + d.dir : d.act || ''; };
   function sideRows() {
     const out = new Map();
-    side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, pin: !!r.closest('.sb-pin'), cnt: (r.querySelector('.cnt') || {}).textContent, faded: r.classList.contains('chain-out') }));
+    side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, pin: !!r.closest('.sb-pin'), cnt: (r.querySelector('.cnt') || {}).textContent, faded: r.classList.contains('chain-out'), held: !!r.querySelector('.cnt > .mk') }));
     side.querySelectorAll('.cm-row[data-commit]').forEach((r) => out.set('k' + r.dataset.commit, { fade: getComputedStyle(r).opacity }));
     return out;
   }
@@ -4841,6 +4841,9 @@
         const nm = r.querySelector('.nm'), ink = r.classList.contains('s-a') ? ['add-ink', 'add-no'] : r.classList.contains('s-d') ? ['del-ink', 'del-no'] : ['text', 'text-3'];
         if (nm) nm.animate([{ color: `var(--${ink[0]})` }, { color: `var(--${ink[1]})` }], { duration: 200, easing: EASE });
       }
+      // A folder just closed takes the mark of what's left to review inside it.
+      const held = r.querySelector('.cnt > .mk');
+      if (held && !v.held) held.animate([{ transform: 'scale(.3)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 200, easing: EASE });
       const cnt = r.querySelector('.cnt');
       if (cnt && v.cnt !== cnt.textContent && /^\d*$/.test(v.cnt || '') && /^\d*$/.test(cnt.textContent)) cnt.animate([{ transform: 'translateY(-5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: EASE });
       if (r.getAttribute('aria-current') === 'true' && from && !v.cur && !under(r) && !from.pin && !v.pin && Math.abs(r.offsetTop - from.top) < 600) {
@@ -4927,7 +4930,9 @@
         let name = d.name;
         while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
         const key = o.prefix + d.path, open = !state.closedDirs.has(key), c = o.count(filesIn(d));
-        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}${c.cls || ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span>${c.diff || ''}<span class="cnt">${c.text}</span></button>` });
+        // Closed, a folder keeps the mark of the changes to review inside it, by their count.
+        const held = !open && !c.done && c.text;
+        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}${c.cls || ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/${held ? `: ${plural(c.text, 'change')} to review inside` : ''}">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span>${c.diff || ''}<span class="cnt">${held ? '<i class="mk"></i>' : ''}${c.text}</span></button>` });
         if (open) walk(d, dp + 1);
       });
       nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => rows.push({ depth: dp, html: (g) => o.file(f, dp, g) }));
