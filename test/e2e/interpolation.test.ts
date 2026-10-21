@@ -128,9 +128,8 @@ describe('Given a served review of a greeting that interpolates its name, ', { s
     before(async () => {
       await openApp();
       await page!.until(`document.querySelector('#lsp-dot')?.classList.contains('ready')`, 180_000);
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`!!document.querySelector('.code[data-p="lib/a.dart"] .ln[data-n="17"] .ref.live')`);
       await page!.clickIn('.code[data-p="lib/a.dart"] .ref.live', 'word', '${word.toUpperCase()}');
       await page!.until(`!!document.querySelector('.peek .pk-h') && !(document.querySelector('.peek')?.textContent || '').includes('looking it up')`, 120_000);

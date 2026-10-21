@@ -136,9 +136,8 @@ describe('Given a served review of shapes that total their areas, with the langu
 
     before(async () => {
       await openShape();
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`!!document.querySelector('.code[data-p="lib/shape.dart"] .ln[data-n="1"] .ref.live')`);
       await page!.clickIn('.code[data-p="lib/shape.dart"] .ref.live', 'Shape', 'abstract class Shape {');
       await page!.until(`${listed('4 usages')} && ${hasImpl}`, 120_000);

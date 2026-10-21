@@ -30,6 +30,8 @@
     // Into the file: drawn with 1.5-pixel strokes, which stay whole at any zoom (Go to File's thin
     // loop breaks up below 100%).
     intoFile: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.75 2.25h4l3 3v7.25a1.25 1.25 0 0 1-1.25 1.25h-5.75"/><path d="M9.75 2.25v3h3"/><path d="M2 9.25h5.5"/><path d="M5.25 7l2.25 2.25-2.25 2.25"/></svg>',
+    // The whole file: lines unfolding from a fold, drawn with strokes too.
+    wholeFile: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75v4M5.75 4L8 1.75 10.25 4M8 14.25v-4M5.75 12L8 14.25 10.25 12M2 8h1.5M5.5 8h1.5M9 8h1.5M12.5 8h1.5"/></svg>',
     down: path1('M3.147 9l5 5h.707l5-5-.707-.707L9 12.439V2H8v10.44L3.854 8.292 3.147 9z'),
     tests: svg('<path d="M6 1h4v1h-.5v4.17l3.83 6.7A1.5 1.5 0 0 1 12.03 15H3.97a1.5 1.5 0 0 1-1.3-2.13L6.5 6.17V2H6V1zm1.5 1v4.43l-.07.25L5.37 10.3h5.26L8.57 6.68 8.5 6.43V2h-1zM4.8 11.3l-1.25 2.19a.5.5 0 0 0 .43.51h8.05a.5.5 0 0 0 .43-.75L11.2 11.3H4.8z"/>'),
     map: svg('<path d="M2.5 5.77705V12.0978L5.5 10.2228V3.90205L2.5 5.77705ZM6.5 3.90205V10.2228L9.5 12.0978V5.77705L6.5 3.90205ZM6 11.0896L2.265 13.4239L1.5 12.9999V5.49993L1.735 5.07593L5.735 2.57593H6.265L10 4.9103L13.735 2.57593L14.5 2.99993V10.4999L14.265 10.9239L10.265 13.4239H9.735L6 11.0896ZM10.5 5.77705V12.0978L13.5 10.2228V3.90205L10.5 5.77705Z"/>'),
@@ -1570,8 +1572,7 @@
   // What a view's ⋯ holds: how it shows the code, and where else to go from it.
   function viewMenuItems() {
     const v = state.view, m = M(), items = [];
-    const showing = (whole) => {
-      if (whole) items.push({ label: 'Show the whole file', checked: state.whole.has(whole.p), data: { act: 'whole', p: whole.p } });
+    const showing = () => {
       items.push({ label: 'Side by side', checked: state.layout === 'split', data: { act: 'layout' } });
       items.push({ label: 'Diffs of reviewed code', checked: state.showReviewedDiff, data: { act: 'revdiff' } });
       items.push({ label: 'Minimap', checked: UI.minimap, data: { act: 'minimap' } });
@@ -1580,7 +1581,7 @@
       const firstAdd = !gen && f.blocks.find((b) => b.adds);
       const ed = editorItem({ side: f.s === 'D' ? 'base' : 'head', p: f.p, line: (firstAdd && f.hunks[firstAdd.hunk].meta[firstAdd.first].n) || 1 });
       if (ed) items.push(ed, { sep: true });
-      showing(CONFIG.served && f.s === 'M' && f.hunks && f.hunks.length ? f : null);
+      showing();
       const more = [];
       if (localMode() ? NT.data : GH.on && GH.data && !GH.data.pr.locked) more.push({ label: localMode() ? 'Write a note on this file' : 'Comment on this file', icon: ICON.comment, data: { act: 'file-comment', p: f.p } });
       if (CONFIG.served && f.s === 'M') more.push({ label: 'The file before these changes', icon: ICON.file, data: { act: 'open-source', side: 'base', p: f.p } });
@@ -1589,7 +1590,7 @@
     if (v.kind === 'chain') {
       const c = m.chains[v.id];
       if (!c) return items;
-      showing(null);
+      showing();
       const usedBy = m.usedBy.get(c.id);
       if (usedBy.length) items.push({ head: 'Used by' }, ...usedBy.map((o) => chainItem(m.chains[o])));
       if (c.uses.length) items.push({ head: 'Uses' }, ...c.uses.map((o) => chainItem(m.chains[o])));
@@ -1599,7 +1600,7 @@
       const g = !f && m.generated.find((x) => x.p === v.path);
       if (f) fileItems(f, false);
       else if (g) fileItems(g, true);
-    } else if (v.kind === 'standalone' || v.kind === 'group' || v.kind === 'tests') showing(null);
+    } else if (v.kind === 'standalone' || v.kind === 'group' || v.kind === 'tests') showing();
     else if (v.kind === 'source') {
       const s = sources.get(srcKey(v)) || {};
       const ed = editorItem({ side: v.side, p: v.path, ext: v.ext, abs: s.abs, line: v.line || 1 });
@@ -4135,6 +4136,8 @@
     });
     return h + '<div class="sec">' + subHunksHtml(m.standalone, { key: 'standalone' }) + '</div>';
   }
+  // A changed file's toggle, in its header: its changes, or the whole of it.
+  const wholeBtn = (f) => (CONFIG.served && f.s === 'M' && f.hunks && f.hunks.length ? iconBtn(ICON.wholeFile, state.whole.has(f.p) ? 'Show only the changes' : 'Show the whole file', `data-act="whole" data-p="${esc(f.p)}"`, { label: 'Show the whole file', on: state.whole.has(f.p) }) : '');
   function renderFile(path) {
     const m = M();
     const f = m.files.find((x) => x.p === path);
@@ -4147,7 +4150,7 @@
     let h = headerHtml({
       crumbs: fileCrumbs(f.p),
       facts: `${f.s === 'A' ? 'Added · ' : f.s === 'D' ? 'Deleted · ' : ''}${leftWords(s)} · ${plusMinus(sumOf(f.blocks, 'adds'), sumOf(f.blocks, 'dels'))}${openThreadsHtml(f.p)}`,
-      tools: chains.length ? iconBtn(ICON.graph, `The graph of ${chains.length > 1 ? 'the chains of ' : ''}the change you’re reading: hover for a look, click to keep it open (g)`, 'data-act="graph" aria-haspopup="dialog" aria-expanded="false"') : '',
+      tools: wholeBtn(f) + (chains.length ? iconBtn(ICON.graph, `The graph of ${chains.length > 1 ? 'the chains of ' : ''}the change you’re reading: hover for a look, click to keep it open (g)`, 'data-act="graph" aria-haspopup="dialog" aria-expanded="false"') : ''),
       chip: chains.length ? `<button type="button" class="chip" data-act="menu" data-menu="chains" aria-haspopup="menu" aria-expanded="${MENU.open === 'chains'}" title="The chains this file's changes are in">In ${chains.length} chain${chains.length > 1 ? 's' : ''}${ICON.chevronDown}</button>` : '',
       nav: true,
       action: s.total ? `<button type="button" class="btn${s.open ? ' primary' : ''}" data-act="mark-file" data-file="${f.idx}">${s.open ? 'Mark file reviewed' : 'Mark file unreviewed'}</button>` : '',
@@ -4172,6 +4175,7 @@
     let h = headerHtml({
       crumbs: fileCrumbs(f.p),
       facts: `Generated (${esc(f.gen)}) · ${plusMinus(f.a, f.d)}${openThreadsHtml(f.p)}`,
+      tools: wholeBtn(f),
       below: '<p class="fv-note">Generated: not reviewed and not counted. Shown for reference only.</p>',
     });
     if (!f.hunks) {

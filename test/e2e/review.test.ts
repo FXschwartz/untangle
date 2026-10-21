@@ -740,21 +740,44 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
-  describe('when Show the whole file is chosen, ', () => {
+  describe('when the header\'s Show the whole file is clicked, then again, ', () => {
+    const button = `(() => { const b = document.querySelector('.fv-head .tools [data-act="whole"]'); return [b.getAttribute('aria-label'), b.getAttribute('aria-pressed'), b.title].join(' | '); })()`;
+    let before0: string;
     let shown: string;
+    let menu: string;
+    let back: string;
 
     before(async () => {
       await rest(page!);
       await openFile(page!, 'lib/notes.dart');
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      before0 = await read(page!, button);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"]') && !document.querySelector('.hh-tail') && (document.querySelector('.code[data-p="lib/notes.dart"]')?.textContent || '').includes('// pad 44')`);
-      shown = await read(page!, `document.querySelector('.hh-tail') ? 'tail' : 'whole'`);
+      shown = await read(page!, `(document.querySelector('.hh-tail') ? 'tail' : 'whole') + ' | ' + ${button}`);
+      await page!.click('[data-act="menu"][data-menu="view"]');
+      await page!.until(`!!document.querySelector('.menu:not([hidden]) .mi')`);
+      menu = await read(page!, `[...document.querySelectorAll('.menu .mi')].some((item) => item.textContent.includes('whole file')) ? 'in the menu' : 'not in the menu'`);
+      await rest(page!);
+      await page!.click('.fv-head [data-act="whole"]');
+      await page!.until(`!!document.querySelector('.hh-tail')`);
+      back = await read(page!, button);
     });
 
-    it('then every line of the notes file is on the page.', () => {
-      assert.equal(shown, 'whole');
+    it('then it\'s a toggle in the header, off while the changes show.', () => {
+      assert.equal(before0, 'Show the whole file | false | Show the whole file');
+    });
+
+    it('then every line of the notes file is on the page, and it\'s on.', () => {
+      assert.equal(shown, 'whole | Show the whole file | true | Show only the changes');
+    });
+
+    it('then the view\'s menu no longer has it.', () => {
+      assert.equal(menu, 'not in the menu');
+    });
+
+    it('then, clicked again, it\'s off, and the changes show again.', () => {
+      assert.equal(back, 'Show the whole file | false | Show the whole file');
     });
   });
 
@@ -928,9 +951,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await fresh();
       await rest(page!);
       await openFile(page!, 'lib/notes.dart');
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`(document.querySelector('.code[data-p="lib/notes.dart"]')?.textContent || '').includes('// pad 44')`);
       await page!.until(`document.querySelector('#vw-mini') && !document.querySelector('#vw-mini').hidden`);
       const beforeScroll = Number(await page!.eval(`document.querySelector('#vw-main').scrollTop`));
@@ -952,9 +974,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await fresh();
       await rest(page!);
       await openFile(page!, 'lib/notes.dart');
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`(document.querySelector('.code[data-p="lib/notes.dart"]')?.textContent || '').includes('// pad 44')`);
       await page!.until(`document.querySelector('#vw-mini') && !document.querySelector('#vw-mini').hidden`);
       const beforeScroll = Number(await page!.eval(`document.querySelector('#vw-main').scrollTop`));

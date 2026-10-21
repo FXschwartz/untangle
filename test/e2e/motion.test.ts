@@ -135,9 +135,8 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
       await page!.until(`!!document.querySelector('.t-head')`, 30_000);
       await openFile('lib/far.dart');
       // The whole file, so the change is far below the top.
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`(document.querySelector('.code[data-p="lib/far.dart"]')?.textContent || '').includes('// pad 40')`);
       await page!.eval(`document.querySelector('#vw-main').scrollTop = 0`);
       // The wheel turns as the glide starts: a glide lasts a quarter of a second, too short to

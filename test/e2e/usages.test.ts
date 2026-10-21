@@ -245,9 +245,8 @@ describe('Given a served review of a renamed parameter and its caller, with the 
       await page!.goto(url);
       await page!.until(`!!document.querySelector('.t-head')`, 30_000);
       await openApp();
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ref')].some((el) => el.textContent === 'StringBuffer')`);
       await page!.clickIn('.code[data-p="lib/app.dart"] .ref', 'StringBuffer', 'final buffer = StringBuffer();');
       await page!.until(`!!document.querySelector('.peek .pk-h') && !(document.querySelector('.peek')?.textContent || '').includes('looking it up')`, 120_000);
@@ -378,9 +377,8 @@ describe('Given a served review of a renamed parameter and its caller, with the 
 
     before(async () => {
       await reopenApp();
-      await page!.click('[data-act="menu"][data-menu="view"]');
-      await page!.until(`!!document.querySelector('[data-act="whole"]')`);
-      await page!.click('[data-act="whole"]');
+      await page!.until(`!!document.querySelector('.fv-head [data-act="whole"]')`);
+      await page!.click('.fv-head [data-act="whole"]');
       await page!.until(`[...document.querySelectorAll('.code[data-p="lib/app.dart"] .ref.live')].some((el) => el.textContent === 'buffer')`);
       await page!.clickIn('.code[data-p="lib/app.dart"] .ref.live', 'buffer', 'final buffer = StringBuffer();');
       await page!.until(listed('1 usage'), 120_000);
