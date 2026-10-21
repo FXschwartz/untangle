@@ -88,6 +88,9 @@
   const PHONE = window.matchMedia ? window.matchMedia('(max-width: 520px)') : { matches: false, addEventListener() {} };
   // Long lines wrap, under their own indent, on a phone (or as ⋯ says, in any narrow window).
   const wrapOn = () => compact() && (UI.wrap != null ? !!UI.wrap : PHONE.matches);
+  // A test's details (its expects, the lines it changed, its commit, a way into the file) wait for
+  // the pointer; with nothing to hover, they show, unless ⋯ says otherwise.
+  const testDetails = () => (UI.testDetails != null ? !!UI.testDetails : COARSE.matches);
   const codeSize = () => UI.codeSize || (PHONE.matches ? 12 : 12.5);
   // Side by side needs the width: a narrow window shows the diff in one column.
   const sideBySide = () => state.layout === 'split' && !compact();
@@ -1757,7 +1760,8 @@
     }
     if (state.view.kind === 'tests') {
       const mode = UI.testsMode === 'sentences' ? 'sentences' : 'nested';
-      view.unshift({ label: 'Nested, as the code nests them', checked: mode === 'nested', data: { act: 'tests-mode', v: 'nested' } }, { label: 'Sentences, each whole', checked: mode === 'sentences', data: { act: 'tests-mode', v: 'sentences' } });
+      view.unshift({ label: 'Nested, as the code nests them', checked: mode === 'nested', data: { act: 'tests-mode', v: 'nested' } }, { label: 'Sentences, each whole', checked: mode === 'sentences', data: { act: 'tests-mode', v: 'sentences' } },
+        { label: 'Each test’s details', checked: testDetails(), data: { act: 'test-details' }, title: 'Its expects, the lines it changed, its commit, and a way into the file: on every test, or on the one you open' });
     }
     if (view.length) items.push({ sep: true }, ...(view[0].head ? [] : [{ head: 'This view' }]), ...view);
     const lsp = $('#vw-lsp');
@@ -7236,6 +7240,7 @@
     if (act === 'minimap') { UI.minimap = !UI.minimap; saveUI(); return mini.update(); }
     if (act === 'side-toggle') return toggleSide();
     if (act === 'wrap') { UI.wrap = !wrapOn(); saveUI(); applyCode(); return render(); }
+    if (act === 'test-details') { UI.testDetails = !testDetails(); saveUI(); applyCode(); return render(); }
     if (act === 'code-size') { UI.codeSize = Math.min(16, Math.max(10, Math.round(codeSize()) + Number(d.step))); saveUI(); applyCode(); MENU.html = ''; renderMenu(); return render(); }
     if (act === 'shade') { if (SIDE.open) sideDrawer(false); return; }
     if (act === 'threads-fold') {
@@ -7482,6 +7487,7 @@
   // Code's settings in a narrow window: wrapped or not, and its size (the rows follow it).
   function applyCode() {
     viewer.classList.toggle('wrap', wrapOn());
+    viewer.classList.toggle('ol-all', testDetails());
     if (compact() && UI.codeSize) viewer.style.setProperty('--code-fs', UI.codeSize + 'px');
     else viewer.style.removeProperty('--code-fs');
   }

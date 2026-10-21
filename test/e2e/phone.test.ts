@@ -177,3 +177,113 @@ describe('Given a served review of a greeting, on a phone of 390 by 844 pixels w
     });
   });
 });
+
+describe('Given a served review that adds two tests, on a phone of 390 by 844 pixels with touch and reduced motion, ', { skip, timeout: 300_000 }, () => {
+  let repo: TempRepo | undefined;
+  let gh: GhStub | undefined;
+  let run: UntangleRun | undefined;
+  let page: Browser | undefined;
+  let cache = '';
+  // Each test's row, and whether its details (its expects, its lines, its commit, a way into the file) show.
+  const details = `[...document.querySelectorAll('#vw-main .ol-row')].filter((r) => r.querySelector('.ol-go')).map((r) => { const s = getComputedStyle(r.querySelector('.ol-go')); return r.querySelector('.ol-tt').textContent.trim() + ': ' + (s.display === 'none' ? 'hidden' : s.opacity === '1' ? 'shown' : 'faded'); }).join('\\n')`;
+
+  before(async () => {
+    repo = TempRepo.create();
+    repo.write('pubspec.yaml', pubspec);
+    repo.write('lib/cart.dart', 'int total(List<int> prices) => prices.fold(0, (sum, price) => sum + price);\n');
+    repo.commit({ subject: 'Start the cart', author: ada('2020-06-01T15:00:00Z'), committer: ada('2020-06-01T15:00:00Z') });
+    repo.branch('feature');
+    repo.write('test/cart_test.dart', [
+      "import 'package:sample/cart.dart';",
+      '',
+      'void main() {',
+      "  group('Given a cart of two prices,', () {",
+      "    test('when the total is taken, then it adds them.', () {",
+      '      expect(total([1, 2]), 3);',
+      '    });',
+      '',
+      "    test('when it is empty, then the total is nothing.', () {",
+      '      expect(total([]), 0);',
+      '    });',
+      '  });',
+      '}',
+      '',
+    ].join('\n'));
+    repo.commit({ subject: 'Test the cart', author: ada('2020-06-02T15:00:00Z'), committer: ada('2020-06-02T15:00:00Z') });
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { cacheDir: cache, gh, base: 'main' });
+    await waitForReview(reviewClient(run.url));
+    page = await launchBrowser();
+    await page.phone(390, 844);
+    await page.reducedMotion(true);
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('.t-head')`, 30_000);
+    await page.eval(`document.querySelector('[data-act="tests-open"]').click()`);
+    await page.until(`document.querySelectorAll('#vw-main .ol-row').length === 3`);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    gh?.remove();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when the Tests view opens, ', () => {
+    let shown: string;
+
+    before(async () => {
+      shown = await read(page!, details);
+    });
+
+    it('then each test shows its details, with nothing to hover.', () => {
+      assert.equal(shown, [
+        'Given a cart of two prices,: shown',
+        'when the total is taken, then it adds them.: shown',
+        'when it is empty, then the total is nothing.: shown',
+      ].join('\n'));
+    });
+  });
+
+  describe('when ⋯ is opened, and its details are turned off, ', () => {
+    let item: string;
+    let shown: string;
+
+    before(async () => {
+      await page!.click('#vw-more');
+      await page!.until(`!document.querySelector('.menu').hidden && !!document.querySelector('.menu [data-act="test-details"]')`);
+      item = await read(page!, `(() => { const b = document.querySelector('.menu [data-act="test-details"]'); return b.textContent + ' ' + b.getAttribute('aria-checked'); })()`);
+      await page!.click('.menu [data-act="test-details"]');
+      await page!.until(`document.querySelector('.menu').hidden`);
+      shown = await read(page!, details);
+    });
+
+    it('then ⋯ has them on, and turned off, no test shows them.', () => {
+      assert.deepEqual([item, shown], ['Each test’s details true', [
+        'Given a cart of two prices,: hidden',
+        'when the total is taken, then it adds them.: hidden',
+        'when it is empty, then the total is nothing.: hidden',
+      ].join('\n')]);
+    });
+  });
+
+  describe('when a test opens, ', () => {
+    let shown: string;
+
+    before(async () => {
+      await page!.eval(`[...document.querySelectorAll('#vw-main .ol-row')].find((r) => r.textContent.includes('when the total')).querySelector('.ol-tt').click()`);
+      await page!.until(`!!document.querySelector('#vw-main .ol-row.open')`);
+      shown = await read(page!, details);
+    });
+
+    it('then its details show, and only its.', () => {
+      assert.equal(shown, [
+        'Given a cart of two prices,: hidden',
+        'when the total is taken, then it adds them.: shown',
+        'when it is empty, then the total is nothing.: hidden',
+      ].join('\n'));
+    });
+  });
+});

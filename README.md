@@ -117,7 +117,9 @@ declaration in the repository, and searches the code.
 A test's group and test titles join into the sentence it asserts: Given …, when …, then ….
 The Tests view lists every sentence the pull request adds, rewords, regroups or removes, with the
 reworded words marked and the commit that wrote each. A chain shows the test files it changes the
-same way. Reviewed tests fold into one line, and a test file can be reviewed whole.
+same way. Reviewed tests fold into one line, and a test file can be reviewed whole. A test's
+details (its expects, the lines it changed, its commit) show as the pointer rests on it; on a
+touch screen they show on every test, and ⋯ can keep them to the test you open.
 
 ![The Tests view: new and reworded sentences, each with its commit](docs/images/tests.png)
 
