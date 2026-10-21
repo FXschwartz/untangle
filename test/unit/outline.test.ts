@@ -440,3 +440,46 @@ ${when}  });
     });
   });
 });
+
+describe('Given new tests whose titles are split into adjacent strings, one missing the space between them, ', { skip: skipDart }, () => {
+  const file = `import 'package:test/test.dart';
+
+void main() {
+  group('Given a retry policy,', () {
+    test(
+      'when nextDelay is called 4 times,'
+      'then it returns the same delay.',
+      () {
+        expect(1, 1);
+      },
+    );
+    test(
+      'when it is called once, '
+      'then it waits.',
+      () {
+        expect(1, 1);
+      },
+    );
+  });
+}
+`;
+  const files = { base: {}, head: { 'test/retry_test.dart': file } };
+
+  describe('when the review is built, ', () => {
+    let review: BuiltReview | undefined;
+
+    before(async () => {
+      review = await buildDartReview(files);
+    });
+
+    after(() => review?.remove());
+
+    it('then each title reads with one space where its strings meet.', () => {
+      assert.equal(outlineOf(review!, 'test/retry_test.dart'), [
+        'group Given a retry policy, · new',
+        '  test when nextDelay is called 4 times, then it returns the same delay. · new · 1 expect · own +2 −0',
+        '  test when it is called once, then it waits. · new · 1 expect · own +2 −0',
+      ].join('\n'));
+    });
+  });
+});

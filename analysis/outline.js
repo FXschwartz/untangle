@@ -35,7 +35,9 @@ function callOf(node) {
   const kind = TESTS.has(m[1]) ? 't' : m[1] === 'group' ? 'g' : literal ? 'w' : null;
   if (!kind) return null;
   const strings = literal ? [...arg.text.matchAll(/r?(['"])((?:\\.|(?!\1)[\s\S])*?)\1/g)] : [];
-  const title = strings.length ? strings.map((x) => x[2].replace(/\\(['"\\])/g, '$1')).join('') : arg.text;
+  // A title split into adjacent strings reads with a space where they meet, which the first so
+  // often forgets ('… 4 times,' 'then …').
+  const title = strings.length ? strings.map((x) => x[2].replace(/\\(['"\\])/g, '$1')).reduce((a, b) => (/\S$/.test(a) && /^\S/.test(b) ? a + ' ' + b : a + b)) : arg.text;
   return { kind, title, s: node.startPosition.row + 1, e: node.endPosition.row + 1, te: arg.endPosition.row + 1 };
 }
 
