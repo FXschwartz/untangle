@@ -11,7 +11,7 @@ import { stubGh } from '../helpers/gh.ts';
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
-import { read, rest } from './page.ts';
+import { motionOf, read, rest } from './page.ts';
 
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
@@ -324,6 +324,48 @@ describe('Given a served review of pull request 7, with an open thread on the ca
 
     it('then it folds.', () => {
       assert.equal(shown, `folded: Resolved by ada· line ${callLine} · 1 comment`);
+    });
+  });
+
+  describe('when the resolved thread on the print is unfolded, then folded, with motion on, ', () => {
+    const two = '.th[data-thread="THREAD_2"]';
+    const toggle = '[data-act="thread-toggle"][data-thread="THREAD_2"]';
+    const heightOf = `(document.querySelector('${two}')?.getBoundingClientRect().height ?? 0).toFixed(1)`;
+    let opening: string;
+    let closing: string;
+    let shut = '';
+    let open = '';
+
+    /** Clicks the toggle, and reads how the thread changed as the page drew it anew. */
+    async function motion(): Promise<string> {
+      await page!.eval(motionOf(two));
+      await page!.click(toggle);
+      await page!.until('window.__motion != null');
+      const seen = await read(page!, 'window.__motion');
+      await page!.until(`document.getAnimations().length === 0`);
+      return seen;
+    }
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await fresh();
+      await page!.until(`document.getAnimations().length === 0`);
+      shut = await read(page!, heightOf);
+      opening = await motion();
+      open = await read(page!, heightOf);
+      closing = await motion();
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+    });
+
+    it('then it opens downward from its header, what it holds fading in.', () => {
+      assert.equal(opening, `it eases from ${shut}px to ${open}px; cm, th-f fade in`);
+    });
+
+    it('then what it holds closes up under its header, fading.', () => {
+      assert.equal(closing, `a stand-in after th-fold, holding cm, th-f, closes from ${(Number(open) - Number(shut)).toFixed(1)}px, fading`);
     });
   });
 

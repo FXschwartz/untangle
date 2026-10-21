@@ -9,7 +9,7 @@ import { reviewClient, waitForReview, type ReviewClient } from '../helpers/http.
 import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
-import { read, rest } from './page.ts';
+import { motionOf, read, rest } from './page.ts';
 
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
@@ -18,6 +18,7 @@ const app = (word: string) => ['void greet() {', `  print('${word}');`, '}', ...
 
 // A note as the page shows it: open or folded, and its header.
 const noteShown = (n: number) => `(() => { const th = document.querySelector('.th.note[data-note="${n}"]'); if (!th) return 'none'; const head = th.querySelector(':scope > .th-fold')?.textContent.replace(/\\s+/g, ' ').trim(); return (th.querySelector(':scope > .cm') ? 'open' : 'folded') + (head ? ': ' + head : ''); })()`;
+const heightOf = (selector: string) => `(document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect().height ?? 0).toFixed(1)`;
 const still = `document.getAnimations().length === 0`;
 
 describe('Given a served review with a note on its change and one on a line outside the diff, ', { skip, timeout: 240_000 }, () => {
@@ -78,6 +79,16 @@ describe('Given a served review with a note on its change and one on a line outs
     await page!.until(`!!document.querySelector('.th.note[data-note="${n}"] .cm')`);
   }
 
+  /** Clicks, and reads how the box changed as the page drew it anew. */
+  async function motion(box: string, click: string): Promise<string> {
+    await page!.eval(motionOf(box));
+    await page!.click(click);
+    await page!.until('window.__motion != null');
+    const seen = await read(page!, 'window.__motion');
+    await page!.until(still);
+    return seen;
+  }
+
   describe('when the note is opened from the Threads tab and resolved, ', () => {
     let shown: string;
 
@@ -124,6 +135,94 @@ describe('Given a served review with a note on its change and one on a line outs
 
     it('then it folds too.', () => {
       assert.equal(shown, 'folded: Resolvedline 30, outside the diff· N2 · line 30 · 1 comment');
+    });
+  });
+
+  describe('when the resolved note is unfolded, then folded, with motion on, ', () => {
+    let opening: string;
+    let closing: string;
+    let shut = '';
+    let open = '';
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await openApp();
+      shut = await read(page!, heightOf(one));
+      opening = await motion(one, `${one} [data-act="nt-fold"]`);
+      open = await read(page!, heightOf(one));
+      closing = await motion(one, `${one} [data-act="nt-fold"]`);
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+    });
+
+    it('then it opens downward from its header, what it holds fading in.', () => {
+      assert.equal(opening, `it eases from ${shut}px to ${open}px; cm, th-f fade in`);
+    });
+
+    it('then what it holds closes up under its header, fading.', () => {
+      assert.equal(closing, `a stand-in after th-fold, holding cm, th-f, closes from ${(Number(open) - Number(shut)).toFixed(1)}px, fading`);
+    });
+  });
+
+  describe('when the resolved note is unfolded and unresolved, then resolved, with motion on, ', () => {
+    let reopening: string;
+    let resolving: string;
+    let open = '';
+    let reopened = '';
+    let shut = '';
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await openApp();
+      await page!.click(`${one} [data-act="nt-fold"]`);
+      await page!.until(`!!document.querySelector('${one} [data-act="nt-resolve"]') && ${still}`);
+      open = await read(page!, heightOf(one));
+      reopening = await motion(one, `${one} [data-act="nt-resolve"]`);
+      reopened = await read(page!, heightOf(one));
+      resolving = await motion(one, `${one} [data-act="nt-resolve"]`);
+      shut = await read(page!, heightOf(one));
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+    });
+
+    it('then, unresolved, its header closes over what stays.', () => {
+      assert.equal(reopening, `a stand-in before cm, holding th-fold, closes from ${(Number(open) - Number(reopened)).toFixed(1)}px, fading`);
+    });
+
+    it('then, resolved, what it holds closes up into the header that takes its place, fading in.', () => {
+      assert.equal(resolving, `a stand-in before th-fold, holding cm, th-f, closes from ${(Number(reopened) - Number(shut)).toFixed(1)}px, fading; th-fold fade in`);
+    });
+  });
+
+  describe('when the notes outside the diff are folded, then unfolded, with motion on, ', () => {
+    let closing: string;
+    let opening: string;
+    let open = '';
+    let shut = '';
+
+    before(async () => {
+      await page!.reducedMotion(false);
+      await openApp();
+      open = await read(page!, heightOf('.fthreads'));
+      closing = await motion('.fthreads', '[data-act="nt-away"]');
+      shut = await read(page!, heightOf('.fthreads'));
+      opening = await motion('.fthreads', '[data-act="nt-away"]');
+    });
+
+    after(async () => {
+      await page!.reducedMotion(true);
+    });
+
+    it('then they close up under their toggle, fading.', () => {
+      assert.equal(closing, `a stand-in after th-away, holding th-hunk, th, closes from ${(Number(open) - Number(shut)).toFixed(1)}px, fading`);
+    });
+
+    it('then they open downward from it, fading in.', () => {
+      assert.equal(opening, `it eases from ${shut}px to ${open}px; th-hunk, th fade in`);
     });
   });
 });

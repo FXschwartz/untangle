@@ -2913,10 +2913,13 @@
     return [...new Set(keys.flatMap((k) => p.byKey.get(k) || []))];
   }
   const markedRow = (el) => (el.closest('.g') && !el.closest('button') ? el.closest('.ln.cm-on, .ln.nt-on, .sl.cm-on, .sl.nt-on') : null);
+  // A thread's or a note's box, by the id marks give it ('gh:<thread>', 'nt:<n>'), and back.
+  const thKey = (th) => (th.dataset.note != null ? 'nt:' + th.dataset.note : 'gh:' + th.dataset.thread);
+  const thEl = (id) => (id.startsWith('nt:') ? main.querySelector(`.th.note[data-note="${id.slice(3)}"]`) : [...main.querySelectorAll('.th[data-thread]')].find((x) => x.dataset.thread === id.slice(3)));
   main.addEventListener('mouseover', (e) => {
     if (drag) return;
     const th = e.target.closest('.th[data-thread], .th.note[data-note]');
-    if (th) return lightComments([th.dataset.note != null ? 'nt:' + th.dataset.note : 'gh:' + th.dataset.thread]);
+    if (th) return lightComments([thKey(th)]);
     const row = markedRow(e.target);
     lightComments(row ? commentsAt(row) : []);
   });
@@ -2924,7 +2927,7 @@
   main.addEventListener('click', (e) => {
     const row = markedRow(e.target), id = row && commentsAt(row)[0];
     if (!id) return;
-    const el = id.startsWith('nt:') ? main.querySelector(`.th.note[data-note="${id.slice(3)}"]`) : [...main.querySelectorAll('.th[data-thread]')].find((x) => x.dataset.thread === id.slice(3));
+    const el = thEl(id);
     if (!el) return;
     placeRow(el, headH() + 40);
     el.classList.remove('flash-th');
@@ -4945,7 +4948,8 @@
   const EASE = 'cubic-bezier(.2, 0, 0, 1)';
   const easeOut = (p) => 1 - Math.pow(1 - p, 4);
   // What the next render is for: { mark: [block ids] } (changes marked or unmarked, sections
-  // folded), or { more: { key, side, n } } (lines shown from a divider).
+  // folded), { more: { key, side, n } } (lines shown from a divider), or { away: { act, p } } (a
+  // file's threads or notes off its diff, folded or unfolded).
   let motionNext = null;
   const hint = (h) => { motionNext = h; };
   const viewKey = () => { const v = state.view; return [v.kind, v.id, v.path, v.family, v.side, v.ext, state.compare].join('|'); };
@@ -4999,7 +5003,9 @@
     }
     const dt = main.querySelector('.hs-detail');
     if (dt) { const r = dt.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.detail = { el: dt, sha: dt.dataset.detailOf, gap: gapOf(dt), place: placeOf(dt.previousElementSibling) }; }
-    main.querySelectorAll('.th[data-thread]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(t.dataset.thread, r.height); });
+    main.querySelectorAll('.th[data-thread], .th[data-note]').forEach((t) => { const r = t.getBoundingClientRect(); if (seen(r.top, r.bottom)) snap.threads.set(thKey(t), { h: r.height, el: t }); });
+    const away = h && h.away && awayBtn(h.away);
+    if (away) snap.away = { key: h.away, items: awayOf(away), h: away.parentElement.getBoundingClientRect().height };
     if (h && h.ol != null) snap.ol = olSnap(h);
     else if (h && h.olf != null) snap.ol = olSnapFile(h.olf, !!h.mark);
     return snap;
@@ -5083,7 +5089,7 @@
     if (content) {
       content.forEach((el) => ghost.appendChild(el));
       // What's in it is a picture: nothing in it is found or pressed.
-      const attrs = ['id', 'data-block', 'data-sec', 'data-n', 'data-c', 'data-thread', 'data-comment', 'data-draft', 'data-act', 'data-nav', 'data-mark', 'data-ol', 'data-key', 'data-olf', 'data-open', 'data-blocks'];
+      const attrs = ['id', 'data-block', 'data-sec', 'data-n', 'data-c', 'data-thread', 'data-note', 'data-comment', 'data-draft', 'data-act', 'data-nav', 'data-mark', 'data-ol', 'data-key', 'data-olf', 'data-open', 'data-blocks'];
       ghost.querySelectorAll(attrs.map((a) => `[${a}]`).join(', ')).forEach((el) => attrs.forEach((a) => el.removeAttribute(a)));
     }
     after.after(ghost);
@@ -5198,13 +5204,52 @@
     if (snap.ol) olMotion(snap.ol);
     peekMotion(snap);
     detailMotion(snap);
-    // A thread that changed size (resolved, a reply box opened) eases into it.
-    snap.threads.forEach((h0, id) => {
-      const el = [...main.querySelectorAll('.th[data-thread]')].find((t) => t.dataset.thread === id);
-      if (!el) return;
-      const h1 = el.getBoundingClientRect().height;
-      if (Math.abs(h1 - h0) > 3) el.animate([{ height: h0 + 'px' }, { height: h1 + 'px' }], { duration: 200, easing: EASE });
-    });
+    snap.threads.forEach((was, id) => { const el = thEl(id); if (el) threadMotion(was, el); });
+    if (snap.away) awayMotion(snap.away);
+  }
+  const fadeOut = (el) => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE, fill: 'forwards' });
+  const fadeIn = (el) => el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 80, easing: EASE, fill: 'backwards' });
+  // A thread or a note drawn again. Folded, what it held closes up under its header, fading; as it's
+  // resolved, into the header that takes the place of its last lines and rises as they close.
+  // Unfolded, it opens downward from its header, what it holds fading in. Unresolved, its header
+  // closes over what stays. Any other change of size (a reply box opened) eases.
+  function threadMotion(was, el) {
+    const h = el.getBoundingClientRect().height, gone = was.h - h;
+    if (Math.abs(gone) <= 3) return;
+    const parts = (th) => { const head = th.querySelector(':scope > .th-fold'); return { head, body: [...th.children].filter((x) => x !== head) }; };
+    const a = parts(was.el), b = parts(el);
+    if (gone > 3 && b.head && a.body.length && !b.body.length) {
+      const g = closeGap(b.head, gone, a.body);
+      if (!a.head) { b.head.before(g); fadeIn(b.head); }
+      fadeOut(g);
+    } else if (gone > 3 && a.head && !b.head && b.body.length) {
+      const g = closeGap(b.body[0], gone, [a.head]);
+      b.body[0].before(g);
+      fadeOut(g);
+    } else if (!a.body.length && b.body.length) {
+      el.animate([{ height: was.h + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE });
+      b.body.forEach(fadeIn);
+    } else el.animate([{ height: was.h + 'px' }, { height: h + 'px' }], { duration: 200, easing: EASE });
+  }
+  // A file's threads or notes off its diff: what follows their toggle, up to the next one.
+  function awayOf(btn) {
+    const out = [];
+    for (let el = btn.nextElementSibling; el && !el.matches('.th-away'); el = el.nextElementSibling) out.push(el);
+    return out;
+  }
+  const awayBtn = (k) => [...main.querySelectorAll('.th-away')].find((b) => b.dataset.act === k.act && b.dataset.p === k.p) || null;
+  // Folded, they close up under their toggle, fading; unfolded, they open downward from it, fading in.
+  function awayMotion(a) {
+    const btn = awayBtn(a.key);
+    if (!btn) return;
+    const box = btn.parentElement, h = box.getBoundingClientRect().height, items = awayOf(btn);
+    if (a.h - h > 3 && a.items.length && !items.length) fadeOut(closeGap(btn, a.h - h, a.items));
+    else if (h - a.h > 3 && items.length && !a.items.length) {
+      box.style.overflow = 'hidden';
+      const open = () => { box.style.overflow = ''; };
+      box.animate([{ height: a.h + 'px' }, { height: h + 'px' }], { duration: 280, easing: EASE }).finished.then(open, open);
+      items.forEach(fadeIn);
+    }
   }
   // Comments new on GitHub since the page last asked fade in where they appear.
   function commentsMotion() {
@@ -6080,7 +6125,7 @@
     if (act === 'thread-open') return openThread(d.thread);
     if (act === 'thread-toggle') { GH.opened.has(d.thread) ? GH.opened.delete(d.thread) : GH.opened.add(d.thread); return render(); }
     if (act === 'resolved-toggle') { GH.showResolved = !GH.showResolved; return renderSide(); }
-    if (act === 'away-toggle') { GH.away.has(d.p) ? GH.away.delete(d.p) : GH.away.add(d.p); return render(); }
+    if (act === 'away-toggle') { GH.away.has(d.p) ? GH.away.delete(d.p) : GH.away.add(d.p); hint({ away: { act, p: d.p } }); return render(); }
     if (act === 'review-toggle') { GH.reviewOpen = !GH.reviewOpen; if (GH.reviewOpen) GH.focus = 'review'; return render(); }
     if (act === 'file-comment') { GH.fileCompose = d.p; GH.focus = 'file:' + d.p; return render(); }
     if (act === 'file-cancel') { if (letGo(d.key)) { GH.fileCompose = null; render(); } return; }
@@ -6263,7 +6308,7 @@
     if (act === 'nt-resolve') { if (note) ntAct('res:' + n, { action: 'resolve', n, resolved: !note.resolved }, () => NT.opened.delete(n)); return; }
     if (act === 'nt-fold') { NT.opened.has(n) ? NT.opened.delete(n) : NT.opened.add(n); return render(); }
     if (act === 'nt-was') { NT.was.has(n) ? NT.was.delete(n) : NT.was.add(n); return render(); }
-    if (act === 'nt-away') { NT.folded.has(d.p) ? NT.folded.delete(d.p) : NT.folded.add(d.p); return render(); }
+    if (act === 'nt-away') { NT.folded.has(d.p) ? NT.folded.delete(d.p) : NT.folded.add(d.p); hint({ away: { act, p: d.p } }); return render(); }
     if (act === 'nt-resolved-toggle') { NT.showResolved = !NT.showResolved; return renderSide(); }
     if (act === 'nt-open') return openNote(n);
     if (act === 'nt-copy1') {
