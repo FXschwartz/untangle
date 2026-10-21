@@ -1020,6 +1020,22 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  describe('when the language server\'s memory is freed from its popover, ', () => {
+    let freed: string;
+
+    before(async () => {
+      const pid = await read(page!, `document.querySelector('#lsp-pid').textContent`);
+      await page!.hover('#vw-lsp');
+      await page!.click('#lsp-free');
+      await page!.until(`document.querySelector('#lsp-dot').classList.contains('ready') && !document.querySelector('#lsp-free').hidden && document.querySelector('#lsp-pid').textContent !== ${JSON.stringify(pid)}`, 180_000);
+      freed = await read(page!, `document.querySelector('#lsp-state').textContent + ' · ' + (document.querySelector('#lsp-pid').textContent === ${JSON.stringify(pid)} ? 'the same process' : 'another process')`);
+    });
+
+    it('then the server starts over in another process, and runs again.', () => {
+      assert.equal(freed, 'Dart analysis server, running · another process');
+    });
+  });
+
   describe('when the greeting chain is opened at 760 pixels wide, ', () => {
     let fit: string;
 

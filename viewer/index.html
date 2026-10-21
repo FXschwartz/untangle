@@ -157,7 +157,12 @@ a.t-pr:hover { text-decoration: underline; text-decoration-color: var(--text-3);
 .dot.starting { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 .dot.failed { background: var(--del-ink); }
 .lsp-pop { display: none; position: absolute; right: -10px; top: calc(100% + 10px); z-index: 45; width: 280px; padding: 12px 14px; border-radius: 12px; background: var(--raised); box-shadow: var(--float); gap: 7px; font-size: 12.5px; color: var(--text-2); white-space: normal; }
-.vw-lsp:hover .lsp-pop, .vw-lsp:focus .lsp-pop { display: grid; }
+.vw-lsp:hover .lsp-pop, .vw-lsp:focus-within .lsp-pop { display: grid; }
+/* The gap above it is part of it: the pointer crosses from the dot to its button. */
+.lsp-pop::before { content: ''; position: absolute; left: 0; right: 0; top: -10px; height: 10px; }
+.lsp-free { justify-self: start; margin-top: 4px; background: var(--hover); }
+.lsp-free:hover { box-shadow: inset 0 0 0 1px var(--hair-2); }
+.lsp-free[hidden] { display: none; }
 .lsp-pop .lsp-h { display: grid; gap: 2px; color: var(--text); font-weight: 600; margin-bottom: 2px; }
 .lsp-pid { color: var(--text-3); font: 500 12px/1.45 var(--code); }
 .lsp-row { display: flex; justify-content: space-between; gap: 12px; }
@@ -1301,13 +1306,14 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
     <span class="sp"></span>
     <div class="vw-lsp" id="vw-lsp" tabindex="0" aria-describedby="lsp-pop" hidden>
       <i class="dot off" id="lsp-dot"></i><span class="lsp-use" id="lsp-use"></span>
-      <span class="lsp-pop" id="lsp-pop" role="tooltip">
+      <span class="lsp-pop" id="lsp-pop">
         <span class="lsp-h"><span id="lsp-state">Language server</span><span class="lsp-pid" id="lsp-pid" hidden></span></span>
         <span class="lsp-row"><span>Memory (RSS)</span><b data-m="rss">…</b></span>
         <span class="lsp-row"><span>CPU</span><b data-m="cpu">…</b></span>
         <span class="lsp-row"><span>Active resources</span><b data-m="resources">…</b></span>
         <span class="lsp-row"><span>Language server’s memory</span><b data-m="lspRss">…</b></span>
         <span class="lsp-row"><span>Language server’s CPU</span><b data-m="lspCpu">…</b></span>
+        <button type="button" class="btn sm lsp-free" id="lsp-free" data-act="lsp-restart" title="Start the language server over: it lets go of what it loaded for the definitions you went to. Go to definition waits for it while it starts" hidden>Free its memory</button>
       </span>
     </div>
     <div class="vw-agents" id="vw-agent" hidden></div>

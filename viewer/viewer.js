@@ -6939,6 +6939,11 @@
       return;
     }
     if (act === 'refresh') return startRefresh();
+    if (act === 'lsp-restart') {
+      t.disabled = true;
+      api('lsp/restart', { method: 'POST' }).catch(() => {}).then(pollMetrics);
+      return;
+    }
     if (act === 'reload') return reloadHere();
     if (act && act.startsWith('nt-')) return ntClick(act, d);
     if (act && (act.startsWith('gh-') || GH_ACTS.has(act))) return ghClick(act, d);
@@ -7337,6 +7342,10 @@
     set('resources', String(m.resources));
     set('lspRss', lsp.state === 'ready' ? bytes(lsp.rss) : lsp.state);
     set('lspCpu', lsp.state === 'ready' ? percent(lsp.cpu) : '—');
+    // Its memory freed by starting it over, once it runs.
+    const free = $('#lsp-free');
+    free.hidden = lsp.state !== 'ready';
+    free.disabled = false;
   }
   function pollMetrics() {
     clearTimeout(metricsTimer);

@@ -107,6 +107,22 @@ export class LiveSession {
     this.server = null;
   }
 
+  /**
+   * The language server started over, at once: it lets go of what it loaded for the definitions
+   * gone to (another package's files, the SDK's), which it otherwise holds until untangle stops.
+   * One still starting is fresh already.
+   */
+  async restart(): Promise<void> {
+    if (this.starting && !this.server) return;
+    const old = this.server;
+    this.server = null;
+    this.starting = null;
+    this.failure = null;
+    // The new one starts as the old one goes: the page reads it starting from the click on.
+    this.ensure().catch((e) => this.progress.note(`live go to definition is off: ${(e as Error).message}`));
+    await old?.stop();
+  }
+
   private externalId(abs: string): number {
     const at = this.external.indexOf(abs);
     if (at >= 0) return at;

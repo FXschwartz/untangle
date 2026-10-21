@@ -260,6 +260,10 @@ export class ReviewSession {
   async call(route: string, method: string, q: URLSearchParams, body: unknown): Promise<{ status?: number; data: unknown }> {
     const where = () => ({ side: q.get('side') || undefined, p: q.get('p') || undefined, ext: q.has('ext') ? Number(q.get('ext')) : undefined });
     if (route === 'metrics' && method === 'GET') return { data: this.metrics.sample(this.live.state()) };
+    if (route === 'lsp/restart' && method === 'POST') {
+      await this.live.restart();
+      return { data: this.live.state() };
+    }
     if (route === 'state' && method === 'PUT') return { data: this.saveState((body || {}) as Parameters<ReviewSession['saveState']>[0]) };
     if (route === 'generated' && method === 'GET') return this.generated(q.get('p') || '');
     if (route === 'definition' && method === 'GET') {
