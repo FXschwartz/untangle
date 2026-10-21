@@ -21,9 +21,9 @@ export function run(cmd: string, args: string[], opts: { cwd?: string; input?: s
 }
 
 /** Runs a command without blocking. Resolves with its output, or rejects with CommandError. */
-export function runAsync(cmd: string, args: string[], opts: { cwd?: string; onLine?: (line: string) => void; shell?: boolean } = {}): Promise<string> {
+export function runAsync(cmd: string, args: string[], opts: { cwd?: string; onLine?: (line: string) => void; shell?: boolean; env?: NodeJS.ProcessEnv; timeout?: number } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, shell: opts.shell, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { cwd: opts.cwd, shell: opts.shell, env: opts.env ? { ...process.env, ...opts.env } : undefined, timeout: opts.timeout, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
     const lines = (chunk: string) => opts.onLine && chunk.split(/\r?\n|\r/).filter(Boolean).forEach(opts.onLine);
     child.stdout.setEncoding('utf8').on('data', (d: string) => { out += d; lines(d); });

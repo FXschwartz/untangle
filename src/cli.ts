@@ -23,7 +23,7 @@ import { ReviewServer } from './server.js';
 import { editorFrom, ReviewSession } from './session.js';
 import { skill } from './skill.js';
 import { isPrUrl, latestHead, resolveDirectory, resolveUrl, type Target } from './target.js';
-import { upgrade } from './upgrade.js';
+import { upgrade, upgradeNotice } from './upgrade.js';
 import { VERSION } from './version.js';
 
 // After its last page closes, untangle waits this long for a page to open again (a reload)
@@ -78,6 +78,8 @@ async function review(opts: Options): Promise<number> {
     if (!gitMaybe(dir, 'rev-parse', '--git-dir')) throw new Error(`${path.resolve(dir)} is not inside a git repository`);
   }
   const exporting = opts.exportTo !== null;
+  // Whether an upgrade brings a newer untangle: said once the review is up.
+  const notice = opts.quiet || exporting ? null : upgradeNotice().catch(() => null);
 
   const say = new Narrator({ quiet: opts.quiet, verbose: opts.verbose, color: opts.color });
   say.header([`untangle ${VERSION}`]);
@@ -314,6 +316,7 @@ async function review(opts: Options): Promise<number> {
     attachNotes(t, built.session);
     say.note(`marks go to the branch ${session.snapshot.branch}`);
     say.ready(url, opts.autoclose);
+    void notice?.then((line) => { if (line) say.note(line); });
     // Start live navigation after extraction and grouping have finished.
     live.ensure().catch((e) => say.note(`live go to definition is off: ${(e as Error).message}`));
   } catch (e) {

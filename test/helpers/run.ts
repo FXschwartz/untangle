@@ -50,8 +50,11 @@ function untangleEnv(cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): N
   // No user git config: marks commits stay untangle <untangle@localhost>, with no signing or hooks.
   env.GIT_CONFIG_GLOBAL = '/dev/null';
   env.GIT_CONFIG_NOSYSTEM = '1';
-  env.GIT_CONFIG_COUNT = '0';
   env.GIT_TERMINAL_PROMPT = '0';
+  // A review looks up untangle's main on GitHub as it starts: here, offline, it finds none.
+  env.GIT_CONFIG_COUNT = '1';
+  env.GIT_CONFIG_KEY_0 = 'url./nonexistent/untangle.git.insteadOf';
+  env.GIT_CONFIG_VALUE_0 = 'https://github.com/marcelomendoncasoares/untangle.git';
   // These tests run inside Orca. A review must not open the person's browser or a real Orca tab.
   delete env.BROWSER;
   for (const key of Object.keys(env)) {

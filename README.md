@@ -289,6 +289,9 @@ new Dart. After the first upgrade, the clone you built in [Getting started](#2-b
 no longer the one on `PATH`, and you can delete it. Reviews already running keep the version they
 started with until you start them again.
 
+When a review starts, `untangle` looks up GitHub's `main` with `git ls-remote`, at most once a
+day, and once the review is up it says whether an upgrade brings a newer `untangle`.
+
 ### Keys
 
 
@@ -374,6 +377,8 @@ plus every change you marked, so `git diff untangle/pr-<number> HEAD` shows what
   - `run/`: the port and token of each review running now, for the agent's commands.
   - `untangle/`: `untangle`'s own clone, which `untangle upgrade` pulls, builds and links. Once
   upgraded, the `untangle` command runs from it, so keep it when you clear the cache.
+  - `upgrade.json`: GitHub's `main` as last looked up, kept a day, to say when an upgrade brings a
+  newer `untangle`.
 
 ## Development
 

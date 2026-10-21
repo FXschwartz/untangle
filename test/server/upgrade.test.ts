@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { VERSION } from '../../dist/version.js';
+import { has } from '../../dist/exec.js';
+import { ROOT, VERSION } from '../../dist/version.js';
 import { stubGh, type GhStub } from '../helpers/gh.ts';
+import { pubspec } from '../helpers/review.ts';
 import { TempRepo, type Person } from '../helpers/repo.ts';
-import { untangleCommand } from '../helpers/run.ts';
+import { startUntangle, untangleCommand } from '../helpers/run.ts';
 
 const ada: Person = { name: 'Ada Lovelace', email: 'ada@example.com', date: '2020-06-01T00:00:00Z' };
 
@@ -210,6 +212,94 @@ describe('Given untangle’s repository and npm’s global folder, both stand-in
       const head = commit('An untangle from before skill -update', { 'build.mjs': BUILD, 'cli.mjs': cli('untangle', "if (process.argv.includes('-update')) process.exit(2);\n") });
       const r = await upgrade();
       assert.deepEqual([r.code, r.out, untangle('hello')], [0, 'untangle: this untangle can’t update its skill where it’s installed: untangle skill -install does, for every agent here.\n', `untangle at ${head}: hello\n`]);
+    },
+  );
+});
+
+// A review that starts says when GitHub's main, looked up at most once a day (git ls-remote, here
+// to a stand-in), has commits the untangle running it doesn't.
+describe('Given a package to review, and untangle’s main on GitHub as a stand-in, ', { skip: has('dart') ? false : 'dart is not on PATH' }, () => {
+  let repo: TempRepo;
+  let github: TempRepo;
+  let work: TempRepo;
+  let cache = '';
+  let newer = '';
+  // The untangle under test: the one the review runs.
+  const head = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const lookedUp = () => path.join(cache, 'upgrade.json');
+  const notice = (main: string) => `    a newer untangle is on GitHub (main is at ${main.slice(0, 7)}, this one at ${head.slice(0, 7)}): untangle upgrade brings it`;
+
+  /** Starts the review, waits until it's up and a moment more, and stops it: what it printed. */
+  async function review(): Promise<string> {
+    const run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, quiet: false, env: {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.${github.dir}.insteadOf`,
+      GIT_CONFIG_VALUE_0: 'https://github.com/marcelomendoncasoares/untangle.git',
+    } });
+    try {
+      const deadline = Date.now() + 60_000;
+      while (!run.output().includes('Review at ') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 1500));
+      return run.output();
+    } finally {
+      await run.stop();
+    }
+  }
+  const told = (out: string) => out.split('\n').filter((l) => l.includes('untangle upgrade'));
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write('pubspec.yaml', pubspec);
+    repo.write('lib/app.dart', "void greet() {\n  print('hi');\n}\n");
+    repo.commit({ subject: 'Start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write('lib/app.dart', "void greet(String name) {\n  print(name);\n}\n");
+    repo.commit({ subject: 'Greet by name', author: ada, committer: ada });
+    // GitHub's main: a commit this untangle doesn't have.
+    github = TempRepo.bare();
+    work = TempRepo.create();
+    work.remoteAdd('origin', github.dir);
+    work.write('README.md', 'A newer untangle\n');
+    newer = work.commit({ subject: 'A newer untangle', author: ada, committer: ada });
+    work.push('origin', 'main');
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+  });
+
+  after(() => {
+    repo.remove();
+    github.remove();
+    work.remove();
+    fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  it(
+    'when main was looked up today, with commits this untangle doesn’t have, '
+    + 'then the review says, once it’s up, that untangle upgrade brings them, without asking GitHub again.',
+    async () => {
+      const today = { checked: new Date().toISOString(), main: 'f'.repeat(40) };
+      fs.writeFileSync(lookedUp(), JSON.stringify(today));
+      const out = await review();
+      assert.deepEqual([told(out), out.indexOf('Review at ') < out.indexOf('untangle upgrade'), JSON.parse(fs.readFileSync(lookedUp(), 'utf8'))], [[notice('f'.repeat(40))], true, today]);
+    },
+  );
+
+  it(
+    'when main, looked up today, is this untangle’s commit, '
+    + 'then the review says nothing of upgrading.',
+    async () => {
+      fs.writeFileSync(lookedUp(), JSON.stringify({ checked: new Date().toISOString(), main: head }));
+      assert.deepEqual(told(await review()), []);
+    },
+  );
+
+  it(
+    'when main was looked up more than a day ago, '
+    + 'then git ls-remote asks GitHub again, the review says what main is now, and that answer is kept for a day.',
+    async () => {
+      fs.writeFileSync(lookedUp(), JSON.stringify({ checked: new Date(Date.now() - 25 * 3600_000).toISOString(), main: head }));
+      const out = await review();
+      const kept = JSON.parse(fs.readFileSync(lookedUp(), 'utf8')) as { checked: string; main: string };
+      assert.deepEqual([told(out), kept.main, Date.now() - Date.parse(kept.checked) < 120_000], [[notice(newer)], newer, true]);
     },
   );
 });

@@ -1,15 +1,16 @@
 // untangle upgrade: the latest untangle, from a clone of its own in the cache. The first upgrade
 // clones it and later ones pull it. npm then installs its packages, builds it and links it, so the
-// untangle command runs it, and the new untangle rewrites its skill where it's installed.
+// untangle command runs it, and the new untangle rewrites its skill where it's installed. A review
+// says, as it starts, when an upgrade would bring a newer untangle.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { selfDir, tilde } from './cache.js';
+import { cacheRoot, selfDir, tilde } from './cache.js';
 import { CommandError, git, gitAsync, gitMaybe, has, runAsync } from './exec.js';
 import { Narrator } from './narrate.js';
 import { listRuns } from './runs.js';
 import { skillFiles } from './skill.js';
-import { VERSION } from './version.js';
+import { ROOT, VERSION } from './version.js';
 
 const SOURCE = 'https://github.com/marcelomendoncasoares/untangle.git';
 
@@ -121,4 +122,40 @@ export async function upgrade(): Promise<number> {
   process.stdout.write(r.stdout || '');
   process.stderr.write(r.stderr || (r.error ? `untangle: ${r.error.message}\n` : ''));
   return r.status === 0 ? 0 : 1;
+}
+
+// GitHub's main, once looked up, stands for a day: reviews start with one lookup a day at most.
+const DAY = 24 * 60 * 60_000;
+const lookedUp = () => path.join(cacheRoot(), 'upgrade.json');
+
+/** GitHub's main, as git ls-remote tells it at most a day before; null when it can't be told. */
+async function githubMain(): Promise<string | null> {
+  try {
+    const was = JSON.parse(fs.readFileSync(lookedUp(), 'utf8')) as { checked?: unknown; main?: unknown };
+    if (typeof was.main === 'string' && /^[0-9a-f]{40}$/.test(was.main) && Date.now() - Date.parse(String(was.checked)) < DAY) return was.main;
+  } catch {
+    // Not looked up yet.
+  }
+  // Never a prompt for a login, in the review's terminal: the repository is public.
+  const out = await runAsync('git', ['ls-remote', SOURCE, 'refs/heads/main'], { env: { GIT_TERMINAL_PROMPT: '0' }, timeout: 15_000 }).catch(() => '');
+  const main = /^([0-9a-f]{40})\trefs\/heads\/main$/m.exec(out)?.[1] ?? null;
+  if (main) {
+    try {
+      fs.mkdirSync(cacheRoot(), { recursive: true });
+      fs.writeFileSync(lookedUp(), JSON.stringify({ checked: new Date().toISOString(), main }) + '\n');
+    } catch {
+      // Looked up again next time.
+    }
+  }
+  return main;
+}
+
+/** The line that says an upgrade brings a newer untangle, when GitHub's main has commits this one doesn't. */
+export async function upgradeNotice(): Promise<string | null> {
+  const head = fs.existsSync(path.join(ROOT, '.git')) ? gitMaybe(ROOT, 'rev-parse', 'HEAD')?.trim() : null;
+  if (!head) return null;
+  const main = await githubMain();
+  // Main's commit is in this untangle's history: it's as new, or newer (a clone being worked on).
+  if (!main || main === head || gitMaybe(ROOT, 'merge-base', '--is-ancestor', main, head) !== null) return null;
+  return `a newer untangle is on GitHub (main is at ${main.slice(0, 7)}, this one at ${head.slice(0, 7)}): untangle upgrade brings it`;
 }
