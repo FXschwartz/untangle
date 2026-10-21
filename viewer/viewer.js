@@ -1776,10 +1776,12 @@
     const anchors = MENU.open ? [...viewer.querySelectorAll(`[data-menu="${MENU.open}"]`)] : [];
     const anchor = anchors.find((a) => a.getClientRects().length) || anchors[0];
     const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'more' ? moreMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
-    const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
-    if (!html) {
+    const sheet = compact();
+    const html = !anchor ? '' : (sheet ? SHEET_HANDLE : '') + (lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '');
+    if (!html || html === SHEET_HANDLE) {
       MENU.open = null;
       MENU.html = '';
+      layerSoon();
       viewer.querySelectorAll('[data-menu][aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
       // It folds back into its button as it was, out of reach, then hides.
       if (MENU.shown) { MENU.shown = null; el.inert = true; pop(el, false, () => { el.hidden = true; el.inert = false; }); }
@@ -1790,6 +1792,7 @@
     el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'more' ? 'More' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
     el.classList.toggle('lens-pop', lens);
+    el.classList.toggle('sheet', sheet);
     if (html !== MENU.html) {
       const list = el.querySelector('.lp-list'), top = list ? list.scrollTop : 0;
       el.innerHTML = html;
@@ -1800,6 +1803,13 @@
     el.hidden = false;
     el.inert = false;
     anchor.setAttribute('aria-expanded', 'true');
+    layerSoon();
+    // A sheet rises from the bottom of the window, wherever its button is.
+    if (sheet) {
+      el.style.left = el.style.top = '';
+      if (MENU.shown !== MENU.open) { el.style.transformOrigin = '50% 100%'; if (MENU.shown) unpop(el); MENU.shown = MENU.open; pop(el, true); }
+      return;
+    }
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
     const left = Math.max(8, Math.min(MENU.open === 'side' || MENU.open === 'chains' || lens || crumb ? r.left : r.right - w, window.innerWidth - w - 8));
     const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
@@ -2940,11 +2950,11 @@
       box.className = `rv-pop${local ? ' local' : ''}`;
       box.setAttribute('aria-label', local ? 'Your notes' : 'Finish your review');
       box.inert = false;
-      box.innerHTML = h;
+      box.innerHTML = (compact() ? SHEET_HANDLE : '') + h;
       fitBoxes(box);
       if (opening) {
         const b = btn.getBoundingClientRect(), r = box.getBoundingClientRect();
-        box.style.transformOrigin = `${Math.round(b.left + b.width / 2 - r.left)}px 0`;
+        box.style.transformOrigin = compact() ? '50% 100%' : `${Math.round(b.left + b.width / 2 - r.left)}px 0`;
         pop(box, true);
       }
     } else if (box && !box.inert) {
@@ -2957,6 +2967,7 @@
       again.focus({ preventScroll: true });
       if (caret) { again.setSelectionRange(caret[0], caret[1]); again.scrollTop = caret[2]; }
     }
+    layerSoon();
   }
   // The menu's switch: new comments go to GitHub, or stay here as notes.
   function modeHtml() {
@@ -3029,8 +3040,9 @@
     const h = list.map((a) => {
       const open = NT.agentOpen === a.name, label = esc(agentLabel(a));
       return `<span class="vw-agent-w"><button type="button" class="vw-agent st-${a.state}" data-act="nt-agent" data-agent="${esc(a.name)}" aria-expanded="${open}" aria-haspopup="dialog"><i class="dot"></i><span class="ag-l" data-n="${esc(a.name)}">${label}</span>${ICON.chevronDown}</button>`
-        + (open ? `<div class="ag-pop st-${a.state}" role="dialog" aria-label="${label}">${agentPopHtml(a)}</div>` : '') + '</span>';
+        + (open ? `<div class="ag-pop st-${a.state}" role="dialog" aria-label="${label}">${compact() ? SHEET_HANDLE : ''}${agentPopHtml(a)}</div>` : '') + '</span>';
     }).join('');
+    layerSoon();
     if (el.innerHTML === h) return;
     // The button that had the focus keeps it as the labels are drawn again.
     const ae = el.contains(document.activeElement) ? document.activeElement : null;
@@ -3171,6 +3183,62 @@
   // The keyboard's click (a mouse's already opened the composer on its way up).
   addBtn.addEventListener('click', (e) => { e.stopPropagation(); if (Date.now() - dragUp > 400 && addAt) openCompose(addAt, e.shiftKey); });
 
+  // ---------- layers: in a narrow window, Contents, a sheet or Jump to over the view is a step in
+  // the browser's history of its own, so the phone's Back closes it instead of leaving the view. A
+  // view opened from it takes that step's place. A sheet's handle swipes it down.
+  const LAYER = { entry: false, skip: false, soon: false };
+  const SHEET_HANDLE = '<div class="sh-h" aria-hidden="true"></div>';
+  const sheetsOpen = () => !!MENU.open || GH.reviewOpen || !!NT.agentOpen;
+  function layerSoon() {
+    if (LAYER.soon) return;
+    LAYER.soon = true;
+    queueMicrotask(() => {
+      LAYER.soon = false;
+      viewer.classList.toggle('sheet-on', compact() && sheetsOpen());
+      const open = compact() && (SIDE.open || sheetsOpen() || PAL.open);
+      if (LAYER.skip || !NAV.hist) return;
+      try {
+        if (open && !LAYER.entry) { history.pushState(Object.assign({}, history.state, { layer: 1 }), ''); LAYER.entry = true; }
+        else if (!open && LAYER.entry) { LAYER.entry = false; LAYER.skip = true; history.back(); }
+      } catch (err) { /* the browser limits how often */ }
+    });
+  }
+  // Back with a layer open: the layer closes, and the view stays as it is.
+  function layersClose() {
+    LAYER.entry = false;
+    if (SIDE.open) sideDrawer(false);
+    if (PAL.open) palClose();
+    if (MENU.open) closeMenu();
+    if (NT.agentOpen) { NT.agentOpen = null; renderAgent(); }
+    if (GH.reviewOpen) { GH.reviewOpen = false; render(); }
+  }
+  // A sheet follows a finger down from its handle; let go far enough down, it closes.
+  let sheetDrag = null;
+  document.addEventListener('pointerdown', (e) => {
+    const h = e.target instanceof Element && e.target.closest('.sh-h');
+    const box = h && h.parentElement;
+    if (!box) return;
+    sheetDrag = { box, y: e.clientY, dy: 0, id: e.pointerId };
+    h.setPointerCapture(e.pointerId);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
+    sheetDrag.dy = Math.max(0, e.clientY - sheetDrag.y);
+    sheetDrag.box.style.transform = `translateY(${sheetDrag.dy}px)`;
+  });
+  const sheetLet = () => {
+    if (!sheetDrag) return;
+    const { box, dy } = sheetDrag;
+    sheetDrag = null;
+    box.style.transform = '';
+    if (dy < 64) return;
+    if (box === MENU.el) closeMenu();
+    else if (box.matches('.rv-pop')) { GH.reviewOpen = false; render(); }
+    else if (box.matches('.ag-pop')) { NT.agentOpen = null; renderAgent(); }
+  };
+  document.addEventListener('pointerup', sheetLet);
+  document.addEventListener('pointercancel', sheetLet);
+
   // ---------- going back: each view the page moves to is a step in the browser's history, so Back
   // (the header's arrow, the browser's, Alt ←, a mouse's back button) brings back the view before,
   // scrolled where it was, with its sidebar tab. Without the browser's history, the steps are the
@@ -3201,7 +3269,7 @@
         const s0 = history.state;
         if (s0 && s0.untangle && s0.at > 0) e.at = s0.at;
         history.replaceState(navState(e), '');
-      } else if (NAV.hist) history.pushState(navState(e), '');
+      } else if (NAV.hist && LAYER.entry) { history.replaceState(navState(e), ''); LAYER.entry = false; } else if (NAV.hist) history.pushState(navState(e), '');
     } catch (err) { NAV.hist = false; }
     NAV.stack[e.at] = e;
     NAV.at = e.at;
@@ -3237,7 +3305,11 @@
     const prev = NAV.stack[NAV.at - 1];
     if (prev) navGo(navState(prev));
   }
-  window.addEventListener('popstate', (e) => { if (e.state && e.state.untangle && e.state.view) navGo(e.state); });
+  window.addEventListener('popstate', (e) => {
+    if (LAYER.skip) { LAYER.skip = false; return layerSoon(); }
+    if (LAYER.entry) return layersClose();
+    if (e.state && e.state.untangle && e.state.view) navGo(e.state);
+  });
   const navBackHtml = () => {
     if (NAV.at <= 0) return '';
     const to = NAV.stack[NAV.at - 1];
@@ -6492,12 +6564,14 @@
     palDraw();
     PAL.input.focus();
     PAL.input.select();
+    layerSoon();
   }
   function palClose() {
     if (!PAL.open) return;
     PAL.open = false;
     PAL.el.hidden = true;
     scrim(null);
+    layerSoon();
   }
 
   // ---------- events
@@ -6995,6 +7069,7 @@
     }
     if (act === 'minimap') { UI.minimap = !UI.minimap; saveUI(); return mini.update(); }
     if (act === 'side-toggle') return toggleSide();
+    if (act === 'shade') { if (SIDE.open) sideDrawer(false); return; }
     if (act === 'threads-fold') {
       const folded = new Set(Array.isArray(UI.foldedThreads) ? UI.foldedThreads : []);
       folded.has(d.key) ? folded.delete(d.key) : folded.add(d.key);
@@ -7231,6 +7306,7 @@
       if (cur) cur.scrollIntoView({ block: 'center' });
       (cur || side.querySelector('[role="tab"][aria-selected="true"]') || side).focus({ preventScroll: true });
     } else if (side.contains(document.activeElement)) ($('#vw-contents') || main).focus({ preventScroll: true });
+    layerSoon();
   }
   COMPACT.addEventListener('change', () => { sideDrawer(false); renderSide(); renderTop(); renderWhere(); renderPill(); });
   let resizing = null;
