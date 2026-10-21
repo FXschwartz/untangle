@@ -83,6 +83,15 @@
   // A narrow window, a phone's among them: one pane at a time, the sidebar a drawer (Contents).
   const COMPACT = window.matchMedia ? window.matchMedia('(max-width: 960px)') : { matches: false, addEventListener() {} };
   const compact = () => COMPACT.matches;
+  const PHONE = window.matchMedia ? window.matchMedia('(max-width: 520px)') : { matches: false, addEventListener() {} };
+  // Long lines wrap, under their own indent, on a phone (or as ⋯ says, in any narrow window).
+  const wrapOn = () => compact() && (UI.wrap != null ? !!UI.wrap : PHONE.matches);
+  const codeSize = () => UI.codeSize || (PHONE.matches ? 12 : 12.5);
+  // Side by side needs the width: a narrow window shows the diff in one column.
+  const sideBySide = () => state.layout === 'split' && !compact();
+  // A line's indent, for a wrapped line's next rows to start under it (a tab as tab-size's 8).
+  const indentOf = (text) => { let i = 0, n = 0; for (; i < text.length && n < 32; i++) { if (text[i] === ' ') n++; else if (text[i] === '\t') n += 8; else break; } return Math.min(n, 32); };
+  const indentAttr = (text) => { const n = text ? indentOf(text) : 0; return n ? ` style="--i:${n}"` : ''; };
   // The page's calls to untangle say which review the page shows. A 409 answer means untangle has
   // moved on to newer commits (refreshed from another page): this one offers to reload.
   function api(path, init) {
@@ -639,7 +648,7 @@
     const oldNo = meta.t === '-' ? meta.o : null;
     const c = o.c ? (meta.t === '-' ? (o.mv ? '' : 'L:' + meta.o) : n != null ? 'R:' + n : '') : '';
     const notes = (o.badges || '') + (o.toggle || '');
-    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}${o.mark || ''}"${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
+    return `<div class="ln ${o.cls}${f.lang === 'md' ? ' md' : ''}${o.sel ? ' cm-sel' : ''}${o.mark || ''}"${indentAttr(text)}${n != null ? ` data-n="${n}"` : ''}${c ? ` data-c="${c}"` : ''}${o.w >= 0 ? ` data-w="${o.w}"` : ''}><span class="g">${o.tick || ''}</span><span class="no">${n != null ? n : meta.o != null ? meta.o : ''}</span><span class="sg">${sign}</span><span class="tx">${codeHtml(f, text, ranges, { emphasis: o.emphasis, n, o: oldNo, refs: o.refs, colors: o.colors })}</span>${notes ? `<span class="bdgs">${notes}</span>` : ''}</div>` + (n != null ? peekAfter(f, n) : oldNo != null ? peekAfterOld(f, oldNo) : '') + (o.c ? threadsRow(f, meta, o.mv) : '');
   }
   // Each move annotation stays at the moved block's position. The removed body stays
   // collapsed; the added body's annotation immediately precedes its rows.
@@ -843,7 +852,7 @@
     }
     return out;
   }
-  const anyRowsHtml = (f, hi, s, e, ctx) => (state.layout === 'split' ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
+  const anyRowsHtml = (f, hi, s, e, ctx) => (sideBySide() ? splitRowsHtml(f, hi, s, e, ctx) : rowsHtml(f, hi, s, e, ctx));
   const BIG = 150;
 
   // ---------- more of the file
@@ -900,7 +909,7 @@
     if (s.status !== 'ok') return `<div class="ln skip${s.status === 'loading' ? ' loading' : ''}"><span class="g"></span><span class="no"></span><span class="sg"></span><span class="tx">${s.status === 'loading' ? 'Loading lines…' : esc(s.error)}</span></div>`;
     if (count == null) count = Math.max(0, s.count - (n0 - 1));
     const colors = textColors(s.text, f.p);
-    const split = state.layout === 'split' && !ctx.unified;
+    const split = sideBySide() && !ctx.unified;
     let h = '';
     for (let k = 0; k < count; k++) {
       const n = n0 + k, meta = { t: ' ', o: o0 + k, n }, text = s.lines[n - 1] != null ? s.lines[n - 1] : '', c = colors && colors[n - 1];
@@ -1050,7 +1059,7 @@
     blocks.forEach((b) => { if (!byFile.has(b.file)) byFile.set(b.file, []); byFile.get(b.file).push(b); });
     let h = '';
     [...byFile.keys()].sort((x, y) => x.idx - y.idx).forEach((f) => {
-      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div><div class="code" data-p="${esc(f.p)}">`;
+      h += `<div class="sec-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${pathHtml(f.p)}</button></div><div class="code" data-p="${esc(f.p)}">`;
       const byHunk = new Map();
       byFile.get(f).forEach((b) => { if (!byHunk.has(b.hunk)) byHunk.set(b.hunk, []); byHunk.get(b.hunk).push(b); });
       const secs = [];
@@ -1736,6 +1745,8 @@
     // The view's menu, but for what a narrow window doesn't show.
     const view = viewMenuItems().filter((it) => !(it.data && (it.data.act === 'minimap' || it.data.act === 'layout')))
       .filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i - 1].sep));
+    items.push({ sep: true }, { head: 'Code' }, { label: 'Wrap long lines', checked: wrapOn(), data: { act: 'wrap' }, title: 'Long lines wrap under their own indent, instead of running off the side' },
+      { note: `<span class="mi-size">Code size<span class="sp"></span><button type="button" class="ib" data-act="code-size" data-step="-1" aria-label="Smaller code"${codeSize() <= 10 ? ' disabled' : ''}>A−</button><b>${codeSize()}</b><button type="button" class="ib" data-act="code-size" data-step="1" aria-label="Larger code"${codeSize() >= 16 ? ' disabled' : ''}>A+</button></span>` });
     if (view.length) items.push({ sep: true }, ...(view[0].head ? [] : [{ head: 'This view' }]), ...view);
     const lsp = $('#vw-lsp');
     if (lsp && !lsp.hidden) {
@@ -1912,7 +1923,7 @@
     h += '<div class="code src">';
     s.lines.forEach((text, i) => {
       const ln = i + 1, c = changed.has(ln);
-      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}${file.lang === 'md' ? ' md' : ''}" data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
+      h += `<div class="ln ${c ? (v.side === 'base' ? 'del' : 'add') : 'ctx'}${file.lang === 'md' ? ' md' : ''}"${indentAttr(text)} data-n="${ln}"><span class="g"></span><span class="no">${ln}</span><span class="sg">${c ? (v.side === 'base' ? '−' : '+') : ''}</span><span class="tx">${codeHtml(file, text, null, { colors: colors && colors[i], live: { side: v.side, p: v.path, ext: v.ext, line: ln } })}</span></div>`;
       if (state.peek && state.peek.src && state.peek.src.key === key && state.peek.src.line === ln) h += peekHtml(state.peek);
     });
     return h + '</div>';
@@ -3339,6 +3350,8 @@
     const path = (hide ? [crumb(hide - 1, '…')] : []).concat(dirs.slice(hide).map((d, i) => crumb(hide + i, d))).join('<i>/</i>');
     return `<button type="button" data-tab="files" title="Show the files">Files</button>${SEP}${dirs.length ? `<span class="path">${path}</span>${SEP}` : ''}<b title="${esc(p)}">${esc(fileName(p))}</b>`;
   };
+  // A file's path, its folders and its name apart: a narrow window shows the name first.
+  const pathHtml = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? `<span class="pname">${esc(p)}</span>` : `<span class="pdir">${esc(p.slice(0, i + 1))}</span><span class="pname">${esc(p.slice(i + 1))}</span>`; };
   // A chain's name with its owner apart: "BridgeMcpServer." and "logPath".
   const splitName = (name) => { const m = /^(_?[A-Z][\w$]*\.)(.+)$/.exec(name); return m ? { own: m[1], name: m[2] } : { own: '', name }; };
   // A commit's chain, and the step that gathers a commit's other changes, are named in words.
@@ -3367,7 +3380,7 @@
     shown.forEach((b) => {
       const f = b.file;
       const hunk = f.hunks[b.hunk];
-      if (f !== lastFile) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; lastFile = f; }
+      if (f !== lastFile) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${pathHtml(f.p)}</button></div>`; lastFile = f; }
       // Each edit's rows, extended to its whole syntax nodes, with one line of context.
       // Small changes are shown whole.
       const keep = new Set();
@@ -4499,7 +4512,7 @@
     h += '<div class="code">';
     let last = null;
     res.slice(0, 400).forEach(({ f, b, hunk, i }) => {
-      if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${esc(f.p)}</button></div>`; last = f; }
+      if (f !== last) { h += `<div class="inst-file"><button type="button" class="linkish" data-open="${esc(f.p)}">${pathHtml(f.p)}</button></div>`; last = f; }
       const meta = hunk.meta[i], [, text, ranges] = hunk.rows[i];
       const n = meta.t !== '-' ? meta.n : null, oldNo = meta.t === '-' ? meta.o : null;
       // Each line as the diff shows it, its changed tokens and names that peek at their
@@ -5656,7 +5669,17 @@
         prevRow = row;
       }
     });
-    root.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount));
+    if (!wrapOn()) { root.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount)); return; }
+    const cols = Math.max(16, Math.floor((main.clientWidth - 66 - 12) / (codeSize() * 0.6)));
+    root.querySelectorAll('.code').forEach((c) => {
+      let rows = 0;
+      for (const el of c.children) {
+        const tx = el.matches('.ln') && el.querySelector(':scope > .tx');
+        const len = tx ? tx.textContent.length : 0, ind = tx ? indentOf(tx.textContent) : 0;
+        rows += len <= cols ? 1 : 1 + Math.ceil((len - cols) / Math.max(8, cols - ind - 2));
+      }
+      c.style.setProperty('--rows', rows);
+    });
   }
   // ---------- a view drawn again: in place, what's the same kept as the browser drew it. Drawn
   // anew, a block of code is as tall as its rows until it shows (a hunk's divider is taller), and
@@ -5764,7 +5787,7 @@
     renderWhere();
     // Contents closes once what was chosen in it is open.
     if (SIDE.open && viewKey() !== SIDE.at) sideDrawer(false);
-    viewer.classList.toggle('split', state.layout === 'split');
+    viewer.classList.toggle('split', sideBySide());
     if (opts.line) {
       const el = main.querySelector(`[data-n="${opts.line}"]`);
       if (el) placeRow(el, headH() + 60); else main.scrollTop = opts.top ? 0 : keep;
@@ -6836,7 +6859,7 @@
   });
   viewer.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act],[data-open],[data-group],[data-chain],[data-standalone],[data-node],[data-graph-open],[data-map],[data-tab],[data-compare],[data-dir],[data-usage],[data-scope],[data-commit],[data-detail],.ref');
-    if (t && t.closest('.menu') && t.dataset.act !== 'crumb-dir') closeMenu();
+    if (t && t.closest('.menu') && t.dataset.act !== 'crumb-dir' && t.dataset.act !== 'code-size') closeMenu();
     if (t && t.tagName === 'A') return;
     if (!t || !viewer.contains(t)) return;
     const m = M();
@@ -7069,6 +7092,8 @@
     }
     if (act === 'minimap') { UI.minimap = !UI.minimap; saveUI(); return mini.update(); }
     if (act === 'side-toggle') return toggleSide();
+    if (act === 'wrap') { UI.wrap = !wrapOn(); saveUI(); applyCode(); return render(); }
+    if (act === 'code-size') { UI.codeSize = Math.min(16, Math.max(10, Math.round(codeSize()) + Number(d.step))); saveUI(); applyCode(); MENU.html = ''; renderMenu(); return render(); }
     if (act === 'shade') { if (SIDE.open) sideDrawer(false); return; }
     if (act === 'threads-fold') {
       const folded = new Set(Array.isArray(UI.foldedThreads) ? UI.foldedThreads : []);
@@ -7308,7 +7333,14 @@
     } else if (side.contains(document.activeElement)) ($('#vw-contents') || main).focus({ preventScroll: true });
     layerSoon();
   }
-  COMPACT.addEventListener('change', () => { sideDrawer(false); renderSide(); renderTop(); renderWhere(); renderPill(); });
+  COMPACT.addEventListener('change', () => { sideDrawer(false); applyCode(); render(); });
+  PHONE.addEventListener('change', () => { applyCode(); render(); });
+  // Code's settings in a narrow window: wrapped or not, and its size (the rows follow it).
+  function applyCode() {
+    viewer.classList.toggle('wrap', wrapOn());
+    if (compact() && UI.codeSize) viewer.style.setProperty('--code-fs', UI.codeSize + 'px');
+    else viewer.style.removeProperty('--code-fs');
+  }
   let resizing = null;
   split.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -7351,6 +7383,7 @@
   window.addEventListener('resize', () => { applySide(); mini.update(); });
   applySide();
   sideDrawer(false);
+  applyCode();
 
   // ---------- the minimap: the view's rows drawn small at the right of the code, with the diff's
   // colors, amber for what's left to review and blue for threads, and the part on screen. A click
