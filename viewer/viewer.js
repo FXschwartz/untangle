@@ -80,6 +80,9 @@
   const iconBtn = (ic, title, attrs, toggle) => `<button type="button" class="ib" ${attrs} title="${esc(title)}" aria-label="${esc(toggle ? toggle.label : title)}"${toggle ? ` aria-pressed="${toggle.on}"` : ''}>${ic}</button>`;
 
   const viewer = $('#viewer'), side = $('#vw-side'), main = $('#vw-main');
+  // A narrow window, a phone's among them: one pane at a time, the sidebar a drawer (Contents).
+  const COMPACT = window.matchMedia ? window.matchMedia('(max-width: 960px)') : { matches: false, addEventListener() {} };
+  const compact = () => COMPACT.matches;
   // The page's calls to untangle say which review the page shows. A 409 answer means untangle has
   // moved on to newer commits (refreshed from another page): this one offers to reload.
   function api(path, init) {
@@ -171,6 +174,8 @@
   // as a tree or a list, and the Threads tab's folded sections.
   const UI_KEY = 'untangle:ui';
   const UI = { side: 272, sideOff: false, minimap: true, filesList: false, foldedThreads: [] };
+  // Contents, open over the view in a narrow window, and the view it was opened on.
+  const SIDE = { open: false, at: '' };
   try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
   const saveUI = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) { /* storage unavailable */ } };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(true); });
@@ -1714,6 +1719,32 @@
     });
     return items;
   }
+  // ⋯ in a narrow window's app bar: what the top bar holds in a wide one (the notes or the review,
+  // the commit, the language server), and the view's own menu.
+  function moreMenuItems() {
+    const items = [];
+    if (GH.on || NT.on) {
+      const d = GH.data, n = d && d.pending ? d.pending.comments : 0;
+      const open = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
+      items.push(localMode()
+        ? { label: open ? `Your notes · ${open} open` : 'Your notes', icon: ICON.comment, data: { act: 'review-toggle' }, title: 'Copy them for your agent, or post them to GitHub' }
+        : { label: n ? `Finish your review · ${n} pending` : 'Review the pull request', icon: ICON.comment, data: { act: 'review-toggle' } });
+    }
+    const sha = (CONFIG.head || M().raw.right || '').slice(0, 7);
+    if (hxOn()) items.push({ label: state.lens ? `Changes from ${lensLabel()}` : `Changes from every commit, at ${sha}`, icon: ICON.history, data: { act: 'menu', menu: 'lens' } });
+    if (CONFIG.served) items.push({ label: 'Look for new commits', icon: ICON.refresh, data: { act: 'refresh' } });
+    // The view's menu, but for what a narrow window doesn't show.
+    const view = viewMenuItems().filter((it) => !(it.data && (it.data.act === 'minimap' || it.data.act === 'layout')))
+      .filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i - 1].sep));
+    if (view.length) items.push({ sep: true }, ...(view[0].head ? [] : [{ head: 'This view' }]), ...view);
+    const lsp = $('#vw-lsp');
+    if (lsp && !lsp.hidden) {
+      const m = (k) => esc(((lsp.querySelector(`[data-m="${k}"]`) || {}).textContent || '…').trim());
+      items.push({ sep: true }, { head: 'Language server' }, { note: `${esc(($('#lsp-state') || {}).textContent || '')}: ${m('lspRss')}, CPU ${m('lspCpu')}. untangle: ${m('rss')}, CPU ${m('cpu')}.` });
+      if (!$('#lsp-free').hidden) items.push({ label: 'Free its memory', title: $('#lsp-free').title, data: { act: 'lsp-restart' } });
+    }
+    return items;
+  }
   // A comment's tools as a menu, each by its name: what its ⋯ opens on a touch screen.
   function cmMenuItems(anchor) {
     const tools = anchor.closest('.cm') && anchor.closest('.cm').querySelector('.cm-tools');
@@ -1742,8 +1773,9 @@
     if (!MENU.el) { MENU.el = document.createElement('div'); MENU.el.className = 'menu'; MENU.el.hidden = true; viewer.appendChild(MENU.el); }
     const el = MENU.el, lens = MENU.open === 'lens';
     const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
-    const anchor = MENU.open && viewer.querySelector(`[data-menu="${MENU.open}"]`);
-    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
+    const anchors = MENU.open ? [...viewer.querySelectorAll(`[data-menu="${MENU.open}"]`)] : [];
+    const anchor = anchors.find((a) => a.getClientRects().length) || anchors[0];
+    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'more' ? moreMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
     const html = !anchor ? '' : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '';
     if (!html) {
       MENU.open = null;
@@ -1755,7 +1787,7 @@
     }
     // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
     el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'more' ? 'More' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
     el.classList.toggle('lens-pop', lens);
     if (html !== MENU.html) {
@@ -2867,6 +2899,8 @@
     const d = GH.data, n = d && d.pending ? d.pending.comments : 0;
     const open = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
     const label = local ? `Notes${open ? ` <span class="rv-n nt">${open}</span>` : ''}` : n ? `Finish review <span class="rv-n">${n}</span>` : 'Review';
+    const more = $('#vw-more');
+    if (more) more.classList.toggle('has', local ? !!open : !!n);
     const title = local ? 'Your notes, kept on this machine: copy them for your agent, or post them to GitHub' : n ? `Finish your review: ${n} pending comment${n === 1 ? '' : 's'}` : 'Comment on, approve or request changes to the pull request';
     let h = '';
     if (GH.reviewOpen) {
@@ -2994,7 +3028,7 @@
     if (NT.agentOpen && !list.some((a) => a.name === NT.agentOpen)) NT.agentOpen = null;
     const h = list.map((a) => {
       const open = NT.agentOpen === a.name, label = esc(agentLabel(a));
-      return `<span class="vw-agent-w"><button type="button" class="vw-agent st-${a.state}" data-act="nt-agent" data-agent="${esc(a.name)}" aria-expanded="${open}" aria-haspopup="dialog"><i class="dot"></i><span>${label}</span>${ICON.chevronDown}</button>`
+      return `<span class="vw-agent-w"><button type="button" class="vw-agent st-${a.state}" data-act="nt-agent" data-agent="${esc(a.name)}" aria-expanded="${open}" aria-haspopup="dialog"><i class="dot"></i><span class="ag-l" data-n="${esc(a.name)}">${label}</span>${ICON.chevronDown}</button>`
         + (open ? `<div class="ag-pop st-${a.state}" role="dialog" aria-label="${label}">${agentPopHtml(a)}</div>` : '') + '</span>';
     }).join('');
     if (el.innerHTML === h) return;
@@ -3963,7 +3997,7 @@
     if (!el || state.view.kind !== 'chain') return;
     const c = M().chains[state.view.id], i = c ? hereNode(c) : null, n = i != null && c.graph.nodes[i];
     const h = n ? `Reading <b>${esc(nodeLabels(n).l2)}</b> · ${GD.order.indexOf(i) + 1} of ${c.graph.nodes.length}` : '';
-    if (el.innerHTML !== h) el.innerHTML = h;
+    if (el.innerHTML !== h) { el.innerHTML = h; renderWhere(); }
   }
   // As the code scrolls the graph under the header, its last stretch shrinks toward the graph's
   // button, which takes it once it's gone (a pulse). Scrolling back up plays it back.
@@ -4884,7 +4918,7 @@
     const threadsOn = GH.on || NT.on;
     const openNotes = NT.data ? NT.data.notes.filter((x) => !x.resolved).length : 0;
     const openThreads = GH.on && !GH.data && !GH.error ? '…' : (GH.data ? GH.data.threads.filter((x) => !x.resolved).length : 0) + openNotes;
-    let h = `<div class="sb-top"><div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
+    let h = `<div class="sb-top">${compact() ? `<div class="sb-pr">${prHtml(true)}</div>` : ''}<div class="sb-prog${t.open ? '' : ' all'}" title="${pct}% of the changed lines reviewed: ${t.total - t.open} of ${t.total} changes">`
       + (t.open ? `<b>${t.open}</b><span>change${t.open === 1 ? '' : 's'} to review</span>` : `<b>${ICON.check}</b><span>All ${t.total} changes reviewed</span>`)
       + `<button type="button" class="ib" data-act="menu" data-menu="side" title="Where your marks are kept" aria-label="Marks" aria-haspopup="dialog" aria-expanded="${MENU.open === 'side'}">${ICON.more}</button><div class="sb-bar" aria-hidden="true"><i style="width:${pct}%"></i></div></div>`
       // Four tabs fit the sidebar without their counts: they show when it's wider.
@@ -5655,6 +5689,9 @@
     if (gs2) { gs2.scrollLeft = graphAt.x; gs2.scrollTop = graphAt.y; }
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     renderTop();
+    renderWhere();
+    // Contents closes once what was chosen in it is open.
+    if (SIDE.open && viewKey() !== SIDE.at) sideDrawer(false);
     viewer.classList.toggle('split', state.layout === 'split');
     if (opts.line) {
       const el = main.querySelector(`[data-n="${opts.line}"]`);
@@ -5721,6 +5758,11 @@
   function renderTop() {
     const el = $('#vw-title');
     if (!el) return;
+    const h = prHtml();
+    if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
+  }
+  // `head`: Contents' head, in a narrow window: its state and commit on a line, then its title.
+  function prHtml(head) {
     const raw = M().raw.title || '';
     const m = /^#(\d+)\s+(.*)$/.exec(raw);
     // `code` in a title reads as code.
@@ -5728,12 +5770,25 @@
     const name = m ? `<span class="t-num">#${m[1]}</span>${words(m[2])}` : words(raw);
     const pr = GH.data && GH.data.pr;
     const st = pr ? (pr.draft ? 'draft' : String(pr.state || '').toLowerCase()) : '';
-    const head = (CONFIG.head || M().raw.right || '').slice(0, 7);
-    const h = (CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`)
-      + (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
-      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="menu" data-menu="lens" aria-haspopup="dialog" aria-expanded="${MENU.open === 'lens'}" title="${state.lens ? `Only these changes count: ${esc(lensLabel())}. Pick others, or all of them` : 'Changes from every commit: pick some to review only theirs'}"><span>${state.lens ? esc(lensLabel()) : esc(head)}</span>${ICON.chevronDown}</button>` : esc(head)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
+    const sha = (CONFIG.head || M().raw.right || '').slice(0, 7);
+    const title = CONFIG.url ? `<a class="t-pr" href="${esc(CONFIG.url)}" target="_blank" rel="noopener noreferrer" title="${esc(raw)}: open on GitHub">${name}</a>` : `<span class="t-pr" title="${esc(raw)}">${name}</span>`;
+    const facts = (st ? `<span class="t-state ${esc(st)}">${{ open: 'Open', merged: 'Merged', closed: 'Closed', draft: 'Draft' }[st] || esc(st)}</span>` : '')
+      + `<span class="t-commit" title="${esc(CONFIG.where || M().raw.label || '')}">${hxOn() ? `<button type="button" class="t-head${state.lens ? ' on' : ''}" data-act="menu" data-menu="lens" aria-haspopup="dialog" aria-expanded="${MENU.open === 'lens'}" title="${state.lens ? `Only these changes count: ${esc(lensLabel())}. Pick others, or all of them` : 'Changes from every commit: pick some to review only theirs'}"><span>${state.lens ? esc(lensLabel()) : esc(sha)}</span>${ICON.chevronDown}</button>` : esc(sha)}${CONFIG.served ? iconBtn(ICON.refresh, 'Look for new commits, and review them here', 'data-act="refresh"') : ''}</span>`
       + `<span class="t-unsaved" title="${esc(unsavedWhy)}">Marks not saved</span>`;
-    if (h !== topHtml) { el.innerHTML = h; topHtml = h; }
+    return head ? `<div class="sb-pr-row">${facts}</div>${title}` : title + facts;
+  }
+  // The app bar, in a narrow window, names where you are: the view, and under it what the
+  // header says about your place in it (the member being read), else its facts.
+  let whereHtml = '';
+  function renderWhere() {
+    const el = $('#vw-where');
+    if (!el || !compact()) return;
+    const crumbs = main.querySelector('.fv-head .crumbs'), here = main.querySelector('.fv-head .fv-here'), facts = main.querySelector('.fv-head .facts');
+    const names = crumbs ? [...crumbs.querySelectorAll('b')] : [];
+    const title = (names.length ? names[names.length - 1].textContent : crumbs ? crumbs.textContent : '').trim() || (M().raw.title || '');
+    const sub = here && here.textContent.trim() ? here.textContent.replace(/^Reading\s+/, '').trim() : facts ? facts.textContent.replace(/\s+/g, ' ').trim() : '';
+    const h = `<b>${esc(title)}</b><small>${esc(sub)}</small>`;
+    if (h !== whereHtml) { el.innerHTML = h; whereHtml = h; }
   }
   function openFile(path, line) {
     state.view = { kind: 'file', path };
@@ -5747,7 +5802,7 @@
     }
     render(line ? { line: Number(line), top: true } : { top: true });
   }
-  const headH = () => { const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
+  const headH = () => { if (compact()) return 0; const hd = main.querySelector('.fv-head'); return hd ? hd.offsetHeight : 0; };
   // Puts a row y pixels below the top of the code pane. Rows off screen only estimate their
   // height until they're drawn (a long line wraps when side by side), so the row is put there
   // again once the rows around it have been drawn.
@@ -5979,7 +6034,7 @@
         let at = cur ? marks.indexOf(cur) : firstWhere(marks, (m) => rowOf(m).getBoundingClientRect().top >= ref - 4);
         if (at >= marks.length) at = -1;
         const n = at < 0 ? total : marks.slice(0, at).reduce((x, m) => x + openIn(m), 0) + 1;
-        h = `${iconBtn(ICON.chevronLeft, 'Previous change to review (k)', 'data-act="pill-step" data-step="-1"')}<span class="pill-n" aria-live="polite"><b>${n}</b> of ${total}</span>${iconBtn(ICON.chevronRight, 'Next change to review (j)', 'data-act="pill-step" data-step="1"')}<span class="pill-sep"></span><button type="button" class="pill-act" data-act="mark-next" title="Mark the change you’re on reviewed, and go to the next one">Mark and go to the next<kbd>Space</kbd></button>`;
+        h = `${iconBtn(ICON.chevronLeft, 'Previous change to review (k)', 'data-act="pill-step" data-step="-1"')}<span class="pill-n" aria-live="polite"><b>${n}</b> of ${total}</span>${iconBtn(ICON.chevronRight, 'Next change to review (j)', 'data-act="pill-step" data-step="1"')}<span class="pill-sep"></span>${canCommentLines() ? `<button type="button" class="ib pill-note" data-act="comment-here" title="${localMode() ? 'Write a note' : 'Comment'} on the change you’re on (c)" aria-label="${localMode() ? 'Write a note' : 'Comment'} on the change you’re on">${ICON.comment}</button>` : ''}<button type="button" class="pill-act" data-act="mark-next" title="Mark the change you’re on reviewed, and go to the next one"><span class="pill-l" data-s="Mark and next">Mark and go to the next</span><kbd>Space</kbd></button>`;
       } else {
         const nx = nextUnreviewed();
         h = `<span class="pill-msg">${lensOn() && !main.querySelector('.tick[data-block]:not(.lens-out)') ? 'Nothing in the lens here' : 'All reviewed here'}</span>${nx ? '<button type="button" class="pill-act" data-act="next-open" title="The next chain with changes to review">Next chain<kbd>n</kbd></button>' : ''}`;
@@ -6899,6 +6954,7 @@
     }
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
+    if (act === 'comment-here') return commentHere();
     if (act === 'graph') {
       // In the page at the top, the click folds it; anywhere else it drops it, kept, or folds it back.
       clearTimeout(GD.enterT); GD.enterT = 0;
@@ -7070,6 +7126,7 @@
     if (mod && (e.key === 'b' || e.key === 'B') && !typingIn(e.target)) { e.preventDefault(); return toggleSide(); }
     if (e.altKey && e.key === 'ArrowLeft' && !NAV.hist && NAV.at > 0 && !typingIn(e.target)) { e.preventDefault(); return navBack(); }
     if (e.key === 'Escape') {
+      if (SIDE.open) return sideDrawer(false);
       if (keysEl && !keysEl.hidden) return toggleKeys(false);
       if (PAL.open) return palClose();
       if (MENU.open) return closeMenu();
@@ -7153,11 +7210,29 @@
     split.title = UI.sideOff ? 'Drag to show the sidebar' : 'Drag to resize the sidebar; double-click to hide it';
   }
   function toggleSide() {
+    if (compact()) return sideDrawer(!SIDE.open);
     UI.sideOff = !UI.sideOff;
     saveUI();
     applySide();
     mini.update();
   }
+  // Contents, over the view in a narrow window: out of reach while it's closed, and closed again
+  // once the window is wide.
+  function sideDrawer(open) {
+    SIDE.open = open && compact();
+    SIDE.at = viewKey();
+    viewer.classList.toggle('side-on', SIDE.open);
+    side.inert = compact() && !SIDE.open;
+    const btn = $('#vw-contents');
+    if (btn) btn.setAttribute('aria-expanded', String(SIDE.open));
+    if (SIDE.open) {
+      renderSide();
+      const cur = side.querySelector('[aria-current="true"]');
+      if (cur) cur.scrollIntoView({ block: 'center' });
+      (cur || side.querySelector('[role="tab"][aria-selected="true"]') || side).focus({ preventScroll: true });
+    } else if (side.contains(document.activeElement)) ($('#vw-contents') || main).focus({ preventScroll: true });
+  }
+  COMPACT.addEventListener('change', () => { sideDrawer(false); renderSide(); renderTop(); renderWhere(); renderPill(); });
   let resizing = null;
   split.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -7199,6 +7274,7 @@
   });
   window.addEventListener('resize', () => { applySide(); mini.update(); });
   applySide();
+  sideDrawer(false);
 
   // ---------- the minimap: the view's rows drawn small at the right of the code, with the diff's
   // colors, amber for what's left to review and blue for threads, and the part on screen. A click

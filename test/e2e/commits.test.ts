@@ -12,7 +12,7 @@ import { pubspec } from '../helpers/review.ts';
 import type { Person } from '../helpers/repo.ts';
 import { startUntangle, type UntangleRun } from '../helpers/run.ts';
 import { featureHistory, saveReviewedHead, type StoryStep } from '../helpers/story.ts';
-import { dayOf, dotOf, fullWhen, historyDots, historySubjects, read, rest, waitForSave, whenOf } from './page.ts';
+import { contents, dayOf, dotOf, fullWhen, historyDots, historySubjects, read, rest, waitForSave, whenOf } from './page.ts';
 
 const skip = e2eSkip();
 const noon = (day: string) => `2020-01-${day}T15:00:00Z`;
@@ -57,6 +57,7 @@ function step(subject: string, day: string, extra: Partial<StoryStep> = {}): Sto
 }
 
 async function history(page: Browser): Promise<void> {
+  await contents(page);
   await page.click('[data-act="history-open"]');
   await page.until(`!!document.querySelector('.hs-s')`);
 }
