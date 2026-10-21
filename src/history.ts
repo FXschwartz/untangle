@@ -341,7 +341,7 @@ export async function sinceRows(repo: string, base: string, head: string, from: 
 }
 
 /**
- * Your last review of another head: the head the newest save on the marks branch recorded,
+ * Your last review of another head: the head the newest save of the marks recorded,
  * among the saves made before the review moved to this head.
  */
 export function reviewedHead(repo: string, ref: string, head: string): { head: string; at: number } | null {

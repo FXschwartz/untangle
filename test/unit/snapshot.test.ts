@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { fileHunks } from '../../dist/pipeline/diff.js';
-import { Snapshot, type ModelCompare } from '../../dist/snapshot.js';
+import { dropMarks, marksRef, moveMarks, Snapshot, type ModelCompare } from '../../dist/snapshot.js';
 import { TempRepo, type Person } from '../helpers/repo.ts';
 
 /** git, and not a mergiraf that happens to be installed for the user. */
@@ -33,6 +33,7 @@ function stubMergiraf(mode: 'clean' | 'conflict'): { path: string; log: string; 
 
 const ada: Person = { name: 'Ada Review', email: 'ada@example.com', date: '2020-06-01T00:00:00Z' };
 const file = 'lib/a.dart';
+const marks = 'refs/untangle/marks/feature';
 
 function git(repo: string, args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).replace(/\n$/, '');
@@ -79,32 +80,145 @@ describe('Given a one-line change that has been marked reviewed, ', () => {
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
     model = compare(repo.dir, base, head, [block(hunksOf(repo.dir, base, head), 'new', 'the-change')]);
-    new Snapshot(repo.dir, 'untangle/feature', base, head, model).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, base, head, model).save(new Set(['the-change']), 'Review the change');
   });
 
   after(() => repo?.remove());
 
-  describe('when the marks branch is read, ', () => {
+  describe('when the marks are read, ', () => {
     let message: string;
     let text: string;
     let reviewed: string;
+    let branches: string;
 
     before(() => {
-      message = git(repo!.dir, ['log', '-1', '--format=%B', 'untangle/feature']).trimEnd();
-      text = execFileSync('git', ['-C', repo!.dir, 'show', `untangle/feature:${file}`], { encoding: 'utf8' });
-      reviewed = [...new Snapshot(repo!.dir, 'untangle/feature', base, head, model).load(null).reviewed].sort().join(' ');
+      message = git(repo!.dir, ['log', '-1', '--format=%B', 'untangle/marks/feature']).trimEnd();
+      text = execFileSync('git', ['-C', repo!.dir, 'show', `untangle/marks/feature:${file}`], { encoding: 'utf8' });
+      branches = git(repo!.dir, ['branch', '--format=%(refname:short)']);
+      reviewed = [...new Snapshot(repo!.dir, marks, base, head, model).load(null).reviewed].sort().join(' ');
     });
 
     it('then the commit names the base and the head.', () => {
       assert.equal(message, `Review the change\n\nUntangle-Base: ${base}\nUntangle-Head: ${head}`);
     });
 
-    it('then the branch holds the new line.', () => {
+    it('then their ref holds the new line, and git takes it by its short name.', () => {
       assert.equal(text, 'alpha\nnew\nomega\n');
+    });
+
+    it('then they aren’t a branch: the repository’s branches are its own.', () => {
+      assert.equal(branches, 'feature\nmain');
     });
 
     it('then the change is reviewed.', () => {
       assert.equal(reviewed, 'the-change');
+    });
+  });
+});
+
+describe('Given reviews’ keys, ', () => {
+  it('when their marks are named, then each is a ref under refs/untangle/marks/, and a key that makes no ref name goes by review.', () => {
+    const repo = TempRepo.create();
+    try {
+      assert.deepEqual(['pr-82', 'feat/x y', 'a..b', 'x.lock', '.'].map((key) => marksRef(repo.dir, key)), [
+        'refs/untangle/marks/pr-82',
+        'refs/untangle/marks/feat/x-y',
+        'refs/untangle/marks/a-b',
+        'refs/untangle/marks/review',
+        'refs/untangle/marks/review',
+      ]);
+    } finally {
+      repo.remove();
+    }
+  });
+});
+
+describe('Given marks an older untangle kept on the branch untangle/feature, ', () => {
+  let repo: TempRepo | undefined;
+  let base: string;
+  let head: string;
+  let model: ModelCompare;
+  const branches = () => git(repo!.dir, ['branch', '--format=%(refname:short)']);
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write(file, 'alpha\nold\nomega\n');
+    base = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write(file, 'alpha\nnew\nomega\n');
+    head = repo.commit({ subject: 'change', author: ada, committer: ada });
+    model = compare(repo.dir, base, head, [block(hunksOf(repo.dir, base, head), 'new', 'the-change')]);
+    new Snapshot(repo.dir, 'refs/heads/untangle/feature', base, head, model).save(new Set(['the-change']), 'Review the change');
+  });
+
+  after(() => repo?.remove());
+
+  describe('when its review starts, ', () => {
+    let reviewed: string;
+    let left: string;
+
+    before(() => {
+      moveMarks(repo!.dir, marksRef(repo!.dir, 'feature'));
+      reviewed = [...new Snapshot(repo!.dir, marks, base, head, model).load(null).reviewed].join(' ');
+      left = branches();
+    });
+
+    it('then the marks are in their ref, and the review reads them there.', () => {
+      assert.equal(reviewed, 'the-change');
+    });
+
+    it('then the branch is gone.', () => {
+      assert.equal(left, 'feature\nmain');
+    });
+  });
+
+  describe('when the review is forgotten, ', () => {
+    before(() => {
+      dropMarks(repo!.dir, marks);
+    });
+
+    it('then its marks go.', () => {
+      assert.equal(git(repo!.dir, ['for-each-ref', 'refs/untangle/']), '');
+    });
+  });
+});
+
+describe('Given marks an older untangle kept on a branch, checked out in a worktree, ', () => {
+  let repo: TempRepo | undefined;
+  let other = '';
+  let tip = '';
+
+  before(() => {
+    repo = TempRepo.create();
+    repo.write(file, 'alpha\nold\nomega\n');
+    const base = repo.commit({ subject: 'start', author: ada, committer: ada });
+    repo.branch('feature');
+    repo.write(file, 'alpha\nnew\nomega\n');
+    const head = repo.commit({ subject: 'change', author: ada, committer: ada });
+    new Snapshot(repo.dir, 'refs/heads/untangle/feature', base, head, compare(repo.dir, base, head, [block(hunksOf(repo.dir, base, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    tip = git(repo.dir, ['rev-parse', 'untangle/feature']);
+    other = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-other-'));
+    git(repo.dir, ['worktree', 'add', '--quiet', path.join(other, 'wt'), 'untangle/feature']);
+  });
+
+  after(() => {
+    repo?.remove();
+    if (other) fs.rmSync(other, { recursive: true, force: true });
+  });
+
+  describe('when its review starts, then forgotten, ', () => {
+    let moved = '';
+    let kept = '';
+
+    before(() => {
+      moveMarks(repo!.dir, marks);
+      moved = git(repo!.dir, ['rev-parse', marks]);
+      dropMarks(repo!.dir, marks);
+      kept = git(repo!.dir, ['rev-parse', 'untangle/feature']);
+    });
+
+    it('then the marks move to their ref, and the branch stays where it’s checked out.', () => {
+      assert.deepEqual([moved, kept], [tip, tip]);
     });
   });
 });
@@ -123,7 +237,7 @@ describe('Given a reviewed line and a later commit that changes another line, ',
     repo.write(file, 'alpha\nMARKED\nbeta\n\ngamma\nsame\ndelta\n');
     const head1 = repo.commit({ subject: 'mark this', author: ada, committer: ada });
     const first = hunksOf(repo.dir, base, head1);
-    new Snapshot(repo.dir, 'untangle/feature', base, head1, compare(repo.dir, base, head1, [block(first, 'MARKED', 'marked')])).save(new Set(['marked']), 'Review the first line');
+    new Snapshot(repo.dir, marks, base, head1, compare(repo.dir, base, head1, [block(first, 'MARKED', 'marked')])).save(new Set(['marked']), 'Review the first line');
     repo.write(file, 'alpha\nMARKED\nbeta\n\ngamma\nCHANGED\ndelta\n');
     head2 = repo.commit({ subject: 'change another', author: ada, committer: ada });
     const second = hunksOf(repo.dir, base, head2);
@@ -136,7 +250,7 @@ describe('Given a reviewed line and a later commit that changes another line, ',
     let reviewed: string;
 
     before(() => {
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', base, head2, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, base, head2, model).load(null);
       reviewed = [...loaded.reviewed].sort().join(' ');
     });
 
@@ -160,7 +274,7 @@ describe('Given reviewed marks whose base then changes the same line, ', () => {
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
     const marked = compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')]);
-    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, marked).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, oldBase, head, marked).save(new Set(['the-change']), 'Review the change');
     repo.checkout('main');
     repo.write(file, 'alpha\nother\nomega\n');
     moved = repo.commit({ subject: 'rebase', author: ada, committer: ada });
@@ -176,7 +290,7 @@ describe('Given reviewed marks whose base then changes the same line, ', () => {
 
     before(() => {
       restore = usePath(gitOnly);
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
     });
 
@@ -201,7 +315,7 @@ describe('Given reviewed marks on a file the new base deletes, ', () => {
     repo.branch('feature');
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
-    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
     repo.checkout('main');
     repo.delete(file);
     moved = repo.commit({ subject: 'delete the file', author: ada, committer: ada });
@@ -218,7 +332,7 @@ describe('Given reviewed marks on a file the new base deletes, ', () => {
 
     before(() => {
       restore = usePath(gitOnly);
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${loaded.replayed?.conflicts.join(' ') || 'none'}`;
     });
 
@@ -243,7 +357,7 @@ describe('Given reviewed marks whose base gains a line above the change, ', () =
     repo.branch('feature');
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
-    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
     repo.checkout('main');
     repo.write(file, 'prefix\nalpha\nold\nomega\n');
     moved = repo.commit({ subject: 'move the base', author: ada, committer: ada });
@@ -260,7 +374,7 @@ describe('Given reviewed marks whose base gains a line above the change, ', () =
 
     before(() => {
       restore = usePath(gitOnly);
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].sort().join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
     });
 
@@ -286,7 +400,7 @@ describe('Given reviewed marks whose base changes the same line, and mergiraf is
     repo.branch('feature');
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
-    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
     repo.checkout('main');
     repo.write(file, 'alpha\nother\nomega\n');
     moved = repo.commit({ subject: 'rebase', author: ada, committer: ada });
@@ -307,7 +421,7 @@ describe('Given reviewed marks whose base changes the same line, and mergiraf is
 
     before(() => {
       restore = usePath(mergiraf!.path);
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
       // Each call's arguments, with its temporary files by name.
       asked = fs.readFileSync(mergiraf!.log, 'utf8').trim().split('\n').map((line) => (JSON.parse(line) as string[]).map((arg) => (path.isAbsolute(arg) ? path.basename(arg) : arg)).join(' ')).join('\n');
@@ -339,7 +453,7 @@ describe('Given reviewed marks whose base changes the same line, and mergiraf le
     repo.branch('feature');
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
-    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
     repo.checkout('main');
     repo.write(file, 'alpha\nother\nomega\n');
     moved = repo.commit({ subject: 'rebase', author: ada, committer: ada });
@@ -359,7 +473,7 @@ describe('Given reviewed marks whose base changes the same line, and mergiraf le
 
     before(() => {
       restore = usePath(mergiraf!.path);
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, moved, head, model).load(null);
       result = `reviewed ${[...loaded.reviewed].join(' ') || 'none'}\nconflicts ${(loaded.replayed?.conflicts ?? []).join(' ') || 'none'}`;
     });
 
@@ -391,7 +505,7 @@ describe('Given reviewed marks whose base gains a line above the change, and mer
     repo.branch('feature');
     repo.write(file, 'alpha\nnew\nomega\n');
     head = repo.commit({ subject: 'change', author: ada, committer: ada });
-    new Snapshot(repo.dir, 'untangle/feature', oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
+    new Snapshot(repo.dir, marks, oldBase, head, compare(repo.dir, oldBase, head, [block(hunksOf(repo.dir, oldBase, head), 'new', 'the-change')])).save(new Set(['the-change']), 'Review the change');
     repo.checkout('main');
     repo.write(file, 'prefix\nalpha\nold\nomega\n');
     moved = repo.commit({ subject: 'move the base', author: ada, committer: ada });
@@ -412,7 +526,7 @@ describe('Given reviewed marks whose base gains a line above the change, and mer
 
     before(() => {
       restore = usePath(mergiraf!.path);
-      const loaded = new Snapshot(repo!.dir, 'untangle/feature', moved, head, model).load(null);
+      const loaded = new Snapshot(repo!.dir, marks, moved, head, model).load(null);
       reviewed = [...loaded.reviewed].sort().join(' ') || 'none';
     });
 

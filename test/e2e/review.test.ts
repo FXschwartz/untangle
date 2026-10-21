@@ -372,8 +372,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       note = await read(page!, `[document.querySelector('.mi-note')?.textContent ?? '', document.querySelector('.mi-foot button')?.textContent ?? ''].join('\\n')`);
     });
 
-    it('then it says marks are kept on untangle/feature, and offers to reset them.', () => {
-      assert.equal(note, `Your marks are kept on the branch untangle/feature. git diff untangle/feature ${head.slice(0, 7)} shows what’s left.\nReset all marks…`);
+    it('then it says marks are kept in git as untangle/marks/feature, and offers to reset them.', () => {
+      assert.equal(note, `Your marks are kept in git as untangle/marks/feature. git diff untangle/marks/feature ${head.slice(0, 7)} shows what’s left.\nReset all marks…`);
     });
   });
 
@@ -442,9 +442,9 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       await chain(page!, 'greet(name)');
       reviewed = await read(page!, `([...document.querySelectorAll('.sec')].find((el) => el.querySelector('.sec-h b')?.textContent === 'greet')?.querySelector('.hh-sum')?.textContent) ?? ''`);
       await page!.click('[aria-label="Marks"]');
-      await page!.until(`(document.querySelector('.mi-note')?.textContent || '').includes('untangle/feature')`);
+      await page!.until(`(document.querySelector('.mi-note')?.textContent || '').includes('untangle/marks/feature')`);
       saved = await read(page!, `document.querySelector('.mi-note')?.textContent ?? ''`);
-      message = execFileSync('git', ['-C', repo!.dir, 'log', '-1', '--format=%B', 'untangle/feature'], { encoding: 'utf8' });
+      message = execFileSync('git', ['-C', repo!.dir, 'log', '-1', '--format=%B', 'untangle/marks/feature'], { encoding: 'utf8' });
       base = repo!.rev('main');
     });
 
@@ -456,8 +456,8 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
       assert.equal(reviewed, '7 lines reviewed');
     });
 
-    it('then the marks panel says the marks are on the branch untangle/feature.', () => {
-      assert.match(saved, new RegExp(`^Your marks are kept on the branch untangle/feature, at [0-9a-f]{7}\\. git diff untangle/feature ${head.slice(0, 7)} shows what’s left\\.$`));
+    it('then the marks panel says the marks are kept in git as untangle/marks/feature.', () => {
+      assert.match(saved, new RegExp(`^Your marks are kept in git as untangle/marks/feature, at [0-9a-f]{7}\\. git diff untangle/marks/feature ${head.slice(0, 7)} shows what’s left\\.$`));
     });
 
     it('then that branch\'s last commit records the review against this base and head.', () => {

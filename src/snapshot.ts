@@ -1,9 +1,9 @@
-// The reviewed snapshot: your review as a local git branch, the base plus every change you
-// marked reviewed. `git diff <branch> <head>` shows what's left. Marks come back from the
-// branch's content, not from a list of ids, so a push to the pull request only brings back what
-// changed since you looked. When the base moves (a rebase), the branch is replayed onto the new
-// base with a 3-way merge (mergiraf first, when it's installed); regions that still conflict
-// go back to unreviewed.
+// The reviewed snapshot: your review as a git ref of the repository reviewed, the base plus every
+// change you marked reviewed. It isn't a branch, so branch lists leave it out, and
+// `git diff untangle/marks/<key> <head>` shows what's left. Marks come back from its content, not
+// from a list of ids, so a push to the pull request only brings back what changed since you
+// looked. When the base moves (a rebase), it's replayed onto the new base with a 3-way merge
+// (mergiraf first, when it's installed); regions that still conflict go back to unreviewed.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,10 +20,34 @@ interface Entry { mode: string; blob: string }
 const EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
 const ZERO = '0'.repeat(40);
 
-/** A branch name for a review: the pull request's number, or the branch it reviews. */
-export function snapshotBranch(repo: string, key: string): string {
-  const name = 'untangle/' + key.replace(/[^\w./-]+/g, '-').replace(/\.{2,}|\/{2,}/g, '-').replace(/^[-./]+|[-./]+$/g, '');
-  return gitMaybe(repo, 'check-ref-format', '--branch', name) ? name : 'untangle/review';
+/** Where reviews keep their marks: refs that aren't branches. */
+export const MARKS = 'refs/untangle/marks/';
+
+/** The ref of a review's marks: named for its pull request's number, or the branch it reviews. */
+export function marksRef(repo: string, key: string): string {
+  const ref = MARKS + key.replace(/[^\w./-]+/g, '-').replace(/\.{2,}|\/{2,}/g, '-').replace(/^[-./]+|[-./]+$/g, '');
+  return gitMaybe(repo, 'check-ref-format', ref) !== null ? ref : MARKS + 'review';
+}
+
+/** The branch older untangles kept a review's marks on. */
+const oldBranch = (ref: string) => 'untangle/' + ref.slice(MARKS.length);
+
+/**
+ * Moves a review's marks from the branch older untangles kept them on. The branch stays while
+ * it's checked out, or when it holds marks the ref doesn't.
+ */
+export function moveMarks(repo: string, ref: string): void {
+  const branch = oldBranch(ref);
+  const old = gitMaybe(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`)?.trim();
+  if (!old) return;
+  if (!gitMaybe(repo, 'rev-parse', '--verify', '--quiet', ref)) gitMaybe(repo, 'update-ref', ref, old, ZERO);
+  if (gitMaybe(repo, 'merge-base', '--is-ancestor', old, ref) !== null) gitMaybe(repo, 'branch', '-D', branch);
+}
+
+/** Removes a review's marks: their ref, and the branch an older untangle kept them on, unless it's checked out. */
+export function dropMarks(repo: string, ref: string): void {
+  gitMaybe(repo, 'update-ref', '-d', ref);
+  gitMaybe(repo, 'branch', '-D', oldBranch(ref));
 }
 
 function diffHunks(text: string): Array<{ a: number; b: number; c: number; d: number }> {
@@ -36,20 +60,21 @@ function diffHunks(text: string): Array<{ a: number; b: number; c: number; d: nu
 }
 
 export class Snapshot {
-  readonly ref: string;
+  /** The ref's short name, as git diff takes it: untangle/marks/pr-168. */
+  readonly name: string;
   private readonly trees = new Map<string, Map<string, Entry>>();
   private readonly byId = new Map<string, Block>();
-  // The reviewed blocks the branch holds now.
+  // The reviewed blocks the ref holds now.
   private current = new Set<string>();
 
   constructor(
     private readonly repo: string,
-    readonly branch: string,
+    readonly ref: string,
     private readonly baseSha: string,
     private readonly headSha: string,
     private readonly model: ModelCompare,
   ) {
-    this.ref = 'refs/heads/' + branch;
+    this.name = ref.replace(/^refs\//, '');
     model.files.forEach((f) => f.blocks.forEach((b) => this.byId.set(b.id, b)));
   }
 
@@ -73,7 +98,7 @@ export class Snapshot {
     return sha ? git(this.repo, 'cat-file', 'blob', sha) : '';
   }
 
-  /** The branch's tip, and the base and head it was written for. */
+  /** The ref's commit, and the base and head it was written for. */
   tip(): { commit: string; tree: string; base: string | null; head: string | null } | null {
     const commit = gitMaybe(this.repo, 'rev-parse', '--verify', '--quiet', this.ref + '^{commit}')?.trim();
     if (!commit) return null;
@@ -134,7 +159,7 @@ export class Snapshot {
 
   /**
    * The snapshot tree for a set of reviewed blocks. A file whose blocks didn't change keeps the
-   * branch's version, which may hold what you reviewed before a push changed it; the others are
+   * ref's version, which may hold what you reviewed before a push changed it; the others are
    * the base with their reviewed blocks applied. Generated files are taken from the head.
    */
   treeFor(reviewed: Set<string>): string {
@@ -164,17 +189,15 @@ export class Snapshot {
   }
 
   private update(commit: string, old: string | null) {
-    const current = gitMaybe(this.repo, 'symbolic-ref', '-q', 'HEAD')?.trim();
-    if (current === this.ref) throw new Error(`${this.branch} is checked out; untangle won't move it under your work`);
     git(this.repo, 'update-ref', '-m', 'untangle: review marks', this.ref, commit, old ?? ZERO);
   }
 
-  /** Whether a set of reviewed blocks differs from what the branch holds. */
+  /** Whether a set of reviewed blocks differs from what the ref holds. */
   differs(reviewed: Set<string>): boolean {
     return reviewed.size !== this.current.size || [...reviewed].some((id) => !this.current.has(id));
   }
 
-  /** Writes the branch for a set of reviewed blocks: a commit when its tree changes. */
+  /** Writes the ref for a set of reviewed blocks: a commit when its tree changes. */
   save(reviewed: Set<string>, subject: string): { commit: string | null; changed: boolean } {
     const tip = this.tip();
     const tree = this.treeFor(reviewed);
@@ -186,10 +209,10 @@ export class Snapshot {
   }
 
   /**
-   * The blocks the branch holds. When its tip is the commit this review last wrote, they are the
+   * The blocks the ref holds. When its commit is the one this review last wrote, they are the
    * blocks written then (`known`): identical code in two places can't tell them apart otherwise.
    * Else a block is reviewed when the snapshot no longer has its removed lines (compared with the
-   * base) and has its added lines as the head does (compared with the head). When the branch was
+   * base) and has its added lines as the head does (compared with the head). When the ref was
    * written for another base, it is replayed onto this one first.
    */
   load(known: { commit: string; blocks: string[] } | null = null): { reviewed: Set<string>; commit: string | null; replayed: { conflicts: string[] } | null } {

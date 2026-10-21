@@ -280,7 +280,7 @@ async function review(opts: Options): Promise<number> {
       render = next.render;
       attachNotes(t, next.session);
       progress.finish();
-      progress.note(`now reviewing ${n.where}; marks go to the branch ${next.session.snapshot.branch}`);
+      progress.note(`now reviewing ${n.where}; marks go to ${next.session.snapshot.name}`);
       r.state = 'ready';
       await old?.stop();
       next.live.ensure().catch((e) => say.note(`live go to definition is off: ${(e as Error).message}`));
@@ -314,7 +314,7 @@ async function review(opts: Options): Promise<number> {
     session = built.session;
     render = built.render;
     attachNotes(t, built.session);
-    say.note(`marks go to the branch ${session.snapshot.branch}`);
+    say.note(`marks go to ${session.snapshot.name}`);
     say.ready(url, opts.autoclose);
     void notice?.then((line) => { if (line) say.note(line); });
     // Start live navigation after extraction and grouping have finished.

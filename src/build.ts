@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { analyze, type Model } from '../analysis/analyze.js';
 import { reviewDir, tilde } from './cache.js';
-import { checkoutAt, packageDirs, pubGet, resolved, worktree } from './checkouts.js';
+import { checkoutAt, packageDirs, pubGet, rehomeCheckouts, resolved, worktree } from './checkouts.js';
 import { has } from './exec.js';
 import { extract, type Extracted } from './analyzer/extract.js';
 import { slim, type SlimDefinitions } from './pipeline/definitions.js';
@@ -84,6 +84,8 @@ export interface Checkouts {
 export async function buildReview(target: Target, opts: { noCache: boolean; label: string; title: string; chains: ChainsBy }, progress: Progress): Promise<{ data: ReviewData; checkouts: Checkouts | null }> {
   const dir = reviewDir(target.repoKey, target.baseSha, target.headSha);
   fs.mkdirSync(dir, { recursive: true });
+  // The checkouts older untangles made as worktrees of your repository: it stops listing them.
+  await rehomeCheckouts(target.repoKey);
   const byCommit = opts.chains === 'history';
   const extractorVersion = fingerprint(EXTRACTION_STAGE), modelVersion = extractorVersion + '.' + fingerprint(MODEL_STAGE);
   // Each way of chaining keeps its own analysis, so switching between them reuses both.
@@ -157,7 +159,7 @@ export async function prepareCheckouts(target: Target, progress: Progress): Prom
   progress.step('checkouts');
   const needs = (checkout: string) => packageDirs(target.repo, target.baseSha, target.headSha, checkout);
   let headDir = target.headDir && checkoutAt(target.headDir, target.headSha) && needs(target.headDir).every(resolved) ? fs.realpathSync(target.headDir) : null;
-  if (target.headDir && !headDir) progress.note('your checkout’s packages aren’t resolved; using a worktree for the head');
+  if (target.headDir && !headDir) progress.note('your checkout’s packages aren’t resolved; using a checkout in the cache for the head');
   progress.detail('base ' + target.baseSha.slice(0, 7));
   const baseDir = await worktree(target.repo, target.repoKey, target.baseSha);
   if (!headDir) {

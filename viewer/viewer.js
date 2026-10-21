@@ -1650,7 +1650,7 @@
     const items = [];
     const sn = CONFIG.snapshot;
     if (!CONFIG.served) items.push({ note: 'Your marks are kept in this browser.' });
-    else if (sn) items.push({ note: `Your marks are kept on the branch <code>${esc(sn.branch)}</code>${sn.commit ? `, at <code>${esc(sn.commit.slice(0, 7))}</code>` : ''}. <code>git diff ${esc(sn.branch)} ${esc((CONFIG.head || '').slice(0, 7))}</code> shows what’s left.${sn.note ? ` ${esc(sn.note)}` : ''}` });
+    else if (sn) items.push({ note: `Your marks are kept in git as <code>${esc(sn.ref)}</code>${sn.commit ? `, at <code>${esc(sn.commit.slice(0, 7))}</code>` : ''}. <code>git diff ${esc(sn.ref)} ${esc((CONFIG.head || '').slice(0, 7))}</code> shows what’s left.${sn.note ? ` ${esc(sn.note)}` : ''}` });
     else items.push({ note: 'Your marks are saved as you go.' });
     items.push({ button: 'Reset all marks…', title: 'Mark every change unreviewed again', data: { act: 'reset' } });
     return items;

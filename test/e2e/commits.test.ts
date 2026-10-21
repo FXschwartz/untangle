@@ -144,7 +144,7 @@ describe('Given a served review of feature, its pull request, a merge of two com
     sha = built.sha;
     removeRepo = () => built.repo.remove();
     repoDir = built.repo.dir;
-    saveReviewedHead(built.repo, 'untangle/pr-7', sha['Merge main'], sha.main, ada('20'));
+    saveReviewedHead(built.repo, 'pr-7', sha['Merge main'], sha.main, ada('20'));
     gh = pullRequestGh({
       number: 7,
       title: 'Add a greeting',

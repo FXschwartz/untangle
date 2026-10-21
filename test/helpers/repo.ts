@@ -134,11 +134,16 @@ export class TempRepo {
    * The worktree stays where it is.
    */
   commitBranch(name: string, rev: string, opts: CommitOptions): string {
+    return this.commitRef(`refs/heads/${name}`, rev, opts);
+  }
+
+  /** Points a ref at a new commit with the tree of `rev` and `rev` as its parent. */
+  commitRef(ref: string, rev: string, opts: CommitOptions): string {
     const tree = runGit(this.dir, ['rev-parse', `${rev}^{tree}`]);
     const body = opts.body == null ? '' : opts.body.endsWith('\n') ? opts.body : `${opts.body}\n`;
     const message = opts.body == null ? `${opts.subject}\n` : `${opts.subject}\n\n${body}`;
     const commit = runGit(this.dir, ['commit-tree', tree, '-p', rev, '-F', '-'], { env: identityEnv(opts.author, opts.committer), input: message });
-    runGit(this.dir, ['update-ref', `refs/heads/${name}`, commit]);
+    runGit(this.dir, ['update-ref', ref, commit]);
     return commit;
   }
 

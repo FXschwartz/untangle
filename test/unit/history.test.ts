@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -620,7 +621,7 @@ describe('Given history.json for an older head, ', () => {
   );
 });
 
-describe('Given a marks branch whose newest save names this head and whose two earlier saves name older heads, ', () => {
+describe('Given marks whose newest save names this head and whose two earlier saves name older heads, ', () => {
   const oldestSave = '2020-07-01T00:00:00Z';
   const previousSave = '2020-07-02T00:00:00Z';
   const currentSave = '2020-07-03T00:00:00Z';
@@ -636,7 +637,7 @@ describe('Given a marks branch whose newest save names this head and whose two e
     previous = repo.commit({ subject: 'previous', author: ada, committer: ada });
     repo.write('lib/a.dart', 'three\n');
     head = repo.commit({ subject: 'head', author: ada, committer: ada });
-    repo.branch('untangle/feature');
+    repo.branch('saves');
     repo.commit({
       subject: 'Save the oldest review',
       body: `Untangle-Head: ${oldest}\n`,
@@ -658,6 +659,7 @@ describe('Given a marks branch whose newest save names this head and whose two e
       author: dated(currentSave),
       committer: dated(currentSave),
     });
+    execFileSync('git', ['-C', repo.dir, 'update-ref', 'refs/untangle/marks/feature', 'HEAD']);
   });
 
   after(() => repo?.remove());
@@ -666,13 +668,13 @@ describe('Given a marks branch whose newest save names this head and whose two e
     'when the reviewed head is read, '
     + 'then it is the newest save of another head, at that save\'s time.',
     () => {
-      const found = reviewedHead(repo!.dir, 'untangle/feature', head);
+      const found = reviewedHead(repo!.dir, 'refs/untangle/marks/feature', head);
       assert.equal(found ? `${found.head} ${found.at}` : 'none', `${previous} ${seconds(previousSave)}`);
     },
   );
 });
 
-describe('Given a marks branch whose only save names this head, ', () => {
+describe('Given marks whose only save names this head, ', () => {
   let repo: TempRepo | undefined;
   let head: string;
 
@@ -680,7 +682,7 @@ describe('Given a marks branch whose only save names this head, ', () => {
     repo = TempRepo.create();
     repo.write('lib/a.dart', 'one\n');
     head = repo.commit({ subject: 'head', author: ada, committer: ada });
-    repo.branch('untangle/feature');
+    repo.branch('saves');
     repo.commit({
       subject: 'Save this review',
       body: `Untangle-Head: ${head}\n`,
@@ -688,6 +690,7 @@ describe('Given a marks branch whose only save names this head, ', () => {
       author: ada,
       committer: ada,
     });
+    execFileSync('git', ['-C', repo.dir, 'update-ref', 'refs/untangle/marks/feature', 'HEAD']);
   });
 
   after(() => repo?.remove());
@@ -696,12 +699,12 @@ describe('Given a marks branch whose only save names this head, ', () => {
     'when the reviewed head is read, '
     + 'then there is no earlier review.',
     () => {
-      assert.equal(reviewedHead(repo!.dir, 'untangle/feature', head), null);
+      assert.equal(reviewedHead(repo!.dir, 'refs/untangle/marks/feature', head), null);
     },
   );
 });
 
-describe('Given a repository with no marks branch, ', () => {
+describe('Given a repository with no marks, ', () => {
   let repo: TempRepo | undefined;
   let head: string;
 
@@ -717,7 +720,7 @@ describe('Given a repository with no marks branch, ', () => {
     'when the reviewed head is read, '
     + 'then there is no earlier review.',
     () => {
-      assert.equal(reviewedHead(repo!.dir, 'untangle/missing', head), null);
+      assert.equal(reviewedHead(repo!.dir, 'refs/untangle/marks/missing', head), null);
     },
   );
 });

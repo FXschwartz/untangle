@@ -48,11 +48,11 @@ export function featureHistory(opts: {
 }
 
 /**
- * Records a review of `head` on `branch`, with the tree of `base` so nothing is marked
- * reviewed. The worktree stays on feature.
+ * Records a review of `head` in the marks of the review `key`, with the tree of `base` so nothing
+ * is marked reviewed. The worktree stays on feature.
  */
-export function saveReviewedHead(repo: TempRepo, branch: string, head: string, base: string, when: Person): void {
-  repo.commitBranch(branch, base, {
+export function saveReviewedHead(repo: TempRepo, key: string, head: string, base: string, when: Person): void {
+  repo.commitRef(`refs/untangle/marks/${key}`, base, {
     subject: 'Your review',
     body: `Untangle-Base: ${base}\nUntangle-Head: ${head}`,
     author: when,

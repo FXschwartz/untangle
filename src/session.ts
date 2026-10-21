@@ -12,7 +12,7 @@ import { broughtBy, hasCommit, reviewedHead, sinceRows, type History } from './h
 import { git, gitAsync, gitMaybe, runAsync } from './exec.js';
 import { fileHunks, generatedPatterns, parseHunks } from './pipeline/diff.js';
 import { writeAtomic } from './server.js';
-import { Snapshot, snapshotBranch } from './snapshot.js';
+import { marksRef, moveMarks, Snapshot } from './snapshot.js';
 import type { Target } from './target.js';
 import '../viewer/core.js';
 
@@ -46,9 +46,9 @@ export class ReviewSession {
   // A change's lines from one commit, reviewed under that commit's lens ("<block>@<sha>").
   private cmarks = new Set<string>();
   private view: { layout?: string; showReviewedDiff?: boolean } = {};
-  private snapshotInfo: { branch: string; commit: string | null; note: string | null };
+  private snapshotInfo: { ref: string; commit: string | null; note: string | null };
   private readonly generatedRx: RegExp[];
-  // Blocks the snapshot branch holds.
+  // Blocks the marks' ref holds.
   private reviewed: Set<string>;
   private readonly metrics = new Metrics();
   private lines: Record<string, number> | null = null;
@@ -68,7 +68,9 @@ export class ReviewSession {
     c.files.forEach((f: { blocks: Block[] }) => f.blocks.forEach((b) => this.blocks.set(b.id, b)));
     this.edits = c.edits;
     this.generatedRx = generatedPatterns(target.repo, target.headSha).map((g) => C.globToRegExp(g));
-    this.snapshot = new Snapshot(target.repo, snapshotBranch(target.repo, page.snapshotKey), target.baseSha, target.headSha, c);
+    const marks = marksRef(target.repo, page.snapshotKey);
+    moveMarks(target.repo, marks);
+    this.snapshot = new Snapshot(target.repo, marks, target.baseSha, target.headSha, c);
     // Marks on parts of a change, the layout, and the blocks of the last commit this review wrote
     // live next to the review, for these commits only.
     this.stateFile = path.join(reviewDir(target.repoKey, target.baseSha, target.headSha), 'state.json');
@@ -82,9 +84,9 @@ export class ReviewSession {
     let note: string | null = null;
     if (loaded.replayed) {
       note = `replayed onto ${target.baseSha.slice(0, 7)}${loaded.replayed.conflicts.length ? `; ${loaded.replayed.conflicts.length} file${loaded.replayed.conflicts.length > 1 ? 's' : ''} conflicted and went back to unreviewed` : ''}`;
-      progress.note(`your review on ${this.snapshot.branch} was ${note}`);
+      progress.note(`your review in ${this.snapshot.name} was ${note}`);
     }
-    this.snapshotInfo = { branch: this.snapshot.branch, commit: loaded.commit, note };
+    this.snapshotInfo = { ref: this.snapshot.name, commit: loaded.commit, note };
     this.reviewed = loaded.reviewed;
     this.partial = new Set((saved.partial || []).filter((id: number) => this.edits[id] && !this.reviewed.has(this.edits[id].b)));
     this.cmarks = this.commitMarks(saved.cmarks);

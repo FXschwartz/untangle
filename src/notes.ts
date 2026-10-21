@@ -1,5 +1,5 @@
 // Local notes: comments kept on this machine, for a coding agent, instead of on GitHub. One file
-// per review in the cache, keyed like the review's branch (untangle/pr-168), so they outlive
+// per review in the cache, keyed like the review's marks (pr-168), so they outlive
 // pushes. Each note moves with its lines when the review moves to newer commits. An agent reads
 // them with `untangle watch`, answers in their threads with `untangle reply`, may resolve them,
 // and writes notes of its own with `untangle note`; what each agent has read is kept with the
@@ -166,7 +166,7 @@ const QUIET = Number(process.env.UNTANGLE_NOTES_QUIET) >= 0 && process.env.UNTAN
 const MAX_BODY = 64 << 10;
 const MAX_EVENTS = 500;
 
-/** The notes file of a review: per repository, named like the review's branch. */
+/** The notes file of a review: per repository, named like the review's marks. */
 export const notesFile = (repoKey: string, key: string) => path.join(cacheRoot(), 'notes', repoKey, encodeURIComponent(key) + '.json');
 
 const short = (sha: string) => sha.slice(0, 7);

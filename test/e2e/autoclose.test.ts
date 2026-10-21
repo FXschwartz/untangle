@@ -32,8 +32,8 @@ describe('Given a review opened while it builds, as untangle serves it by defaul
     repo.write('lib/app.dart', "void greet() {\n  print('hello');\n}\n");
     repo.commit({ subject: 'Say hello', author: ada, committer: ada });
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    // The checkouts wait, so the startup page is up when the browser opens.
-    git = heldGit(['worktree']);
+    // The checkouts wait (each starts with git init), so the startup page is up when the browser opens.
+    git = heldGit(['init']);
     run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, autoclose: null, quiet: false, env: { PATH: `${git.dir}${path.delimiter}${process.env.PATH ?? ''}` } });
     page = await launchBrowser();
     await page.goto(run.url);
@@ -135,7 +135,7 @@ describe('Given the startup page of a review, as untangle serves it by default, 
     repo.write('lib/app.dart', "void greet() {\n  print('hello');\n}\n");
     repo.commit({ subject: 'Say hello', author: ada, committer: ada });
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
-    git = heldGit(['worktree']);
+    git = heldGit(['init']);
     run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, autoclose: null, env: { PATH: `${git.dir}${path.delimiter}${process.env.PATH ?? ''}` } });
     page = await launchBrowser();
     await page.goto(run.url);

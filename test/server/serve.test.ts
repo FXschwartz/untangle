@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -112,6 +113,7 @@ describe('Given a review untangle built once, into its cache, ', () => {
     let roots = '';
     let onDisk = '';
     let text = '';
+    let listed: string[] = [];
 
     before(async () => {
       run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh });
@@ -121,19 +123,24 @@ describe('Given a review untangle built once, into its cache, ', () => {
       roots = `${dirs.head}\n${dirs.base}`;
       onDisk = `${fs.existsSync(dirs.head)} ${fs.existsSync(dirs.base)}`;
       text = ((await client.call('file', { query: { side: 'head', p: 'lib/a.dart' } })).data as { text: string }).text;
+      listed = execFileSync('git', ['-C', repo!.dir, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).split('\n').filter((l) => l.startsWith('worktree ')).map((l) => fs.realpathSync(l.slice(9)));
     });
 
     after(async () => {
       await run?.stop();
     });
 
-    it('then its checkouts are the worktrees of its head and its base in the cache.', () => {
+    it('then its checkouts are of its head and its base, in the cache.', () => {
       const worktree = (sha: string) => `${escaped(path.join(cache, 'worktrees', 'local', path.basename(repo!.dir)))}-[0-9a-f]{8}${escaped(path.sep)}${sha.slice(0, 12)}`;
       assert.match(roots, new RegExp(`^${worktree(head)}\\n${worktree(base)}$`));
     });
 
     it('then both checkouts are on disk.', () => {
       assert.equal(onDisk, 'true true');
+    });
+
+    it('then the repository lists neither among its worktrees.', () => {
+      assert.deepEqual(listed, [fs.realpathSync(repo!.dir)]);
     });
 
     it('then a whole file opens from the head.', () => {
@@ -214,6 +221,66 @@ describe('Given reviewed marks, and untangle stopped, ', () => {
 
     it('then nothing had to be replayed.', () => {
       assert.equal(note, 'no note');
+    });
+  });
+});
+
+describe('Given reviewed marks an older untangle kept on the branch untangle/feature, and untangle stopped, ', () => {
+  let repo: TempRepo | undefined;
+  let gh: GhStub | undefined;
+  let cache = '';
+  let marked = '';
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo!.dir, ...args], { encoding: 'utf8' }).trim();
+
+  before(async () => {
+    const built = dartRepo();
+    repo = built.repo;
+    gh = stubGh();
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    const first = await startUntangle(repo.dir, { base: 'main', cacheDir: cache, gh });
+    try {
+      const client = reviewClient(first.url);
+      const model = jsonScript(await waitForReview(client), 'd-model') as Model;
+      const edits = model.compares.base.files.flatMap((file) => file.blocks.flatMap((block) => block.edits));
+      await client.call('state', { method: 'PUT', body: { rev: { base: edits } } });
+      marked = edits.join(' ');
+    } finally {
+      await first.stop();
+    }
+    git('update-ref', 'refs/heads/untangle/feature', git('rev-parse', 'refs/untangle/marks/feature'));
+    git('update-ref', '-d', 'refs/untangle/marks/feature');
+  });
+
+  after(() => {
+    gh?.remove();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when untangle opens the review again, ', () => {
+    let run: UntangleRun | undefined;
+    let reviewed = '';
+    let kept = '';
+    let branches = '';
+
+    before(async () => {
+      run = await startUntangle(repo!.dir, { base: 'main', cacheDir: cache, gh });
+      const config = jsonScript(await waitForReview(reviewClient(run.url)), 'd-config') as { state: { rev: { base: number[] } }; snapshot: { ref: string } };
+      reviewed = config.state.rev.base.join(' ');
+      kept = config.snapshot.ref;
+      branches = git('branch', '--format=%(refname:short)');
+    });
+
+    after(async () => {
+      await run?.stop();
+    });
+
+    it('then the same changes are reviewed, their marks kept in git as untangle/marks/feature.', () => {
+      assert.deepEqual([reviewed, kept], [marked, 'untangle/marks/feature']);
+    });
+
+    it('then the branch is gone: the repository’s branches are its own.', () => {
+      assert.equal(branches, 'feature\nmain');
     });
   });
 });

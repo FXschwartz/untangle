@@ -45,7 +45,7 @@ describe('Given a review saved at a head that was then amended, and GitHub repor
     repo.branch('feature');
     repo.write('lib/app.dart', namedApp);
     oldHead = repo.commit({ subject: 'Name it', author: ada('2020-01-05T15:00:00Z'), committer: ada('2020-01-05T15:00:00Z') });
-    saveReviewedHead(repo, 'untangle/pr-7', oldHead, base, ada(pushedAt));
+    saveReviewedHead(repo, 'pr-7', oldHead, base, ada(pushedAt));
     repo.write('lib/app.dart', amendedApp);
     const head = repo.amend({ subject: 'Name it', author: ada('2020-01-06T15:00:00Z'), committer: ada('2020-01-06T15:00:00Z') });
     gh = pullRequestGh({
@@ -109,7 +109,7 @@ describe('Given a review saved at a head that was then amended, and the branch h
     repo.branch('feature');
     repo.write('lib/app.dart', namedApp);
     oldHead = repo.commit({ subject: 'Name it', author: ada('2020-01-05T15:00:00Z'), committer: ada('2020-01-05T15:00:00Z') });
-    saveReviewedHead(repo, 'untangle/feature', oldHead, base, ada(reviewedAt));
+    saveReviewedHead(repo, 'feature', oldHead, base, ada(reviewedAt));
     repo.write('lib/app.dart', amendedApp);
     repo.amend({ subject: 'Name it', author: ada('2020-01-06T15:00:00Z'), committer: ada('2020-01-06T15:00:00Z') });
     gh = stubGh();

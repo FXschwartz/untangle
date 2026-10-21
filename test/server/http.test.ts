@@ -156,16 +156,16 @@ describe('Given a served review of one change, ', { skip: skipDart }, () => {
     before(async () => {
       const model = jsonScript(review!.html, 'd-model') as Model;
       await review!.client.call('state', { method: 'PUT', body: { rev: { base: model.compares.base.edits.map((edit) => edit.id) } } });
-      message = git(review!.repo.dir, ['log', '-1', '--format=%B', 'untangle/feature']).replace(/\n$/, '');
-      text = git(review!.repo.dir, ['show', 'untangle/feature:lib/a.dart']);
+      message = git(review!.repo.dir, ['log', '-1', '--format=%B', 'untangle/marks/feature']).replace(/\n$/, '');
+      text = git(review!.repo.dir, ['show', 'untangle/marks/feature:lib/a.dart']);
     });
 
-    it('then the marks branch\'s commit names this base and head.', () => {
+    it('then the marks’ commit names this base and head.', () => {
       const config = jsonScript(review!.html, 'd-config') as { head: string; base: string };
       assert.equal(message, `Review: 1 of 1 change reviewed\n\nUntangle-Base: ${config.base}\nUntangle-Head: ${config.head}\n`);
     });
 
-    it('then the marks branch holds the file as it is at the head.', () => {
+    it('then the marks hold the file as it is at the head.', () => {
       assert.equal(text, "void greet() {\n  print('hi');\n}\n");
     });
   });
@@ -193,10 +193,10 @@ describe('Given a served review whose change was marked reviewed, ', { skip: ski
 
     before(async () => {
       await review!.client.call('state', { method: 'PUT', body: { rev: { base: [] } } });
-      text = git(review!.repo.dir, ['show', 'untangle/feature:lib/a.dart']);
+      text = git(review!.repo.dir, ['show', 'untangle/marks/feature:lib/a.dart']);
     });
 
-    it('then the branch holds the line from before the change.', () => {
+    it('then the marks hold the line from before the change.', () => {
       assert.equal(text, "void greet() {\n  print('hello');\n}\n");
     });
   });
@@ -226,13 +226,13 @@ describe('Given a served review of two edits in one function, ', { skip: skipDar
       await review!.client.call('state', { method: 'PUT', body: { rev: { base: [model.compares.base.edits[0].id] } } });
       saved = stateText(review!.cacheDir);
       try {
-        branch = git(review!.repo.dir, ['rev-parse', '--verify', 'untangle/feature']);
+        branch = git(review!.repo.dir, ['rev-parse', '--verify', 'untangle/marks/feature']);
       } catch {
         branch = 'none';
       }
     });
 
-    it('then the partial mark stays next to the analysis and the branch is not written.', () => {
+    it('then the partial mark stays next to the analysis and the marks aren’t written.', () => {
       const state = JSON.parse(saved) as { partial: number[] };
       assert.equal(`${state.partial.join(',')}\n${branch.trim() === 'none' ? 'none' : 'written'}`, '0\nnone');
     });

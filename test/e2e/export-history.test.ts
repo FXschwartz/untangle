@@ -34,7 +34,7 @@ describe('Given an exported review of a branch that merged two commits from main
       merge: { subject: 'Merge main', author: ada('08'), committer: ada('08') },
       after: [step('Edit the greeting again', '10', { 'lib/app.dart': "void main() {\n  print('hello');\n}\n" })],
     });
-    saveReviewedHead(repo, 'untangle/feature', sha['Merge main'], sha.main, ada('20'));
+    saveReviewedHead(repo, 'feature', sha['Merge main'], sha.main, ada('20'));
     head = sha['Edit the greeting again'];
     const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-export-'));

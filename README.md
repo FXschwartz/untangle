@@ -95,8 +95,8 @@ opens read-only.
 
 Space marks the change in front of you and goes to the next; the pill under the code says where
 you are among the changes left ("1 of 224"). Reviewed code stays on screen, muted, and a hunk
-folds away once its last change is reviewed. Your review is a local git branch: the base plus
-every change you marked. A new push brings back only what changed since you looked, and a rebase
+folds away once its last change is reviewed. Your review is kept in git: the base plus every
+change you marked. A new push brings back only what changed since you looked, and a rebase
 replays your marks onto the new base.
 
 ![Reviewed code: a folded hunk, muted places marked reviewed, and the next ones still to review](docs/images/reviewed.png)
@@ -340,9 +340,12 @@ On a Mac, <kbd>⌘</kbd> takes Ctrl's place, and Back is <kbd>⌘</kbd> <kbd>[</
 - **Fixed rules.** Every chain, group and count comes from fixed rules over git and the Dart
 analyzer's facts, with tree-sitter for the shape of each edit, so the same diff always gives
 the same review.
-- **Checkouts.** The base is a git worktree that shares objects with the repository. The head is
-the directory itself when it has nothing uncommitted and its packages are resolved, otherwise a
-worktree too. Only worktrees get `pub get`; your own checkout never does.
+- **Checkouts.** The base is checked out in the cache, as a repository of its own that borrows
+the reviewed repository's objects, so that repository doesn't list it among its worktrees. For a
+pull request URL it's a worktree of untangle's clone, and of a partial clone, which fetches what it
+lacks, a worktree of it. The head is the directory itself when it has nothing uncommitted and its
+packages are resolved, otherwise a checkout too. Only these get `pub get`; your own checkout
+never does.
 - **Dart analyzer.** A short-lived native process resolves the changed files on both sides and
 streams declarations, definitions, calls and overrides.
 - **Commits.** The branch's commits are replayed, so each changed line knows the commit that
@@ -353,8 +356,8 @@ outlines the tests. It's cached per pair of commits, so reopening a review reuse
 - **Serving.** A Node server on localhost serves the page and answers its calls. The page shows
 the build's steps as they run, then the review replaces it. The Dart language server starts
 once the review is up, for live go to definition.
-- **Marks.** Your marks come back from the review branch's content, not from a list of ids, so a
-push brings back only what changed. When the base moves, the branch is replayed onto it with a
+- **Marks.** Your marks come back from the content of their ref, not from a list of ids, so a
+push brings back only what changed. When the base moves, they're replayed onto it with a
 three-way merge (mergiraf first, when it's installed), and what still conflicts goes back to
 unreviewed.
 
@@ -365,17 +368,21 @@ requests in [docs/02-test-runs.md](docs/02-test-runs.md).
 
 Your review lives in git, and everything else in `untangle`'s cache.
 
-- **The review branch**, `untangle/pr-<number>` (or `untangle/<branch>`), is a local branch of the
-repository you review, or of its clone in the cache for a pull request URL. It holds the base
-plus every change you marked, so `git diff untangle/pr-<number> HEAD` shows what's left.
+- **Your marks** are a ref of the repository you review, `refs/untangle/marks/pr-<number>` (or
+`…/<branch>`), or of its clone in the cache for a pull request URL. It holds the base plus every
+change you marked, so `git diff untangle/marks/pr-<number> HEAD` shows what's left. It isn't a
+branch, so branch lists and graphs leave it out; the `untangle/pr-<number>` branches older
+versions kept marks on move to it when their review starts.
 - **The cache** is `~/.cache/untangle` (`$XDG_CACHE_HOME`, `~/Library/Caches` on macOS,
 `%LOCALAPPDATA%` on Windows; `UNTANGLE_CACHE` overrides it):
   - `repos/`: clones made for pull request URLs (bare, blobs on demand).
-  - `worktrees/`: checkouts of base and head commits. A worktree of your own repository is listed
-  by `git worktree list`; `git worktree remove` or deleting the folder is safe.
+  - `worktrees/`: checkouts of base and head commits. Each is a repository of its own that borrows
+  your repository's objects, so your repository doesn't list it, or a worktree of a clone:
+  untangle's, or a partial clone of yours. Deleting one is safe. Older versions made worktrees of
+  your repository: they become their own when untangle next reviews it.
   - `reviews/`: per pair of commits, the analyzer's facts, the review, and marks on parts of a
   change.
-  - `notes/`: your notes, per review like its branch (`notes/github.com/<owner>/<repo>/pr-<number>.json`).
+  - `notes/`: your notes, per review, named like its marks (`notes/github.com/<owner>/<repo>/pr-<number>.json`).
   - `run/`: the port and token of each review running now, for the agent's commands.
   - `untangle/`: `untangle`'s own clone, which `untangle upgrade` pulls, builds and links. Once
   upgraded, the `untangle` command runs from it, so keep it when you clear the cache.

@@ -19,8 +19,8 @@ export interface PageConfig {
   roots?: { head: string; base: string } | null;
   /** How "Open in editor" works: a link built from a template, or a command untangle runs. */
   editor?: { mode: 'uri'; template: string } | { mode: 'command' | 'orca' };
-  /** The branch that holds the marks. */
-  snapshot?: { branch: string; commit: string | null; note: string | null };
+  /** The ref that holds the marks. */
+  snapshot?: { ref: string; commit: string | null; note: string | null };
   /** Lines in each modified file at the head: how far its diff can grow below the last hunk. */
   lines?: Record<string, number>;
   /** The pull request's conversation on GitHub (through gh), or why it's off. */
