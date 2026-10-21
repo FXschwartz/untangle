@@ -980,7 +980,8 @@
       + `<span class="hh-at" title="@@ −${o != null ? o : hk.o} +${n != null ? n : hk.n} @@">${n != null ? n : hk.n}</span><span class="hh-tx">${esc(head)}</span>`;
     if (x.collapsed) {
       const lines = linesWord(S.e0 - S.s0);
-      const threads = x.threads.all ? `<span class="cm-cnt" title="Threads on these lines">${ICON.comment}${x.threads.all}</span>` : '';
+      const count = (n, cls, title) => (n ? `<span class="cm-cnt${cls}" title="${title}">${ICON.comment}${n}</span>` : '');
+      const threads = count(x.threads.threads, '', 'Threads on these lines') + count(x.threads.notes, ' note', 'Notes on these lines');
       out += x.allDone ? `<span class="hh-sum ok">${ICON.check}${lines} reviewed${threads}</span>` : `<span class="hh-sum">${lines}${x.open ? ` · ${x.open} to review` : ''}${threads}</span>`;
       const focus = ctx.chain && ctx.chain.focus ? x.blocks.flatMap((b) => ctx.chain.focus[b.id] || []) : [];
       if (focus.length && !x.allDone) out += `<span class="hh-chips"><span class="hh-sum">in this chain:</span>${[...new Set(focus)].slice(0, 8).map((ln) => `<button type="button" class="chip-btn" data-act="expand-to" data-key="${esc(S.key)}" data-line="${ln}">line ${ln}</button>`).join('')}</span>`;
@@ -2669,16 +2670,17 @@
     h += `<div class="th-f">${reply}<span class="th-tools">${tools}</span>${err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : ''}</div>`;
     return h + '</div>';
   }
-  // The threads on a section's lines, and how many of them are open.
+  // The threads and notes on a section's lines (each kind, for its color), and how many of them all
+  // are open.
   function threadsIn(f, hi, s0, e0) {
-    const out = { all: 0, open: 0 };
+    const out = { threads: 0, notes: 0, open: 0 };
     if (!GH.anchors.size && !NT.anchors.size) return out;
     const meta = hunkMeta(f.hunks[hi]);
-    const add = (list) => (list || []).forEach((t) => { out.all++; if (!t.resolved) out.open++; });
+    const add = (kind, list) => (list || []).forEach((t) => { out[kind]++; if (!t.resolved) out.open++; });
     for (let i = s0; i < e0; i++) {
       const r = meta[i];
-      if (r.n != null && r.t !== '-') { add(GH.anchors.get(f.p + '\nRIGHT\n' + r.n)); add(NT.anchors.get(f.p + '\nRIGHT\n' + r.n)); }
-      if (r.o != null && r.t !== '+') { add(GH.anchors.get(f.p + '\nLEFT\n' + r.o)); add(NT.anchors.get(f.p + '\nLEFT\n' + r.o)); }
+      if (r.n != null && r.t !== '-') { add('threads', GH.anchors.get(f.p + '\nRIGHT\n' + r.n)); add('notes', NT.anchors.get(f.p + '\nRIGHT\n' + r.n)); }
+      if (r.o != null && r.t !== '+') { add('threads', GH.anchors.get(f.p + '\nLEFT\n' + r.o)); add('notes', NT.anchors.get(f.p + '\nLEFT\n' + r.o)); }
     }
     return out;
   }

@@ -295,6 +295,27 @@ describe('Given a served review of pull request 7, and an agent’s commands, ',
     });
   });
 
+  describe('when the hunk with GitHub’s thread and the notes is folded, ', () => {
+    let counts: string;
+
+    before(async () => {
+      const chevron = '.code[data-p="lib/app.dart"] .hh [data-act="toggle-hunk"]';
+      await page!.click(chevron);
+      await page!.until(`!!document.querySelector('.code[data-p="lib/app.dart"] .hh .hh-sum .cm-cnt')`);
+      counts = await read(page!, `(() => {
+        const swatch = (token) => { const s = document.createElement('span'); s.style.color = 'var(' + token + ')'; document.body.appendChild(s); const c = getComputedStyle(s).color; s.remove(); return c; };
+        const named = { [swatch('--gh')]: 'GitHub’s color', [swatch('--local')]: 'the notes’ color' };
+        return [...document.querySelectorAll('.code[data-p="lib/app.dart"] .hh .hh-sum .cm-cnt')].map((c) => c.textContent + ' ' + c.title.toLowerCase() + ', in ' + (named[getComputedStyle(c).color] || getComputedStyle(c).color)).join(' / ');
+      })()`);
+      await page!.click(chevron);
+      await page!.until(`!document.querySelector('.code[data-p="lib/app.dart"] .hh .hh-sum')`);
+    });
+
+    it('then its line counts the thread in GitHub’s color, and the notes apart, in the notes’ color.', () => {
+      assert.equal(counts, '1 threads on these lines, in GitHub’s color / 2 notes on these lines, in the notes’ color');
+    });
+  });
+
   describe('when GitHub is chosen again and a line’s + is clicked, ', () => {
     let shown: string;
 
