@@ -2937,11 +2937,11 @@
   // Pressing the + and dragging over lines comments on all of them, as on GitHub (within a hunk;
   // near the pane's edges it scrolls). Shift stretches the open comment instead.
   let drag = null, dragUp = 0;
-  const cellAt = (x, y) => { const el = document.elementFromPoint(x, y); const c = el && el.closest('[data-c]'); return c && drag && drag.code.contains(c) ? c : null; };
+  const cellAt = (x, y) => { const el = document.elementFromPoint(x, y); const c = el && el.closest('[data-c]'); return c && drag && drag.code.some((x) => x.contains(c)) ? c : null; };
   const atOf = (cell) => { const [side, line] = cell.dataset.c.split(':'); return { path: drag.at.path, side: side === 'L' ? 'LEFT' : 'RIGHT', line: Number(line) }; };
   function paintDrag() {
     main.querySelectorAll('.cm-drag').forEach((x) => x.classList.remove('cm-drag'));
-    const cells = [...drag.code.querySelectorAll('[data-c]')];
+    const cells = drag.code.flatMap((x) => [...x.querySelectorAll('[data-c]')]);
     let i = cells.indexOf(drag.cell), j = cells.indexOf(drag.end);
     if (i < 0 || j < 0) return;
     if (i > j) [i, j] = [j, i];
@@ -2966,7 +2966,7 @@
   addBtn.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || !addAt || !addAt.cell) return;
     e.preventDefault();
-    drag = { at: { path: addAt.path, side: addAt.side, line: addAt.line }, to: null, cell: addAt.cell, end: addAt.cell, code: addAt.cell.closest('.code'), shift: e.shiftKey, x: e.clientX, y: e.clientY };
+    drag = { at: { path: addAt.path, side: addAt.side, line: addAt.line }, to: null, cell: addAt.cell, end: addAt.cell, code: codeRun(addAt.cell.closest('.code')), shift: e.shiftKey, x: e.clientX, y: e.clientY };
     document.body.classList.add('dragging');
     paintDrag();
     requestAnimationFrame(dragScroll);
@@ -3724,20 +3724,20 @@
     const top = box.top + hh;
     const m = M();
     const byPath = m.byPath || (m.byPath = new Map(m.files.map((f) => [f.p, f])));
-    // Only a test's outline or code has groups to pin, so the line is looked for (a hit test, slow
-    // in a long chain) only under one of them.
+    // Only a test's outline or code has groups to pin, so the line is looked for only under one of
+    // them: among the rows in their order, the first whose bottom is below the line, if it's on it.
     const tests = paneQuery('tests', () => [...main.querySelectorAll('.ol-sec[data-olf], .code[data-p]')].filter((el) => el.matches('.ol-sec') || olOf(byPath.get(el.dataset.p))));
     const under = tests.some((el) => { const r = el.getBoundingClientRect(); return r.top <= top + 3 && r.bottom > top + 3; });
     let row = null;
-    for (const x of under ? [box.left + 36, box.left + box.width / 3] : []) {
-      const el = [...document.elementsFromPoint(x, top + 3)].find((e) => !e.closest('.ol-pinw, .fv-head'));
-      row = el && el.closest && el.closest('.ol-row[data-ol], .ln, .sl');
-      if (row) break;
+    if (under) {
+      const rows = paneQuery('rows', () => [...main.querySelectorAll('.ol-row[data-ol], .code > .ln, .code > .sl')]);
+      const r = rows[firstWhere(rows, (x) => x.getBoundingClientRect().bottom > top + 3)];
+      if (r && r.getBoundingClientRect().top <= top + 3) row = r;
     }
     // Above the top: every element that stands for the call (its outline row, its call's line).
     const gone = (f, g) => {
-      const els = [...main.querySelectorAll('.ol-row[data-ol]')].filter((x) => x.dataset.ol === olKey(f, g))
-        .concat([...main.querySelectorAll('.code[data-p]')].filter((c) => c.dataset.p === f.p).flatMap((c) => [...c.querySelectorAll(`[data-n="${g.s}"]`)]));
+      const els = paneQuery('call ' + olKey(f, g), () => [...main.querySelectorAll('.ol-row[data-ol]')].filter((x) => x.dataset.ol === olKey(f, g))
+        .concat([...main.querySelectorAll('.code[data-p]')].filter((c) => c.dataset.p === f.p).flatMap((c) => [...c.querySelectorAll(`[data-n="${g.s}"]`)])));
       return els.every((x) => x.getBoundingClientRect().bottom <= top + 1);
     };
     let groups = [], f = null;
@@ -3752,7 +3752,7 @@
       const code = row.closest('.code[data-p]');
       f = code && byPath.get(code.dataset.p);
       let r = row;
-      while (r && !r.dataset.n) r = r.previousElementSibling;
+      while (r && !r.dataset.n) r = prevIn(r);
       const ln = r ? Number(r.dataset.n) : 0, ol = olOf(f);
       if (ol && ln) groups = ol.nodes.filter((n) => n.s < ln && ln <= n.e).filter((g) => gone(f, g));
     }
@@ -4956,7 +4956,7 @@
   // A section's rows: what follows its divider, up to the next divider or the end of its code.
   function regionOf(band) {
     const out = [];
-    for (let el = band.nextElementSibling; el && !el.matches('.hh'); el = el.nextElementSibling) out.push(el);
+    for (let el = nextIn(band); el && !el.matches('.hh'); el = nextIn(el)) out.push(el);
     return out;
   }
   const bandByKey = (key) => [...main.querySelectorAll('.hh[data-sec]')].find((b) => b.dataset.sec === key) || null;
@@ -5132,11 +5132,11 @@
     if (!band) return;
     const take = (from, next) => {
       const out = [];
-      for (let el = next ? from.nextElementSibling : from.previousElementSibling, k = 0; el && !el.matches('.hh') && k < m.n; el = next ? el.nextElementSibling : el.previousElementSibling) { if (el.matches('.ln, .sl')) k++; out.push(el); }
+      for (let el = next ? nextIn(from) : prevIn(from), k = 0; el && !el.matches('.hh') && k < m.n; el = next ? nextIn(el) : prevIn(el)) { if (el.matches('.ln, .sl')) k++; out.push(el); }
       return next ? out : out.reverse();
     };
     if (m.side === 'above') return growRows(take(band, true));
-    const rows = regionOf(band), after = rows.length ? rows[rows.length - 1].nextElementSibling : band.nextElementSibling;
+    const rows = regionOf(band), after = rows.length ? nextIn(rows[rows.length - 1]) : nextIn(band);
     growRows(after ? take(after, false) : rows.slice(-m.n));
   }
   let shownPeek = null, clickX = null;
@@ -5311,6 +5311,41 @@
     if (r0.top - dy < top) dy = r0.top - top;
     if (dy) main.scrollTo({ top: main.scrollTop + dy, behavior: moving() ? 'smooth' : 'auto' });
   }
+  // A long block of code is cut, between two rows, into blocks of a hundred rows: off screen, each
+  // skips layout and paint as one (see .code in the page's style), so a scroll checks a few blocks
+  // rather than every row. The blocks cut from one are marked .cont. Each is as tall as a row for
+  // each thing it holds until it's first drawn. (A test's code in its outline stays whole: the
+  // outline's motion knows it as one piece.)
+  const CUT = 100;
+  function cutCode() {
+    main.querySelectorAll('.code:not(.ol-code)').forEach((code) => {
+      let at = code, rows = 0, prevRow = false;
+      for (const el of [...code.children]) {
+        const row = el.matches('.ln, .sl');
+        if (row && prevRow && rows >= CUT) {
+          const next = code.cloneNode(false);
+          next.classList.add('cont');
+          at.after(next);
+          at = next;
+          rows = 0;
+        }
+        if (at !== code) at.appendChild(el);
+        if (row) rows++;
+        prevRow = row;
+      }
+    });
+    main.querySelectorAll('.code').forEach((c) => c.style.setProperty('--rows', c.childElementCount));
+  }
+  // What follows (precedes) an element in its block of code, across the cuts.
+  const nextIn = (el) => el.nextElementSibling || (el.parentElement && el.parentElement.nextElementSibling && el.parentElement.nextElementSibling.matches('.code.cont') ? el.parentElement.nextElementSibling.firstElementChild : null);
+  const prevIn = (el) => el.previousElementSibling || (el.parentElement && el.parentElement.matches('.code.cont') && el.parentElement.previousElementSibling ? el.parentElement.previousElementSibling.lastElementChild : null);
+  // A block of code and the blocks cut from it.
+  function codeRun(code) {
+    while (code.matches('.cont') && code.previousElementSibling && code.previousElementSibling.matches('.code')) code = code.previousElementSibling;
+    const out = [code];
+    for (let c = code.nextElementSibling; c && c.matches('.code.cont'); c = c.nextElementSibling) out.push(c);
+    return out;
+  }
   // ---------- render
   function render(opts) {
     opts = opts || {};
@@ -5335,6 +5370,7 @@
       main.innerHTML = `<div class="empty">This view failed to render: ${esc(e && e.message ? e.message : String(e))}. Reloading the page may help; if not, it’s a bug in untangle.</div>`;
       console.error(e);
     }
+    cutCode();
     fitBoxes(main);
     const fvHead = main.querySelector('.fv-head');
     if (fvHead) fvHead.insertAdjacentHTML('afterend', '<div class="ol-pinw" aria-hidden="true"><div class="ol-pin"></div></div>' + (gdHas() ? '<div class="gd-w"><div class="gd" role="dialog" aria-label="The chain’s graph" hidden></div></div>' : ''));
@@ -5446,19 +5482,21 @@
   // while the view changes around it.
   function lineOnScreen() {
     const top = main.getBoundingClientRect().top + headH();
-    const codes = [...main.querySelectorAll('.code')];
+    const codes = [...main.querySelectorAll('.code:not(.cont)')];
     for (const el of main.querySelectorAll('[data-n]')) {
       if (!el.dataset.n) continue;
       const r = el.getBoundingClientRect();
-      if (r.bottom > top + 1) return { code: codes.indexOf(el.closest('.code')), n: Number(el.dataset.n), off: r.top - top };
+      if (r.bottom <= top + 1) continue;
+      const code = el.closest('.code');
+      return { code: code ? codes.indexOf(codeRun(code)[0]) : -1, n: Number(el.dataset.n), off: r.top - top };
     }
     return null;
   }
   function backTo(at) {
     if (!at) return;
-    const code = main.querySelectorAll('.code')[at.code];
+    const code = main.querySelectorAll('.code:not(.cont)')[at.code];
     if (!code) return;
-    const rows = [...code.querySelectorAll('[data-n]')].filter((x) => x.dataset.n);
+    const rows = codeRun(code).flatMap((c) => [...c.querySelectorAll('[data-n]')]).filter((x) => x.dataset.n);
     const el = rows.find((x) => Number(x.dataset.n) === at.n) || rows.find((x) => Number(x.dataset.n) > at.n);
     if (el) placeRow(el, headH() + at.off);
   }
@@ -5470,16 +5508,25 @@
   let navAt = null;
   // What a query of the pane finds, kept until the pane's DOM changes: scrolling asks some every
   // frame, and in a long chain each walks thousands of rows. Changes not yet delivered count, so a
-  // query right after a render finds the new rows.
+  // query right after a render finds the new rows; the header's and the pinned groups' don't, as
+  // they change while the pane scrolls and hold none of what's asked.
   const paneFound = new Map();
-  const paneChanges = new MutationObserver(() => paneFound.clear());
+  const counts = (list) => list.some((m) => !(m.target.closest && m.target.closest('.fv-head, .ol-pinw')));
+  const paneChanges = new MutationObserver((list) => { if (counts(list)) paneFound.clear(); });
   paneChanges.observe(main, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id', 'data-block', 'data-nav', 'data-mark', 'data-unit', 'data-p', 'data-olf', 'data-ol'] });
   function paneQuery(key, find) {
-    if (paneChanges.takeRecords().length) paneFound.clear();
+    if (counts(paneChanges.takeRecords())) paneFound.clear();
     if (!paneFound.has(key)) paneFound.set(key, find());
     return paneFound.get(key);
   }
   const rowOf = (el) => el.closest('.ln, .sl, .hh, .ol-row');
+  // The first of some elements in the pane's order for which a test, false before it and true from
+  // it on, holds: found by halving, as scrolling asks every frame and a long chain has thousands.
+  function firstWhere(list, ok) {
+    let lo = 0, hi = list.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (ok(list[mid])) hi = mid; else lo = mid + 1; }
+    return lo;
+  }
   const markId = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
   // A chain shows other chains' changes in its context lines: j, k and the pill skip them.
   const changeMarks = (open) => paneQuery(open ? 'marks open' : 'marks', () => {
@@ -5504,7 +5551,8 @@
     const seen = (el) => { const r = rowOf(el).getBoundingClientRect(); return r.bottom > top && r.top < box.bottom - 56; };
     const open = changeMarks(true);
     if (navAt) { const el = open.find((x) => markId(x) === navAt); if (el && seen(el)) return el; }
-    return open.find(seen) || null;
+    const first = open[firstWhere(open, (el) => rowOf(el).getBoundingClientRect().bottom > top)];
+    return first && seen(first) ? first : null;
   }
   function flashRow(row) {
     main.querySelectorAll('.flash').forEach((x) => x.classList.remove('flash'));
@@ -5644,7 +5692,8 @@
       const total = marks.reduce((x, m) => x + openIn(m), 0);
       if (total) {
         const cur = currentMark(), ref = readY();
-        const at = cur ? marks.indexOf(cur) : marks.findIndex((m) => rowOf(m).getBoundingClientRect().top >= ref - 4);
+        let at = cur ? marks.indexOf(cur) : firstWhere(marks, (m) => rowOf(m).getBoundingClientRect().top >= ref - 4);
+        if (at >= marks.length) at = -1;
         const n = at < 0 ? total : marks.slice(0, at).reduce((x, m) => x + openIn(m), 0) + 1;
         h = `${iconBtn(ICON.chevronLeft, 'Previous change to review (k)', 'data-act="pill-step" data-step="-1"')}<span class="pill-n" aria-live="polite"><b>${n}</b> of ${total}</span>${iconBtn(ICON.chevronRight, 'Next change to review (j)', 'data-act="pill-step" data-step="1"')}<span class="pill-sep"></span><button type="button" class="pill-act" data-act="mark-next" title="Mark the change you’re on reviewed, and go to the next one">Mark and go to the next<kbd>Space</kbd></button>`;
       } else {
@@ -5665,7 +5714,7 @@
   main.addEventListener('scroll', () => {
     if (scrollRaf) return;
     if (state.gdrop) gdClose();
-    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); renderPill(); spyHere(); foldGraph(); mini.scrolled(); olPin(); });
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; main.classList.toggle('scrolled', main.scrollTop > 2); main.classList.toggle('aside', main.scrollLeft > 0); renderPill(); spyHere(); foldGraph(); mini.scrolled(); olPin(); });
     clearTimeout(NAV.saveT);
     NAV.saveT = setTimeout(() => { const cur = NAV.stack[NAV.at]; if (cur) { cur.top = main.scrollTop; navSave(cur); } }, 400);
   }, { passive: true });

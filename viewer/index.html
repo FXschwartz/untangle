@@ -201,7 +201,7 @@ a.t-pr:hover { text-decoration: underline; text-decoration-color: var(--text-3);
 body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
 .vw-sheet { position: relative; min-width: 0; min-height: 0; background: var(--sheet); border-radius: 12px 0 0 0; overflow: hidden; }
 .vw.side-off .vw-sheet { border-radius: 0; }
-.vw-main { position: absolute; inset: 0; overflow: auto; container-type: inline-size; scrollbar-width: thin; scrollbar-color: #2C2C34 transparent; }
+.vw-main { position: absolute; inset: 0; overflow: auto; container-type: inline-size; background: var(--sheet); scrollbar-width: thin; scrollbar-color: #2C2C34 transparent; }
 .vw.mini-on .vw-main { right: 64px; }
 .vw.mini-on .vw-pill { margin-left: -32px; }
 /* Room under the last line for the review pill. */
@@ -784,12 +784,19 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 @keyframes flashsec { 0% { background: rgba(255, 255, 255, .05); } 100% { background: transparent; } }
 
 /* ---- Code. A whole file has thousands of rows: the ones off screen skip layout and paint until
-   scrolled to. That clips what overflows a row, so focus rings inside rows are drawn inward. */
+   scrolled to. That clips what overflows a row, so focus rings inside rows are drawn inward. A
+   block of rows off screen skips them all, so a scroll checks the blocks (a long one is cut into
+   blocks of a hundred rows), not every row of the view; until it's first drawn, it's a row tall
+   for each thing it holds (--rows, set as it's drawn). */
 .code { font: 400 12.5px/1.65 var(--code); width: max-content; min-width: 100%; }
+.vw-main .code { content-visibility: auto; contain-intrinsic-width: auto 0px; contain-intrinsic-height: auto calc(var(--rows, 40) * 20.625px); }
 .ln { display: flex; align-items: flex-start; }
 .code > .ln, .code > .sl { content-visibility: auto; contain-intrinsic-size: auto 20.625px; }
 .code > .ln :focus-visible, .code > .sl :focus-visible { outline-offset: -2px; }
-.ln .g, .sl .g { position: sticky; left: 0; z-index: 1; display: flex; align-items: center; justify-content: center; width: var(--gut); height: var(--row); flex: none; background: var(--sheet); }
+.ln .g, .sl .g { display: flex; align-items: center; justify-content: center; width: var(--gut); height: var(--row); flex: none; background: var(--sheet); }
+/* Scrolled sideways, the gutter stays at the left edge, over the code. Only then: a gutter stuck
+   on every row costs every frame of a scroll. */
+.vw-main.aside .ln .g, .vw-main.aside .sl .g { position: sticky; left: 0; z-index: 1; }
 .ln .no, .half .no { width: var(--num); flex: none; padding-right: 10px; text-align: right; color: var(--text-4); user-select: none; font-variant-numeric: tabular-nums; }
 .ln .no.wide { width: 60px; }
 .ln .no .linkish { text-decoration: none; }
