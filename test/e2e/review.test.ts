@@ -633,16 +633,23 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
 
   describe('when the Files tab is opened, ', () => {
     let tree: string;
+    let total: string;
 
     before(async () => {
       await rest(page!);
       await page!.click('[data-tab="files"]');
       await page!.until(`(document.querySelector('#vw-side')?.textContent || '').includes('Generated')`);
       tree = await read(page!, `[...document.querySelectorAll('#vw-side .sb-row.dir, #vw-side .sb-row.tr, #vw-side .sb-group')].map((el) => el.classList.contains('sb-group') ? el.textContent : (el.classList.contains('dir') ? 'dir ' : 'file ') + (el.querySelector('.nm')?.textContent ?? '')).join('\\n')`);
+      total = await read(page!, `(() => { const heading = document.querySelector('#vw-side .sb-group'); return heading.textContent + '\\n' + heading.title; })()`);
+    });
+
+    it('then the review\'s files are headed by their count and the lines they add and remove, without the generated file\'s.', () => {
+      assert.equal(total, 'In the review3 files · +8 −7\nThe lines the review’s files add and remove. Generated files and migrations, below, aren’t reviewed or counted.');
     });
 
     it('then a folder that holds only a folder is shown with it, and the generated file is set aside.', () => {
       assert.equal(tree, [
+        'In the review3 files · +8 −7',
         'dir lib',
         'dir only/nested',
         'file added.dart',

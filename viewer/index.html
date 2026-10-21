@@ -246,6 +246,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .sb-pin { display: grid; padding-bottom: 8px; margin-bottom: 6px; box-shadow: 0 1px 0 var(--hair); }
 .sb-group { display: flex; justify-content: space-between; gap: 8px; padding: 22px 6px 6px; font-size: 11.5px; color: var(--text-3); }
 .sb-group span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-group > span + span { flex: none; white-space: nowrap; }
 button.sb-group { appearance: none; border: 0; background: none; width: 100%; font-family: var(--ui); text-align: left; cursor: pointer; }
 button.sb-group:hover { color: var(--text-2); }
 /* The Threads tab's sections (notes, and what comes from GitHub): each folds. */

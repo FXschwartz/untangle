@@ -4812,6 +4812,8 @@
       // A file the changes add, or delete, says so in its color, as in a diff.
       const status = (f) => ' s-' + f.s.toLowerCase();
       const statusWords = (f) => (f.s === 'A' ? 'added, ' : f.s === 'D' ? 'deleted, ' : '');
+      // What the review covers, in lines: the generated files and migrations below aren't in it.
+      if (m.files.length) h += `<div class="sb-group" title="The lines the review’s files add and remove. Generated files and migrations, below, aren’t reviewed or counted."><span>In the review</span><span>${plural(m.files.length, 'file')} · ${plusMinus(sumOf(m.files, 'a'), sumOf(m.files, 'd'))}</span></div>`;
       h += treeHtml(fileTree(m.files), 0, {
         prefix: '',
         count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open, diff: filesDiff(files), cls: outCls(files) }; },
