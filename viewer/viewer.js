@@ -591,11 +591,11 @@
         seen.add(e.group);
         const g = M().groupById.get(e.group);
         const ok = g.edits.every((x) => rev().has(x));
-        h += `<button type="button" class="note${ok ? ' ok' : ''}" data-group="${g.id}" title="The same change in ${g.count} places: see them all">same change ×${g.count}</button>`;
+        h += `<button type="button" class="bdg${ok ? ' ok' : ''}" data-group="${g.id}" title="The same change in ${g.count} places: see them all">same change ×${g.count}</button>`;
       });
     }
     if (n != null) (M().usageByLine.get(f.p + ':' + n) || []).forEach(([key, cnt]) => {
-      h += `<button type="button" class="note" data-usage="${esc(key)}" title="Usages inside other changes, from the language server">${cnt} changed usage${cnt > 1 ? 's' : ''}</button>`;
+      h += `<button type="button" class="bdg" data-usage="${esc(key)}" title="Usages inside other changes, from the language server">${cnt} changed usage${cnt > 1 ? 's' : ''}</button>`;
     });
     return h;
   }
@@ -605,7 +605,7 @@
   }
   function diffToggle(b) {
     const shown = state.blockDiff.has(b.id) || state.showReviewedDiff;
-    return state.showReviewedDiff ? '' : `<button type="button" class="note" data-act="toggle-diff" data-block="${esc(b.id)}" title="${shown ? 'Read this reviewed change as plain code again' : 'Show what this reviewed change changed'}">${shown ? 'hide diff' : 'show diff'}</button>`;
+    return state.showReviewedDiff ? '' : `<button type="button" class="bdg" data-act="toggle-diff" data-block="${esc(b.id)}" title="${shown ? 'Read this reviewed change as plain code again' : 'Show what this reviewed change changed'}">${shown ? 'hide diff' : 'show diff'}</button>`;
   }
   function peekAfter(f, n) {
     return state.peek && !state.peek.old && state.peek.path === f.p && state.peek.n === n ? peekHtml(state.peek) : '';
@@ -647,8 +647,8 @@
     const open = state.moveOpen.has(b.id);
     const groups = new Set(b.edits.map((id) => M().edits[id].group).filter((g) => g != null));
     let h = `<div class="ln mv-head${d && b.edits.length ? ' rvd' : ''}"><span class="g">${b.edits.length ? tickHtml(b) : ''}</span><span class="no"></span><span class="sg">↤</span><span class="tx">Moved from ${moveLink(b, `${esc(fileName(from.p))}:${fromLine}`)} · ${moveLines(b, false)} · ${b.edits.length ? `${b.edits.length} change${b.edits.length > 1 ? 's' : ''}` : 'no changes'}</span><span class="bdgs">`
-      + [...groups].map((g) => { const gr = M().groupById.get(g); return `<button type="button" class="note" data-group="${g}">same change ×${gr.count}</button>`; }).join('')
-      + `<button type="button" class="note" data-act="toggle-move" data-block="${esc(b.id)}">${open ? 'fold the moved lines' : 'show the moved lines'}</button></span></div>`;
+      + [...groups].map((g) => { const gr = M().groupById.get(g); return `<button type="button" class="bdg" data-group="${g}">same change ×${gr.count}</button>`; }).join('')
+      + `<button type="button" class="bdg" data-act="toggle-move" data-block="${esc(b.id)}">${open ? 'fold the moved lines' : 'show the moved lines'}</button></span></div>`;
     return h + movePeekAfter(b);
   }
   // Where a move's other copy is: the lines it moved to, at the head, or the ones it came from, at

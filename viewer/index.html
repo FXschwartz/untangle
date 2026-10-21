@@ -848,11 +848,12 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .ln.add:hover, .ln.add:hover .g { background-color: var(--add); }
 .ln.del:hover, .ln.del:hover .g { background-color: var(--del); }
 .ln.mv:hover, .ln.mv:hover .g { background-color: var(--mv); }
-/* Notes at a line's end: the same change elsewhere, changed usages, a reviewed change's diff. */
+/* A line's badges, at its end: the same change elsewhere, changed usages, a reviewed change's
+   diff. (Not .note: that's the review's notes, which aren't buttons.) */
 .bdgs { display: inline-flex; align-items: center; gap: 12px; flex: none; height: var(--row); padding-right: 16px; }
-.note { appearance: none; border: 0; background: none; padding: 0; font: 500 11px/1.2 var(--ui); color: var(--text-3); white-space: nowrap; cursor: pointer; border-bottom: 1px dotted var(--text-4); }
-.note:hover { color: var(--text); border-bottom-color: var(--text-2); }
-.note.ok { color: var(--text-4); }
+.bdg { appearance: none; border: 0; background: none; padding: 0; font: 500 11px/1.2 var(--ui); color: var(--text-3); white-space: nowrap; cursor: pointer; border-bottom: 1px dotted var(--text-4); }
+.bdg:hover { color: var(--text); border-bottom-color: var(--text-2); }
+.bdg.ok { color: var(--text-4); }
 /* The review mark: muted until the pointer is on its line. */
 .tick { appearance: none; position: relative; width: 14px; height: 14px; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; box-shadow: inset 0 0 0 1.5px #3A3A44; color: transparent; font-size: 0; cursor: pointer; transition: background-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease); }
 .tick::after { content: ""; position: absolute; left: 5px; top: 2.2px; width: 3.4px; height: 7px; border: solid transparent; border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); transition: border-color var(--fast) var(--ease); }

@@ -150,16 +150,22 @@ describe('Given a served review of pull request 7, and an agent’s commands, ',
 
   describe('when the note is added, ', () => {
     let shown: string;
+    let cursors: string;
 
     before(async () => {
       await fill(page!, '.th.new.note textarea', 'Why greet `ada`?');
       await page!.click('.th.new.note [data-act="nt-add"]');
       await page!.until(`!!document.querySelector('.th.note[data-note="1"]')`);
       shown = await read(page!, noteShown(1));
+      cursors = await read(page!, `['', ' .cm-h', ' .cm-body'].map((part) => getComputedStyle(document.querySelector('.th.note[data-note="1"]' + part)).cursor).join(' ')`);
     });
 
     it('then it sits under its line, numbered N1 and local.', () => {
       assert.equal(shown, `N1 You line ${callLine} (Local) - Why greet ada?`);
+    });
+
+    it('then the pointer over it is the page\'s, as over a comment, not a button\'s.', () => {
+      assert.equal(cursors, 'auto auto auto');
     });
   });
 
