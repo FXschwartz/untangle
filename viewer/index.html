@@ -278,6 +278,10 @@ button.sb-group:hover { color: var(--text-2); }
 .sb-row.done .nm { color: var(--text-3); }
 .sb-row.dir .nm { color: var(--text-2); font-weight: 500; }
 .sb-row.dir.done .nm { color: var(--text-3); }
+/* A chain open: the files it has no changes in fade, as its commits do in the Commits tab. The
+   tree's lines stay. */
+.sb-row.chain-out > :not(.ig) { opacity: .38; }
+.sb-row.chain-out:hover > :not(.ig), .sb-row.chain-out:focus-visible > :not(.ig) { opacity: .8; }
 .sb-row .tw { display: grid; place-items: center; width: 12px; height: 16px; color: var(--text-3); }
 .sb-row .tw svg { width: 14px; height: 14px; flex: none; }
 /* A row's mark: amber while it has changes to review, a check once they're all reviewed. */

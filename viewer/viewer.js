@@ -4762,12 +4762,18 @@
       if (st.total) h += `<div class="sb-group"><span>Outside chains</span></div><button type="button" class="sb-row chain${st.open ? '' : ' done'}" data-standalone="1"${v.kind === 'standalone' ? ' aria-current="true"' : ''} title="Changes that don’t use, and aren’t used by, anything changed elsewhere: ${leftWords(st)}">${markHtml(st)}<span class="nm ui">Not in a chain</span>${sideDiff(sumOf(m.standalone, 'adds'), sumOf(m.standalone, 'dels'))}<span class="cnt">${st.open || ''}</span></button>`;
     } else {
       const on = (f) => (v.kind === 'file' && v.path === f.p ? ' aria-current="true"' : '');
+      // A chain open: the files it has no changes in fade, as its commits do in the Commits tab.
+      const chainOn = v.kind === 'chain' && m.chains[v.id];
+      const mine = chainOn ? new Set(chainOn.blocks.map((id) => m.blockById.get(id).file.p)) : null;
+      const out = (files) => !!mine && !files.some((f) => mine.has(f.p));
+      const outCls = (files) => (out(files) ? ' chain-out' : '');
+      const outWords = (f) => (out([f]) ? '. None of its changes are in the open chain' : '');
       h += treeHtml(fileTree(m.files), 0, {
         prefix: '',
-        count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open, diff: filesDiff(files) }; },
+        count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open, diff: filesDiff(files), cls: outCls(files) }; },
         file: (f, depth, g) => {
           const st = stats(f.blocks);
-          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
+          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}${outCls([f])}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}${outWords(f)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
         },
       });
       const migration = (f) => /(^|\/)migrations?\//i.test(f.p);
@@ -4781,8 +4787,8 @@
         h += `<div id="files-${key}"${open ? '' : ' hidden'}>`;
         if (open) h += treeHtml(fileTree(files), 0, {
           prefix: key + ':',
-          count: (files) => ({ text: '', done: false, diff: filesDiff(files) }),
-          file: (f, depth, g) => `<button type="button" class="sb-row tr gen" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${key} (${esc(f.gen)})">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">+${fmt(f.a)}</span></button>`,
+          count: (files) => ({ text: '', done: false, diff: filesDiff(files), cls: outCls(files) }),
+          file: (f, depth, g) => `<button type="button" class="sb-row tr gen${outCls([f])}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${key} (${esc(f.gen)})${outWords(f)}">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">+${fmt(f.a)}</span></button>`,
         });
         h += '</div>';
       }
@@ -4804,7 +4810,7 @@
   const sideKey = (r) => { const d = r.dataset; return d.chain != null ? 'c' + d.chain : d.open != null ? 'f' + d.open : d.standalone ? 's' : d.thread ? 't' + d.thread : d.map != null ? 'map' : d.dir != null ? 'd' + d.dir : d.act || ''; };
   function sideRows() {
     const out = new Map();
-    side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, pin: !!r.closest('.sb-pin'), cnt: (r.querySelector('.cnt') || {}).textContent }));
+    side.querySelectorAll('.sb-row').forEach((r) => out.set(sideKey(r), { done: r.classList.contains('done'), cur: r.getAttribute('aria-current') === 'true', top: r.offsetTop, pin: !!r.closest('.sb-pin'), cnt: (r.querySelector('.cnt') || {}).textContent, faded: r.classList.contains('chain-out') }));
     side.querySelectorAll('.cm-row[data-commit]').forEach((r) => out.set('k' + r.dataset.commit, { fade: getComputedStyle(r).opacity }));
     return out;
   }
@@ -4822,6 +4828,9 @@
     side.querySelectorAll('.sb-row').forEach((r) => {
       const v = before.get(sideKey(r));
       if (!v) return;
+      // So does a file in the Files tab (not the tree's lines).
+      const faded = r.classList.contains('chain-out');
+      if (faded !== v.faded) [...r.children].forEach((x) => { if (!x.matches('.ig')) x.animate([{ opacity: v.faded ? 0.38 : 1 }, { opacity: faded ? 0.38 : 1 }], { duration: 200, easing: EASE }); });
       if (r.classList.contains('done') && !v.done) {
         const mk = r.querySelector('.mk');
         if (mk) mk.animate([{ transform: 'scale(.3)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 200, easing: EASE });
@@ -4914,7 +4923,7 @@
         let name = d.name;
         while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
         const key = o.prefix + d.path, open = !state.closedDirs.has(key), c = o.count(filesIn(d));
-        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span>${c.diff || ''}<span class="cnt">${c.text}</span></button>` });
+        rows.push({ depth: dp, html: (g) => `<button type="button" class="sb-row tr dir${c.done ? ' done' : ''}${c.cls || ''}" data-dir="${esc(key)}" aria-expanded="${open}" style="--d:${dp}" title="${esc(d.path)}/">${g}<span class="tw">${open ? ICON.chevronDown : ICON.chevronRight}</span><span class="nm">${esc(name)}</span>${c.diff || ''}<span class="cnt">${c.text}</span></button>` });
         if (open) walk(d, dp + 1);
       });
       nd.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => rows.push({ depth: dp, html: (g) => o.file(f, dp, g) }));

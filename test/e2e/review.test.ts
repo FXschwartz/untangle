@@ -653,6 +653,32 @@ describe('Given a served review of a greeting and a wave, a 45-line notes file a
     });
   });
 
+  describe('when the Files tab is shown with the greeting chain open, then a file is opened from it, ', () => {
+    const faded = `[...document.querySelectorAll('#vw-side .sb-row.tr')].map((el) => el.querySelector('.nm').textContent + ' ' + getComputedStyle(el.querySelector('.nm')).opacity + ' ' + getComputedStyle(el.querySelector('.ig') || el).opacity).join('\\n')`;
+    let withChain: string;
+    let withFile: string;
+
+    before(async () => {
+      await rest(page!);
+      await fresh();
+      await chain(page!, 'greet(name)');
+      await page!.click('[data-tab="files"]');
+      await page!.until(`!!document.querySelector('#vw-side [data-open="lib/app.dart"]')`);
+      withChain = await read(page!, faded);
+      await page!.click('[data-open="lib/notes.dart"]');
+      await page!.until(`!!document.querySelector('.code[data-p="lib/notes.dart"]')`);
+      withFile = await read(page!, faded);
+    });
+
+    it('then, the chain open, the files and folders without its changes fade, not the tree\'s lines.', () => {
+      assert.equal(withChain, ['lib 1 1', 'only/nested 0.38 1', 'added.dart 0.38 1', 'app.dart 1 1', 'notes.dart 0.38 1'].join('\n'));
+    });
+
+    it('then, a file open, none of them fade.', () => {
+      assert.equal(withFile, ['lib 1 1', 'only/nested 1 1', 'added.dart 1 1', 'app.dart 1 1', 'notes.dart 1 1'].join('\n'));
+    });
+  });
+
   describe('when the notes file is opened, ', () => {
     let divider: string;
 
