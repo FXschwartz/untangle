@@ -131,3 +131,85 @@ describe('Given two sibling folders with a file in each, ', { skip: browserSkip(
     });
   });
 });
+
+// A file's name in the Files tab, and the color it's drawn in, named by the page's own colors.
+const named = `(() => {
+  const ink = (name) => { const probe = document.createElement('i'); probe.style.color = 'var(--' + name + ')'; document.body.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; };
+  const inks = ['text', 'text-3', 'add-ink', 'add-no', 'del-ink', 'del-no'].map((name) => [name, ink(name)]);
+  return [...document.querySelectorAll('#vw-side .sb-row.tr:not(.dir)')].map((row) => {
+    const nm = getComputedStyle(row.querySelector('.nm'));
+    return row.querySelector('.nm').textContent + ' ' + (inks.find(([, color]) => color === nm.color) || [nm.color])[0] + (nm.textDecorationLine === 'line-through' ? ', struck' : '');
+  }).join('\\n');
+})()`;
+
+describe('Given a file added, one changed and one deleted, ', { skip: browserSkip(), timeout: 120_000 }, () => {
+  let repo: TempRepo;
+  let run: UntangleRun;
+  let page: Browser;
+  let cache: string;
+
+  before(async () => {
+    const author = { name: 'Ada Review', email: 'ada@example.com', date: '2020-10-01T00:00:00Z' };
+    repo = TempRepo.create();
+    repo.write('lib/changed.txt', 'Before\n');
+    repo.write('lib/deleted.txt', 'Gone soon\n');
+    repo.commit({ subject: 'Start', author, committer: author });
+    repo.branch('feature');
+    repo.write('lib/added.txt', 'New\n');
+    repo.write('lib/changed.txt', 'After\n');
+    repo.delete('lib/deleted.txt');
+    repo.commit({ subject: 'Add, change and delete', author, committer: author });
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache });
+    await waitForReview(reviewClient(run.url));
+    page = await launchBrowser();
+    await page.reducedMotion(true);
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('[data-tab="files"]')`);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when the Files tab is opened, ', () => {
+    let files: string;
+    let titles: string;
+
+    before(async () => {
+      await page.click('[data-tab="files"]');
+      await page.until(`!!document.querySelector('[data-open="lib/added.txt"]')`);
+      files = await page.eval(named) as string;
+      titles = await page.eval(`[...document.querySelectorAll('#vw-side [data-open]')].map((row) => row.title).join('\\n')`) as string;
+    });
+
+    it('then the added file is green, the deleted one red and struck through, and the changed one as it was.', () => {
+      assert.equal(files, ['added.txt add-ink', 'changed.txt text', 'deleted.txt del-ink, struck'].join('\n'));
+    });
+
+    it('then each says so when hovered.', () => {
+      assert.equal(titles, ['lib/added.txt: added, 1 change', 'lib/changed.txt: 1 change', 'lib/deleted.txt: deleted, 1 change'].join('\n'));
+    });
+  });
+
+  describe('when the added and the deleted files are marked reviewed, ', () => {
+    let files: string;
+
+    before(async () => {
+      for (const file of ['lib/added.txt', 'lib/deleted.txt']) {
+        await page.click(`[data-open="${file}"]`);
+        await page.until(`!!document.querySelector('[data-act="mark-file"]') && (document.querySelector('.crumbs b')?.title === ${JSON.stringify(file)})`);
+        await page.click('[data-act="mark-file"]');
+        await page.until(`document.querySelector('[data-open="${file}"]')?.classList.contains('done')`);
+      }
+      files = await page.eval(named) as string;
+    });
+
+    it('then they keep their hues, dimmed as the names of reviewed files are.', () => {
+      assert.equal(files, ['added.txt add-no', 'changed.txt text', 'deleted.txt del-no, struck'].join('\n'));
+    });
+  });
+});

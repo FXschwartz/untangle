@@ -282,6 +282,12 @@ button.sb-group:hover { color: var(--text-2); }
    tree's lines stay. */
 .sb-row.chain-out > :not(.ig) { opacity: .38; }
 .sb-row.chain-out:hover > :not(.ig), .sb-row.chain-out:focus-visible > :not(.ig) { opacity: .8; }
+/* A file the changes add is green, one they delete red and struck through, as in a diff; dimmer
+   once reviewed. */
+.vw-side .sb-row.s-a .nm { color: var(--add-ink); }
+.vw-side .sb-row.s-a.done .nm { color: var(--add-no); }
+.vw-side .sb-row.s-d .nm { color: var(--del-ink); text-decoration: line-through; text-decoration-color: var(--text-4); }
+.vw-side .sb-row.s-d.done .nm { color: var(--del-no); }
 .sb-row .tw { display: grid; place-items: center; width: 12px; height: 16px; color: var(--text-3); }
 .sb-row .tw svg { width: 14px; height: 14px; flex: none; }
 /* A row's mark: amber while it has changes to review, a check once they're all reviewed. */

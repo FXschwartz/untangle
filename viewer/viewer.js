@@ -4768,12 +4768,15 @@
       const out = (files) => !!mine && !files.some((f) => mine.has(f.p));
       const outCls = (files) => (out(files) ? ' chain-out' : '');
       const outWords = (f) => (out([f]) ? '. None of its changes are in the open chain' : '');
+      // A file the changes add, or delete, says so in its color, as in a diff.
+      const status = (f) => ' s-' + f.s.toLowerCase();
+      const statusWords = (f) => (f.s === 'A' ? 'added, ' : f.s === 'D' ? 'deleted, ' : '');
       h += treeHtml(fileTree(m.files), 0, {
         prefix: '',
         count: (files) => { const st = stats(files.flatMap((f) => f.blocks)); return { text: st.open || '', done: !st.open, diff: filesDiff(files), cls: outCls(files) }; },
         file: (f, depth, g) => {
           const st = stats(f.blocks);
-          return `<button type="button" class="sb-row tr${st.open ? '' : ' done'}${outCls([f])}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${leftWords(st)}${outWords(f)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
+          return `<button type="button" class="sb-row tr${status(f)}${st.open ? '' : ' done'}${outCls([f])}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${statusWords(f)}${leftWords(st)}${outWords(f)}">${g}${markHtml(st)}<span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">${openThreadsHtml(f.p)}${st.open || ''}</span></button>`;
         },
       });
       const migration = (f) => /(^|\/)migrations?\//i.test(f.p);
@@ -4788,7 +4791,7 @@
         if (open) h += treeHtml(fileTree(files), 0, {
           prefix: key + ':',
           count: (files) => ({ text: '', done: false, diff: filesDiff(files), cls: outCls(files) }),
-          file: (f, depth, g) => `<button type="button" class="sb-row tr gen${outCls([f])}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${key} (${esc(f.gen)})${outWords(f)}">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">+${fmt(f.a)}</span></button>`,
+          file: (f, depth, g) => `<button type="button" class="sb-row tr gen${status(f)}${outCls([f])}" data-open="${esc(f.p)}"${on(f)} style="--d:${depth}" title="${esc(f.p)}: ${statusWords(f)}${key} (${esc(f.gen)})${outWords(f)}">${g}<i class="mk gen"></i><span class="nm">${esc(fileName(f.p))}</span>${filesDiff([f])}<span class="cnt">+${fmt(f.a)}</span></button>`,
         });
         h += '</div>';
       }
@@ -4834,8 +4837,9 @@
       if (r.classList.contains('done') && !v.done) {
         const mk = r.querySelector('.mk');
         if (mk) mk.animate([{ transform: 'scale(.3)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 200, easing: EASE });
-        const nm = r.querySelector('.nm');
-        if (nm) nm.animate([{ color: '#E8E8EC' }, { color: '#6F6F7A' }], { duration: 200, easing: EASE });
+        // A file the changes add, or delete, keeps its hue.
+        const nm = r.querySelector('.nm'), ink = r.classList.contains('s-a') ? ['add-ink', 'add-no'] : r.classList.contains('s-d') ? ['del-ink', 'del-no'] : ['text', 'text-3'];
+        if (nm) nm.animate([{ color: `var(--${ink[0]})` }, { color: `var(--${ink[1]})` }], { duration: 200, easing: EASE });
       }
       const cnt = r.querySelector('.cnt');
       if (cnt && v.cnt !== cnt.textContent && /^\d*$/.test(v.cnt || '') && /^\d*$/.test(cnt.textContent)) cnt.animate([{ transform: 'translateY(-5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: EASE });
