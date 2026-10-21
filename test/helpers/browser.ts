@@ -70,6 +70,8 @@ export interface Browser {
   type(text: string): Promise<void>;
   key(key: string, opts?: { shift?: boolean; ctrl?: boolean }): Promise<void>;
   setViewport(width: number, height: number): Promise<void>;
+  /** A phone's screen, its width and height in CSS pixels, with its pixel ratio and touch. */
+  phone(width: number, height: number): Promise<void>;
   reducedMotion(on: boolean): Promise<void>;
   /** Installs a fake clock before the next document's scripts run. */
   installClock(): Promise<void>;
@@ -397,6 +399,10 @@ export async function launchBrowser(width = 1400, height = 900): Promise<Browser
     },
     async setViewport(nextWidth: number, nextHeight: number) {
       await session('Emulation.setDeviceMetricsOverride', { width: nextWidth, height: nextHeight, deviceScaleFactor: 1, mobile: false });
+    },
+    async phone(nextWidth: number, nextHeight: number) {
+      await session('Emulation.setDeviceMetricsOverride', { width: nextWidth, height: nextHeight, deviceScaleFactor: 2, mobile: true });
+      await session('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     },
     async reducedMotion(on: boolean) {
       await session('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: on ? 'reduce' : 'no-preference' }] });

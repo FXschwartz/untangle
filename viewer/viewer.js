@@ -1749,6 +1749,16 @@
       .filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i - 1].sep));
     items.push({ sep: true }, { head: 'Code' }, { label: 'Wrap long lines', checked: wrapOn(), data: { act: 'wrap' }, title: 'Long lines wrap under their own indent, instead of running off the side' },
       { note: `<span class="mi-size">Code size<span class="sp"></span><button type="button" class="ib" data-act="code-size" data-step="-1" aria-label="Smaller code"${codeSize() <= 10 ? ' disabled' : ''}>A−</button><b>${codeSize()}</b><button type="button" class="ib" data-act="code-size" data-step="1" aria-label="Larger code"${codeSize() >= 16 ? ' disabled' : ''}>A+</button></span>` });
+    // A chain's own action, from the header that scrolled away.
+    const ch = state.view.kind === 'chain' && M().chains[state.view.id];
+    if (ch) {
+      const st = stats(blocksOf(ch.blocks));
+      if (!outOfLens(st)) view.unshift({ label: st.open ? 'Mark the whole chain reviewed' : 'Mark the whole chain unreviewed', icon: ICON.check, data: { act: 'mark-chain', 'chain-id': ch.id } });
+    }
+    if (state.view.kind === 'tests') {
+      const mode = UI.testsMode === 'sentences' ? 'sentences' : 'nested';
+      view.unshift({ label: 'Nested, as the code nests them', checked: mode === 'nested', data: { act: 'tests-mode', v: 'nested' } }, { label: 'Sentences, each whole', checked: mode === 'sentences', data: { act: 'tests-mode', v: 'sentences' } });
+    }
     if (view.length) items.push({ sep: true }, ...(view[0].head ? [] : [{ head: 'This view' }]), ...view);
     const lsp = $('#vw-lsp');
     if (lsp && !lsp.hidden) {
@@ -3366,6 +3376,7 @@
     const kb = Math.max(0, Math.round(window.innerHeight - VV.height - VV.offsetTop));
     document.documentElement.style.setProperty('--kb', kb + 'px');
     document.documentElement.style.setProperty('--vvh', Math.round(VV.height) + 'px');
+    document.documentElement.style.setProperty('--vvt', Math.round(VV.offsetTop) + 'px');
     const host = $('#vw-compose');
     if (host && host.childElementCount) viewer.style.setProperty('--compose-h', host.offsetHeight + 'px');
     composeInView();
@@ -6572,7 +6583,7 @@
         const i = f.p.lastIndexOf('/') + 1;
         const st = gen ? null : stats(f.blocks);
         // A match in the file's name counts more than one in its folders.
-        out.files.push({ score: r.score + (r.at.length && r.at[0] >= i ? 300 : 0) + (st && st.open ? 40 : 0) - (gen ? 200 : 0), icon: ICON.file, html: `<span class="dir">${matched(f.p.slice(0, i), r.at)}</span>${matched(f.p.slice(i), r.at, i)}`, hint: gen ? 'generated' : st.open ? `${st.open} to review` : 'reviewed', go: () => openFile(f.p) });
+        out.files.push({ score: r.score + (r.at.length && r.at[0] >= i ? 300 : 0) + (st && st.open ? 40 : 0) - (gen ? 200 : 0), icon: ICON.file, html: `<span class="dir">${matched(f.p.slice(0, i), r.at)}</span><span class="fn">${matched(f.p.slice(i), r.at, i)}</span>`, hint: gen ? 'generated' : st.open ? `${st.open} to review` : 'reviewed', go: () => openFile(f.p) });
       };
       m.files.forEach((f) => add(f, false));
       m.generated.forEach((f) => add(f, true));
@@ -6625,6 +6636,8 @@
   function palDraw() {
     const q = PAL.q.trim().toLowerCase();
     PAL.scopeBtn.textContent = SCOPE_WORD[PAL.scope];
+    const scopes = PAL.el.querySelector('.pal-scopes');
+    if (scopes) scopes.innerHTML = SCOPES.filter((k) => (k !== 'symbols' || CONFIG.served) && (k !== 'threads' || GH.on || NT.on)).map((k) => `<button type="button" class="chip-btn${PAL.scope === k ? ' on' : ''}" data-scope-to="${k}" aria-pressed="${PAL.scope === k}">${SCOPE_WORD[k]}</button>`).join('');
     const symOn = CONFIG.served && (PAL.scope === 'all' || PAL.scope === 'symbols');
     if (symOn && q.length >= 2) palSymbols(q);
     const c = palCandidates(q);
@@ -6686,8 +6699,8 @@
       el.setAttribute('role', 'dialog');
       el.setAttribute('aria-label', 'Jump to');
       el.hidden = true;
-      el.innerHTML = `<div class="pal-in">${ICON.search}<input type="text" placeholder="Jump to a chain, file, symbol or thread" aria-label="Jump to" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"><button type="button" class="pal-scope" title="Only chains, files, symbols or threads (Tab)"></button></div>`
-        + `<div class="pal-list" id="pal-list" role="listbox" aria-label="Results"></div><div class="pal-f"><span><kbd>↑</kbd><kbd>↓</kbd>choose</span><span><kbd>Enter</kbd>open</span><span><kbd>Tab</kbd>only chains, files, symbols or threads</span><span><kbd>Esc</kbd>close</span></div>`;
+      el.innerHTML = `<div class="pal-in"><button type="button" class="ib pal-back" title="Close" aria-label="Close">${ICON.back}</button>${ICON.search}<input type="text" placeholder="Jump to a chain, file, symbol or thread" aria-label="Jump to" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"><button type="button" class="pal-scope" title="Only chains, files, symbols or threads (Tab)"></button></div>`
+        + `<div class="pal-scopes" role="group" aria-label="Look in"></div><div class="pal-list" id="pal-list" role="listbox" aria-label="Results"></div><div class="pal-f"><span><kbd>↑</kbd><kbd>↓</kbd>choose</span><span><kbd>Enter</kbd>open</span><span><kbd>Tab</kbd>only chains, files, symbols or threads</span><span><kbd>Esc</kbd>close</span></div>`;
       viewer.appendChild(el);
       Object.assign(PAL, { el, input: el.querySelector('input'), list: el.querySelector('.pal-list'), scopeBtn: el.querySelector('.pal-scope') });
       PAL.input.addEventListener('input', () => { PAL.q = PAL.input.value; PAL.active = 0; palDraw(); });
@@ -6700,6 +6713,8 @@
         else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); palClose(); }
       });
       PAL.scopeBtn.addEventListener('click', () => { palScope(1); PAL.input.focus(); });
+      el.querySelector('.pal-back').addEventListener('click', palClose);
+      el.querySelector('.pal-scopes').addEventListener('click', (e) => { const b = e.target.closest('[data-scope-to]'); if (b) { PAL.scope = b.dataset.scopeTo; PAL.active = 0; palDraw(); } });
       PAL.list.addEventListener('mousemove', (e) => { const r = e.target.closest('[data-pi]'); if (r && Number(r.dataset.pi) !== PAL.active) { PAL.active = Number(r.dataset.pi); palMark(); } });
       PAL.list.addEventListener('click', (e) => { const r = e.target.closest('[data-pi]'); if (r) palGo(Number(r.dataset.pi)); });
     }
