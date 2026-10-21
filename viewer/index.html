@@ -1293,7 +1293,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
 }
 @media (pointer: coarse) {
   .cmp-ta, .rv-ta, .pal-in input { font-size: 16px; }
-  .vw-jump kbd, .pill-act kbd, .pal-f, .mi .k { display: none; }
+  .vw-jump kbd, .pill-act kbd, .pal-f, .mi .k, .cmp-key { display: none; }
 }
 /* A narrow view of the tests: a test's sentence takes the row, its details go on a line under it,
    its mark stays at the row's end, and the filters scroll sideways. */
@@ -1427,6 +1427,35 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
   .th-reply { height: 44px; font-size: 14px; }
   .cm-more { width: 32px; height: 32px; }
 }
+/* Picked lines, on a touch screen: tinted as a comment's lines are while it's written (orchid for
+   notes), and the review bar says what's picked, with what to do with them. A line's mark is the
+   gutter's to tap: it picks the line. */
+.ln.cm-pick, .ln.cm-pick .g { background-image: linear-gradient(var(--gh-soft), var(--gh-soft)); }
+.ln.cm-pick .g { box-shadow: inset 2px 0 0 var(--gh); }
+.vw.local .ln.cm-pick, .vw.local .ln.cm-pick .g { background-image: linear-gradient(var(--local-soft), var(--local-soft)); }
+.vw.local .ln.cm-pick .g { box-shadow: inset 2px 0 0 var(--local); }
+.vw.local .ln.cm-pick .no { color: var(--local-ink); }
+.pick-what { display: grid; gap: 3px; min-width: 0; padding: 0 4px 0 2px; }
+.pick-what b { font: 600 13px/1.1 var(--ui); color: var(--text); white-space: nowrap; }
+.pick-what small { font: 500 11.5px/1.1 var(--code); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vw-pill.pick > .sp { flex: 1; }
+.pick-note svg { width: 15px; height: 15px; }
+.pick-note.local { background: var(--local); color: #22101F; }
+.pick-note.local:hover { background: var(--local-ink); }
+.vw-pill.pick .pill-act { padding: 0 14px 0 11px; }
+@media (hover: none) and (pointer: coarse) {
+  .ln > .g .tick { pointer-events: none; }
+}
+/* The box you write in, in a narrow window: a sheet on the keyboard, the view above it. */
+.vw-compose { display: none; }
+@media (max-width: 960px) {
+  .vw.composing .vw-compose { display: block; position: fixed; right: 0; bottom: var(--kb, 0px); left: 0; z-index: 62; max-height: calc(var(--vvh, 100dvh) - 72px); overflow: auto; overscroll-behavior: contain; padding-bottom: env(safe-area-inset-bottom); border-radius: 16px 16px 0 0; background: var(--raised); box-shadow: 0 -1px 0 var(--hair-2), 0 -24px 48px rgba(0, 0, 0, .6); }
+  .vw-compose .th.new { position: static; width: auto; margin: 0; border-radius: 0; background: none; box-shadow: none; }
+  .vw-compose .th.new .cmp { margin: 0 12px 12px; }
+  .vw.composing .vw-main { bottom: calc(var(--kb, 0px) + var(--compose-h, 0px)) !important; }
+  .vw.composing .vw-pill { display: none; }
+  .vw-pill.pick { gap: 0; }
+}
 /* Held sideways, a phone is short: the bars give back some of their height. */
 @media (max-width: 960px) and (max-height: 500px) {
   .vw-bar { min-height: calc(44px + env(safe-area-inset-top)); }
@@ -1477,6 +1506,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
       <div class="vw-pill" id="vw-pill" role="toolbar" aria-label="Review" hidden></div>
     </div>
   </div>
+  <div class="vw-compose" id="vw-compose"></div>
 </div>
 <!--HIGHLIGHT-->
 <script>

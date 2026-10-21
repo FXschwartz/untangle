@@ -83,6 +83,8 @@
   // A narrow window, a phone's among them: one pane at a time, the sidebar a drawer (Contents).
   const COMPACT = window.matchMedia ? window.matchMedia('(max-width: 960px)') : { matches: false, addEventListener() {} };
   const compact = () => COMPACT.matches;
+  // A touch screen: lines are picked from their gutter, with nothing to hover.
+  const COARSE = window.matchMedia ? window.matchMedia('(hover: none) and (pointer: coarse)') : { matches: false, addEventListener() {} };
   const PHONE = window.matchMedia ? window.matchMedia('(max-width: 520px)') : { matches: false, addEventListener() {} };
   // Long lines wrap, under their own indent, on a phone (or as ⋯ says, in any narrow window).
   const wrapOn = () => compact() && (UI.wrap != null ? !!UI.wrap : PHONE.matches);
@@ -2513,7 +2515,7 @@
       + (previewing ? `<div class="cmp-pre cm-body">${pre}</div>`
         : `<textarea class="cmp-ta" data-draft="${esc(key)}" placeholder="${esc(o.placeholder || (o.local ? 'A note for your agent' : 'Leave a comment'))}" rows="${o.rows || 4}">${esc(drafts.get(key) || '')}</textarea>`)
       + (err ? `<div class="cmp-err" role="alert">${esc(err)}</div>` : '') + (o.extra || '')
-      + `<div class="cmp-f"><span class="cmp-hint">${o.dest ? destHtml(o.local) + ' · ' : ''}Markdown · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busy(key)}>Cancel</button>` : ''}${btns}</div></div>`;
+      + `<div class="cmp-f"><span class="cmp-hint">${o.dest ? destHtml(o.local) + ' · ' : ''}Markdown<span class="cmp-key"> · Ctrl+Enter: ${esc(o.buttons.find((b) => b[2])[0])}</span></span><span class="sp"></span>${o.cancel ? `<button type="button" class="btn sm" data-act="${o.cancel}" data-key="${esc(key)}"${busy(key)}>Cancel</button>` : ''}${btns}</div></div>`;
   }
   // The buttons to send a comment: into the pending review, or (with none pending) on its own. In
   // local mode, one: Add note (on a GitHub thread, a note that quotes it).
@@ -2578,7 +2580,7 @@
     const sign = (side) => (side === 'LEFT' ? '−' : '+');
     const what = c.startLine != null && (c.startLine !== c.line || c.startSide !== c.side) ? `lines ${sign(c.startSide)}${c.startLine} to ${sign(c.side)}${c.line}` : `line ${sign(c.side)}${c.line}`;
     const local = localMode();
-    return `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on ${what}</b><span class="muted">Drag the + over more lines, or shift-click it on another line of this hunk, for a range.</span></div>`
+    return `<div class="th new${local ? ' note' : ''}" data-thread="new"><div class="th-new-h">${ICON.comment}<b>${local ? 'Note' : 'Comment'} on ${what}</b><span class="muted">${COARSE.matches ? 'Tap another line’s gutter in this hunk for a range.' : 'Drag the + over more lines, or shift-click it on another line of this hunk, for a range.'}</span></div>`
       + composerHtml(c.key, { local, dest: true, mode: true, buttons: sendButtons('gh-thread'), cancel: 'compose-cancel', suggest: c.hi != null && c.side === 'RIGHT' && (c.startSide == null || c.startSide === 'RIGHT') }) + '</div>';
   }
   // Threads and notes on a side's line of a file, and the comment being written there.
@@ -2588,7 +2590,7 @@
     const list = GH.on && GH.data ? GH.anchors.get(k) : null, notes = NT.data ? NT.anchors.get(k) : null;
     let h = (list ? list.map((t) => threadHtml(t)).join('') : '') + (notes ? notes.map((n) => noteHtml(n)).join('') : '');
     const c = state.compose;
-    if (c && c.path === f.p && c.side === side && c.line === line) h += newThreadHtml(c);
+    if (c && !compact() && c.path === f.p && c.side === side && c.line === line) h += newThreadHtml(c);
     return h;
   }
   // Threads under a unified row: on its new line, and on its old one (a removed or unchanged line).
@@ -3206,7 +3208,7 @@
     queueMicrotask(() => {
       LAYER.soon = false;
       viewer.classList.toggle('sheet-on', compact() && sheetsOpen());
-      const open = compact() && (SIDE.open || sheetsOpen() || PAL.open);
+      const open = compact() && (SIDE.open || sheetsOpen() || PAL.open || viewer.classList.contains('composing'));
       if (LAYER.skip || !NAV.hist) return;
       try {
         if (open && !LAYER.entry) { history.pushState(Object.assign({}, history.state, { layer: 1 }), ''); LAYER.entry = true; }
@@ -3222,6 +3224,7 @@
     if (MENU.open) closeMenu();
     if (NT.agentOpen) { NT.agentOpen = null; renderAgent(); }
     if (GH.reviewOpen) { GH.reviewOpen = false; render(); }
+    if (state.compose && compact() && letGo(state.compose.key)) { state.compose = null; render(); }
   }
   // A sheet follows a finger down from its handle; let go far enough down, it closes.
   let sheetDrag = null;
@@ -3249,6 +3252,125 @@
   };
   document.addEventListener('pointerup', sheetLet);
   document.addEventListener('pointercancel', sheetLet);
+
+  // ---------- picking lines, on a touch screen: a tap on a line's gutter picks it, and a tap on
+  // another line's gutter in the same hunk stretches to it (as the +, dragged, does with a pointer).
+  // The review bar turns into the lines' bar: Copy, Mark, and Note (or Comment) on them.
+  const PICK = { path: null, a: null, b: null, view: '' };
+  const rowKey = (row) => row.dataset.c || (row.dataset.n ? 'n:' + row.dataset.n : '');
+  // The picked rows, in order, as the page has them now.
+  function pickRows() {
+    if (!PICK.path) return [];
+    const codes = [...main.querySelectorAll('.code[data-p]')].filter((c) => c.dataset.p === PICK.path);
+    for (const code of codes) {
+      const rows = codeRun(code).flatMap((c) => [...c.querySelectorAll(':scope > .ln')]);
+      let i = rows.findIndex((r) => rowKey(r) === PICK.a), j = rows.findIndex((r) => rowKey(r) === PICK.b);
+      if (i < 0 || j < 0) continue;
+      if (i > j) [i, j] = [j, i];
+      return rows.slice(i, j + 1);
+    }
+    return [];
+  }
+  function paintPick() {
+    const rows = new Set(pickRows());
+    main.querySelectorAll('.cm-pick').forEach((x) => { if (!rows.has(x)) x.classList.remove('cm-pick'); });
+    rows.forEach((x) => x.classList.add('cm-pick'));
+    if (PICK.path && !rows.size) pickClear();
+  }
+  function pickClear() {
+    if (!PICK.path) return;
+    PICK.path = PICK.a = PICK.b = null;
+    main.querySelectorAll('.cm-pick').forEach((x) => x.classList.remove('cm-pick'));
+    renderPill();
+  }
+  const hunkOf = (path, row) => { const [sd, line] = (row.dataset.c || '').split(':'); const r = line ? rowAt(path, sd === 'L' ? 'LEFT' : 'RIGHT', Number(line)) : null; return r ? r.hi : null; };
+  main.addEventListener('click', (e) => {
+    if (!COARSE.matches || !(e.target instanceof Element)) return;
+    const cell = e.target.closest('.ln > .g, .ln > .no, .ln > .sg');
+    if (!cell || e.target.closest('button:not(.tick), a')) return;
+    const row = cell.parentElement, code = row.closest('.code[data-p]');
+    if (!code || !rowKey(row)) return;
+    e.stopPropagation();
+    const path = code.dataset.p, key = rowKey(row);
+    const rows = pickRows();
+    if (PICK.path === path && rows.length === 1 && rows[0] === row) return pickClear();
+    if (PICK.path === path && rows.length && codeRun(code).includes(rows[0].closest('.code')) && hunkOf(path, rows[0]) === hunkOf(path, row)) PICK.b = key;
+    else Object.assign(PICK, { path, a: key, b: key, view: viewKey() });
+    paintPick();
+    renderPill();
+  }, true);
+  // The lines' bar, in the review bar's place.
+  function pickBarHtml() {
+    const rows = pickRows();
+    const nos = rows.map((r) => (r.querySelector(':scope > .no') || {}).textContent).filter(Boolean);
+    const what = nos.length > 1 ? `Lines ${nos[0]}–${nos[nos.length - 1]}` : nos.length ? `Line ${nos[0]}` : `${rows.length} lines`;
+    const can = canCommentLines() && rows.some((r) => r.dataset.c);
+    const local = localMode();
+    return `${iconBtn(ICON.close, 'Put the lines back', 'data-act="pick-clear"')}<span class="pick-what"><b>${esc(what)}</b><small>${esc(fileName(PICK.path))}</small></span><span class="sp"></span>`
+      + iconBtn(ICON.copy, 'Copy the lines', 'data-act="pick-copy"') + (pickBlocks().length ? iconBtn(ICON.check, 'Mark their changes reviewed', 'data-act="pick-mark"') : '')
+      + (can ? `<button type="button" class="pill-act pick-note${local ? ' local' : ''}" data-act="pick-note">${ICON.comment}${local ? 'Note' : 'Comment'}</button>` : '');
+  }
+  // The changes the picked rows are in: the marks among them, else the one their run starts with.
+  function pickBlocks() {
+    const rows = pickRows();
+    const ids = new Set(rows.flatMap((r) => [...r.querySelectorAll('.tick[data-block]')].map((t) => t.dataset.block)));
+    if (!ids.size && rows.length) {
+      for (let r = rows[0]; r && r.matches('.ln.add, .ln.del'); r = r.previousElementSibling) {
+        const t = r.querySelector('.tick[data-block]');
+        if (t) { ids.add(t.dataset.block); break; }
+      }
+    }
+    return blocksOf([...ids]);
+  }
+  function pickAct(act) {
+    const rows = pickRows();
+    if (act === 'pick-clear') return pickClear();
+    if (act === 'pick-copy') { copyText(rows.map((r) => (r.querySelector(':scope > .tx') || {}).textContent || '').join('\n'), `Copied ${plural(rows.length, 'line')}.`); return pickClear(); }
+    if (act === 'pick-mark') { const bl = pickBlocks(); toggleBlocks(bl); hint({ mark: bl.map((b) => b.id) }); pickClear(); return render(); }
+    if (act === 'pick-note') {
+      const path = PICK.path, cells = rows.filter((r) => r.dataset.c), at = (r) => { const [sd, line] = r.dataset.c.split(':'); return { path, side: sd === 'L' ? 'LEFT' : 'RIGHT', line: Number(line) }; };
+      if (!cells.length) return;
+      PICK.path = PICK.a = PICK.b = null;
+      main.querySelectorAll('.cm-pick').forEach((x) => x.classList.remove('cm-pick'));
+      return composeRange(at(cells[0]), at(cells[cells.length - 1]));
+    }
+  }
+  // The box you write in, in a narrow window: a sheet held at the bottom of what's visible, over
+  // the keyboard (Safari doesn't shrink the page for it; visualViewport says where it is). The view
+  // above it keeps its lines in sight.
+  let composeLast = '';
+  function renderCompose() {
+    const host = $('#vw-compose');
+    if (!host) return;
+    const c = compact() && state.compose && (GH.on || NT.on) ? state.compose : null;
+    const h = c ? newThreadHtml(c) : '';
+    viewer.classList.toggle('composing', !!h);
+    if (h === composeLast) return;
+    const opening = !composeLast && h;
+    composeLast = h;
+    host.innerHTML = h;
+    host.style.setProperty('--h', host.offsetHeight + 'px');
+    viewer.style.setProperty('--compose-h', host.offsetHeight + 'px');
+    if (opening) requestAnimationFrame(composeInView);
+    layerSoon();
+  }
+  function composeInView() {
+    if (!viewer.classList.contains('composing')) return;
+    const sel = main.querySelectorAll('.cm-sel');
+    const last = sel[sel.length - 1];
+    if (last) placeRow(last, Math.max(8, main.clientHeight - last.offsetHeight - 12));
+  }
+  const VV = window.visualViewport;
+  function keyboardInset() {
+    if (!VV) return;
+    const kb = Math.max(0, Math.round(window.innerHeight - VV.height - VV.offsetTop));
+    document.documentElement.style.setProperty('--kb', kb + 'px');
+    document.documentElement.style.setProperty('--vvh', Math.round(VV.height) + 'px');
+    const host = $('#vw-compose');
+    if (host && host.childElementCount) viewer.style.setProperty('--compose-h', host.offsetHeight + 'px');
+    composeInView();
+  }
+  if (VV) { VV.addEventListener('resize', keyboardInset); VV.addEventListener('scroll', keyboardInset); keyboardInset(); }
 
   // ---------- going back: each view the page moves to is a step in the browser's history, so Back
   // (the header's arrow, the browser's, Alt ←, a mouse's back button) brings back the view before,
@@ -5785,8 +5907,11 @@
     viewer.querySelectorAll('[data-compare]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.compare === state.compare)));
     renderTop();
     renderWhere();
+    renderCompose();
+    paintPick();
     // Contents closes once what was chosen in it is open.
     if (SIDE.open && viewKey() !== SIDE.at) sideDrawer(false);
+    if (PICK.path && PICK.view !== viewKey()) { PICK.path = PICK.a = PICK.b = null; }
     viewer.classList.toggle('split', sideBySide());
     if (opts.line) {
       const el = main.querySelector(`[data-n="${opts.line}"]`);
@@ -6121,7 +6246,9 @@
     const el = $('#vw-pill');
     if (!el) return;
     let h = '';
-    if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav], .ol-row[data-mark]')) {
+    el.classList.toggle('pick', !!PICK.path);
+    if (PICK.path) h = pickBarHtml();
+    else if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav], .ol-row[data-mark]')) {
       const marks = changeMarks(true);
       const total = marks.reduce((x, m) => x + openIn(m), 0);
       if (total) {
@@ -7052,6 +7179,7 @@
     if (act === 'pill-step') return gotoChange(Number(d.step), true);
     if (act === 'mark-next') return markAndNext();
     if (act === 'comment-here') return commentHere();
+    if (act && act.startsWith('pick-')) return pickAct(act);
     if (act === 'graph') {
       // In the page at the top, the click folds it; anywhere else it drops it, kept, or folds it back.
       clearTimeout(GD.enterT); GD.enterT = 0;
@@ -7234,6 +7362,7 @@
       if (GH.reviewOpen) { GH.reviewOpen = false; return render(); }
       if (NT.agentOpen) { NT.agentOpen = null; return renderAgent(); }
       if (state.peek) { state.peek = null; return render(); }
+      if (PICK.path) return pickClear();
       if (HX && HX.detail && state.view.kind === 'history') { HX.detail = null; return render(); }
       if (state.card && state.view.kind === 'chain' && main.querySelector('.hs-detail')) { state.card = null; return render(); }
       if (state.lens) return setLens(null);
