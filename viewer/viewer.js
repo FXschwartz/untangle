@@ -177,6 +177,9 @@
 
   // ---------- model
   const models = {};
+  // A hunk's rows, to the hunk: what its first line starts inside on each side (so, sn), when that's
+  // a string or a comment that an earlier line opened (see rowsColors).
+  const hunkOfRows = new WeakMap();
   function M(name) {
     name = name || state.compare;
     if (models[name]) return models[name];
@@ -189,6 +192,7 @@
     m.files.forEach((f, fi) => {
       f.idx = fi;
       f.hunks.forEach((h) => {
+        hunkOfRows.set(h.rows, h);
         let o = h.o, n = h.n;
         h.meta = h.rows.map(([t]) => { const r = { t, o: t !== '+' ? o : null, n: t !== '-' ? n : null, block: null }; if (t !== '+') o++; if (t !== '-') n++; return r; });
       });
@@ -202,6 +206,7 @@
       });
       f.hunks.forEach((h, hi) => h.meta.forEach((r, ri) => { if (r.n != null) m.head.set(f.p + ':' + r.n, { f, hi, ri, r }); if (r.o != null && r.t !== '+') m.old.set(f.p + ':' + r.o, { f, hi, ri, r }); }));
     });
+    m.generated.forEach((g) => (g.hunks || []).forEach((h) => hunkOfRows.set(h.rows, h)));
     m.groupById = new Map(m.groups.map((g) => [g.id, g]));
     m.chainsOf = new Map();
     m.chains.forEach((c) => {
@@ -439,7 +444,8 @@
   // ---------- syntax colors: Shiki once it has loaded (VS Code's grammars and Dark+), the
   // tokenizer's classes until then. A run of rows is highlighted as two pieces of code, its new
   // side (context and added lines) and its old side (context and removed lines), so strings and
-  // comments over several lines keep their colors.
+  // comments over several lines keep their colors; one that starts inside a string or a comment an
+  // earlier line opened starts from what opened it (the analysis tells which: so, sn).
   const SHIKI = window.UntangleShiki || null;
   let shikiOn = false;
   // The theme's color for text no grammar rule colors (a bundle from before it said so: Dark+'s).
@@ -453,7 +459,14 @@
     if (lang) {
       const neu = [], old = [];
       rows.forEach((r, i) => { if (r[0] !== '-') neu.push(i); if (r[0] !== '+') old.push(i); });
-      const nl = SHIKI.lines(neu.map((i) => rows[i][1]).join('\n'), lang), ol = SHIKI.lines(old.map((i) => rows[i][1]).join('\n'), lang);
+      // Highlighted after what's open where the side starts, on a line of its own, then left out.
+      const h = hunkOfRows.get(rows) || {};
+      const side = (idx, open) => {
+        const text = idx.map((i) => rows[i][1]).join('\n');
+        const c = SHIKI.lines(open ? open + '\n' + text : text, lang);
+        return c && open ? c.slice(1) : c;
+      };
+      const nl = side(neu, h.sn), ol = side(old, h.so);
       out = { neu: [], old: [] };
       if (nl) neu.forEach((ri, k) => { out.neu[ri] = nl[k]; });
       if (ol) old.forEach((ri, k) => { out.old[ri] = ol[k]; });

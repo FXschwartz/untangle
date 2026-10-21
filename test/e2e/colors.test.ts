@@ -99,3 +99,64 @@ describe('Given a served review of a greeting with a return, ', { skip, timeout:
     });
   });
 });
+
+// A string over several lines, changed inside, and code after it changed too, far enough below
+// that the two changes are hunks of their own: the second starts inside the string.
+const config = (name: string, said: string) => ["const config = '''", `name: ${name}`, 'a: 1', 'b: 2', 'c: 3', 'd: 4', 'e: 5', 'f: 6', "''';", 'void start() {', `  print('${said}');`, '}', ''].join('\n');
+
+describe('Given a served review of a change inside a string over several lines, and one in the code after it, ', { skip, timeout: 180_000 }, () => {
+  let repo: TempRepo | undefined;
+  let run: UntangleRun | undefined;
+  let page: Browser | undefined;
+  let cache = '';
+
+  before(async () => {
+    const author = ada('2020-09-01T15:00:00Z');
+    repo = TempRepo.create();
+    repo.write('pubspec.yaml', pubspec);
+    repo.write('lib/config.dart', config('base', 'started'));
+    repo.commit({ subject: 'Start', author, committer: author });
+    repo.branch('feature');
+    repo.write('lib/config.dart', config('head', 'running'));
+    repo.commit({ subject: 'Rename and run', author, committer: author });
+    cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
+    run = await startUntangle(repo.dir, { base: 'main', cacheDir: cache });
+    await waitForReview(reviewClient(run.url));
+    page = await launchBrowser();
+    await page.goto(run.url);
+    await page.until(`!!document.querySelector('.t-head')`, 30_000);
+    await page.click('[data-tab="files"]');
+    await page.click('[data-open="lib/config.dart"]');
+    await page.until(`!!document.querySelector('.code[data-p="lib/config.dart"] .t-str[class*=" k"]')`);
+  });
+
+  after(async () => {
+    await page?.close();
+    await run?.stop();
+    repo?.remove();
+    if (cache) fs.rmSync(cache, { recursive: true, force: true });
+  });
+
+  describe('when highlighting has loaded, ', () => {
+    let colors: string;
+
+    before(async () => {
+      colors = await read(page!, `(() => {
+        const rows = [...document.querySelectorAll('.code[data-p="lib/config.dart"] .ln')];
+        // A word on the row that holds a text, as Dark+ colors it.
+        const word = (line, w) => { const row = rows.find((r) => r.querySelector('.tx')?.textContent === line); const el = row && [...row.querySelectorAll('.tx span')].find((s) => !s.children.length && s.textContent === w); return el ? getComputedStyle(el).color : 'missing'; };
+        return [
+          document.querySelectorAll('.code[data-p="lib/config.dart"] .hh').length + ' hunks',
+          word('f: 6', 'f'),
+          word('void start() {', 'start'),
+          word("  print('running');", 'print'),
+          word("  print('started');", 'print'),
+        ].join('\\n');
+      })()`);
+    });
+
+    it('then the hunk that starts inside the string reads it as one up to its end, and the code after it as code, on both sides.', () => {
+      assert.equal(colors, ['2 hunks', rgb(darkPlus.string), rgb(darkPlus.function), rgb(darkPlus.function), rgb(darkPlus.function)].join('\n'));
+    });
+  });
+});

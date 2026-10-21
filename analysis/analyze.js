@@ -19,7 +19,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import YAML from 'yaml';
 import { ADAPTERS } from './adapters.js';
-import { dartParser } from './dart.js';
+import { dartOpenings, dartParser } from './dart.js';
 import { readingUnits, testCall } from './units.js';
 import { testOutline } from './outline.js';
 import { assembleIntroducedChains } from './chains.js';
@@ -1602,11 +1602,19 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
       (r.toks || []).forEach((tk) => { if (tk.atom) ranges.push([tk.c, tk.c + tk.t.length, editOfAtom.get(tk.atom).id]); });
       return ranges.length ? [r.type, r.text, r.o, r.n, ranges] : [r.type, r.text, r.o, r.n];
     };
+    // Where a hunk starts inside a string or a comment over several lines, on either side: what
+    // opens it (so, sn). The page highlights a hunk's lines alone, as if after it.
+    const openings = (dir, p) => { try { return dartOpenings(fs.readFileSync(dir + p, 'utf8')); } catch { return null; } };
+    const startsIn = (f) => {
+      const dart = /\.dart$/.test(f.p);
+      const was = dart && OLD[name] ? openings(OLD[name].dir, f.p) : null, is = dart ? openings(HEAD, f.p) : null;
+      return (h) => { const so = was && h.o > 0 && was[h.o - 1], sn = is && h.n > 0 && is[h.n - 1]; return { ...(so ? { so } : {}), ...(sn ? { sn } : {}) }; };
+    };
     const ser = {
       label: meta.label, left: meta.left.slice(0, 7), right: meta.right.slice(0, 7),
-      files: files.map((f) => ({
+      files: files.map((f) => { const at = startsIn(f); return {
         p: f.p, s: f.s, a: f.a, d: f.d, lang: f.lang,
-        hunks: f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, rows: h.rows.map((r) => {
+        hunks: f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, ...at(h), rows: h.rows.map((r) => {
           const row = [r.type, r.text];
           if (r.toks) {
             const ranges = [];
@@ -1620,14 +1628,14 @@ export async function analyze({ repo, headDir, diff, defsRaw, old: oldSides = {}
           movedTo: b.movedTo ? { f: fileIndex.get(b.movedTo.file), b: b.movedTo.block.id, n: (b.movedTo.block.rows.find((r) => r.text.trim()) || b.movedTo.block.rows[0]).n, changes: b.movedTo.block.edits.length } : undefined })),
         // A test file's tests as sentences: its group and test calls, matched and compared.
         outline: f.lang === 'dart' && TEST_FILE.test(f.p) ? testOutline(f) || undefined : undefined,
-      })),
+      }; }),
       units: units.map((u) => ({ id: u.id, kind: u.kind, name: u.name, file: u.file, start: u.start, end: u.end, blocks: [...u.blocks].map((b) => b.id) })),
       edits: edits.map((e) => ({ id: e.id, f: fileIndex.get(e.block.file), b: e.block.id, op: e.op, where: e.where, from: e.from.slice(0, 400), to: e.to.slice(0, 400), group: e.group, comment: e.commentOnly || undefined, os: e.oldSpan, ns: e.newSpan, sym: e.group != null && e.op === 'token' ? symOf(e) : undefined })),
       groups: groups.map((g) => ({ id: g.id, count: g.count, files: g.files, parts: g.parts.map((p) => p.edits[0].id), edits: g.edits.map((e) => e.id) })),
       chainsBy: history ? 'history' : 'structure',
       families: history ? familiesOut(history) : undefined,
       chains: chains.map((c) => ({ id: c.id, name: c.name, kind: c.kind, rootKind: c.root ? c.root.kind : null, also: c.also.map(label).filter((x, i, a) => x !== c.name && a.indexOf(x) === i), blocks: [...c.blocks].map((b) => b.id).sort(), files: c.files, graph: c.graph, ext: history ? extOut(c) : undefined, links: c.links, uses: [...c.uses].sort((a, b) => a - b), shares: [...c.shares].sort((a, b) => a - b), depth: c.depth, family: c.family, adds: [...c.blocks].reduce((x, b) => x + b.adds, 0), dels: [...c.blocks].reduce((x, b) => x + b.dels, 0), focus: Object.fromEntries(Object.entries(c.focus).map(([k, v]) => [k, [...v].sort((x, y) => x - y)])) })),
-      generated: generated.map((f) => ({ p: f.p, s: f.s, a: f.a, d: f.d, gen: f.gen, hunks: f.hunks ? f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, rows: h.l.map((l) => [l[0], l.slice(1)]) })) : null })),
+      generated: generated.map((f) => { const at = startsIn(f); return { p: f.p, s: f.s, a: f.a, d: f.d, gen: f.gen, hunks: f.hunks ? f.hunks.map((h) => ({ o: h.o, n: h.n, h: h.h, ...at(h), rows: h.l.map((l) => [l[0], l.slice(1)]) })) : null }; }),
     };
     out.compares[name] = ser;
     const inChain = new Set(chains.flatMap((c) => [...c.blocks]));
