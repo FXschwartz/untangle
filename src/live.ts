@@ -301,6 +301,11 @@ export class LiveSession {
     return { results, truncated: results.length >= SEARCH_MAX };
   }
 
+  /** Every file in the repository at the head: the page's folder menus list them. */
+  files(): string[] {
+    return git(this.target.repo, 'ls-tree', '-r', '-z', '--name-only', this.target.headSha).split('\0').filter(Boolean);
+  }
+
   /** Lines in each file at the head (a file that isn't there is left out), with one git call. */
   lineCounts(paths: string[]): Record<string, number> {
     const out: Record<string, number> = {};

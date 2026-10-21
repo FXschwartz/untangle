@@ -267,7 +267,7 @@ const menuShown = `(() => {
   })].join('\\n');
 })()`;
 
-describe('Given a file deep in folders, beside another, with a generated folder and a file one folder up, ', { skip: browserSkip(), timeout: 120_000 }, () => {
+describe('Given a file deep in folders, beside another, with a generated folder and a file one folder up, and files the review doesn\'t change, ', { skip: browserSkip(), timeout: 120_000 }, () => {
   let repo: TempRepo;
   let run: UntangleRun;
   let page: Browser;
@@ -279,6 +279,8 @@ describe('Given a file deep in folders, beside another, with a generated folder 
     repo = TempRepo.create();
     repo.write('.review.yaml', 'generated:\n  - "**/generated/**"\n');
     repo.write(`${deep}/model.txt`, 'Model\n');
+    repo.write(`${deep}/widgets/icon.txt`, 'Icon\n');
+    repo.write(`${deep}/theme/colors.txt`, 'Colors\n');
     repo.commit({ subject: 'Start', author, committer: author });
     repo.branch('feature');
     repo.write(`${deep}/widgets/button.txt`, 'Button\n');
@@ -345,16 +347,16 @@ describe('Given a file deep in folders, beside another, with a generated folder 
       folded = await page.eval(menuShown) as string;
     });
 
-    it('then its menu lists the files beside it, the file open current and focused.', () => {
-      assert.equal(own, ['…/lib/src/feature/widgets/', '- ..', 'dot button.txt (1) current focused', 'dot card.txt (1)'].join('\n'));
+    it('then its menu lists the files beside it, the file open current and focused, and the repository\'s others without a mark.', () => {
+      assert.equal(own, ['…/lib/src/feature/widgets/', '- ..', 'dot button.txt (1) current focused', 'dot card.txt (1)', '- icon.txt'].join('\n'));
     });
 
     it('then up, the folder above lists its folders first, the generated one ringed, and the folder it came from has the focus.', () => {
-      assert.equal(up, ['…/long_package_name_here/lib/src/feature/', '- ..', 'ring generated/', 'dot widgets/ (2) current focused', 'dot model.txt (1)'].join('\n'));
+      assert.equal(up, ['…/long_package_name_here/lib/src/feature/', '- ..', 'ring generated/', '- theme/', 'dot widgets/ (2) current focused', 'dot model.txt (1)'].join('\n'));
     });
 
     it('then up again, it passes the folders that hold only one folder, to the top, where they show with it.', () => {
-      assert.equal(top, ['Top level', `dot ${deep}/ (3) current focused`].join('\n'));
+      assert.equal(top, ['Top level', `dot ${deep}/ (3) current focused`, '- .review.yaml'].join('\n'));
     });
 
     it('then the folded folders open on the deepest of them.', () => {
@@ -376,11 +378,43 @@ describe('Given a file deep in folders, beside another, with a generated folder 
     });
 
     it('then the menu opens that folder, what leads to the file open current and focused.', () => {
-      assert.equal(inside, ['…/long_package_name_here/lib/src/feature/', '- ..', 'ring generated/', 'dot widgets/ (2) current focused', 'dot model.txt (1)'].join('\n'));
+      assert.equal(inside, ['…/long_package_name_here/lib/src/feature/', '- ..', 'ring generated/', '- theme/', 'dot widgets/ (2) current focused', 'dot model.txt (1)'].join('\n'));
     });
 
     it('then the file opens, and the menu closes.', () => {
       assert.equal(opened, [`${deep}/model.txt`, 'menu closed'].join('\n'));
+    });
+  });
+
+  describe('when a folder the review doesn\'t change is opened in the menu, then its file, then the file\'s own folder, ', () => {
+    let folder: string;
+    let opened: string;
+    let own: string;
+
+    before(async () => {
+      await page.click('.crumbs [data-menu="crumb:4"]');
+      await page.until(`!!document.querySelector('.menu:not([hidden]) .mi[data-folder="${deep}/theme"]')`);
+      await page.click(`.menu .mi[data-folder="${deep}/theme"]`);
+      await page.until(`document.querySelector('.menu .mi-h')?.textContent === '…/lib/src/feature/theme/'`);
+      folder = await page.eval(`${menuShown} + '\\n' + document.querySelector('.menu .mi[data-p]').title`) as string;
+      await page.click('.menu .mi[data-p]');
+      await page.until(`document.querySelector('.crumbs b')?.title === '${deep}/theme/colors.txt' && !!document.querySelector('.code.src .ln')`);
+      opened = await page.eval(`[document.querySelector('.fv-head .facts').textContent, document.querySelector('.code.src').textContent, document.querySelector('.menu:not([hidden])') ? 'menu open' : 'menu closed'].join('\\n')`) as string;
+      await page.click('.crumbs [data-menu="crumb:5"]');
+      await page.until(`!!document.querySelector('.menu:not([hidden]) .mi')`);
+      own = await page.eval(menuShown) as string;
+    });
+
+    it('then the folder lists its file, unmarked and focused, which says it has no changes.', () => {
+      assert.equal(folder, ['…/lib/src/feature/theme/', '- ..', '- colors.txt focused', `${deep}/theme/colors.txt: no changes in this review`].join('\n'));
+    });
+
+    it('then the file opens whole, as it is after the changes, and the menu closes.', () => {
+      assert.match(opened, /^After these changes, at [0-9a-f]{7} · 1 line\n1Colors\nmenu closed$/);
+    });
+
+    it('then its folder\'s menu has it current and focused.', () => {
+      assert.equal(own, ['…/lib/src/feature/theme/', '- ..', '- colors.txt current focused'].join('\n'));
     });
   });
 });

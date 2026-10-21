@@ -1566,8 +1566,9 @@
   // ---------- menus: the view's ⋯, the sidebar's ···, a file's chains, a folder of its breadcrumb,
   // the head commit's "Changes from". One at a time, under the button that opened it; items are
   // the page's usual buttons (data-act, data-chain, …).
-  // crumb: the folder a breadcrumb's menu went to, from the folder it opened on.
-  const MENU = { open: null, el: null, html: '', crumb: null };
+  // crumb: the folder a breadcrumb's menu went to, from the folder it opened on; want: the menu
+  // that opens once what it lists has come.
+  const MENU = { open: null, el: null, html: '', crumb: null, want: null };
   const chainItem = (c) => { const st = stats(blocksOf(c.blocks)); const n = splitName(c.name); return { label: n.name, own: n.own, mono: !proseName(c), icon: ICON.chain, data: { chain: c.id }, key: st.open ? `${st.open} to review` : 'reviewed' }; };
   // What a view's ⋯ holds: how it shows the code, and where else to go from it.
   function viewMenuItems() {
@@ -1643,13 +1644,32 @@
     return items;
   }
   // A breadcrumb's folder: its folders (one holding only a folder shows with it, as in the Files
-  // tab) and the review's files in it, each with its mark. A folder opens in the menu, and ..
-  // goes up; what leads to the file open is current.
+  // tab) and its files, the review's with their marks. A folder opens in the menu, and .. goes
+  // up; what leads to the file open is current. The review's files open in their diff, the
+  // repository's others whole.
   const parentOf = (dir) => dir.slice(0, Math.max(0, dir.lastIndexOf('/')));
   const crumbDir = () => (MENU.crumb != null ? MENU.crumb : (state.view.path || '').split('/').slice(0, Number(MENU.open.slice('crumb:'.length)) + 1).join('/'));
+  // The repository's files at the head, asked of untangle once, as a breadcrumb first shows.
+  const REPO = { files: null, asked: null };
+  function repoFiles() {
+    if (CONFIG.served && !REPO.asked) {
+      REPO.asked = api('files').then(okJson).then((j) => { REPO.files = j.files; }, () => { REPO.files = []; })
+        .then(() => { if (MENU.open && MENU.open.startsWith('crumb:')) renderMenu(); });
+    }
+    return REPO.asked;
+  }
+  // The folders of the review's files, generated ones too, with the repository's other files.
+  function crumbTree() {
+    const m = M();
+    if (m.crumbTree && m.crumbTree.repo === REPO.files) return m.crumbTree.root;
+    const ours = m.files.concat(m.generated), have = new Set(ours.map((f) => f.p));
+    const root = fileTree(ours.concat((REPO.files || []).filter((p) => !have.has(p)).map((p) => ({ p, out: true }))));
+    m.crumbTree = { repo: REPO.files, root };
+    return root;
+  }
   function crumbMenuItems() {
     const m = M(), path = state.view.path || '', dir = crumbDir();
-    const root = fileTree(m.files.concat(m.generated));
+    const root = crumbTree();
     const at = (p) => (p ? p.split('/') : []).reduce((node, name) => node && node.dirs.get(name), root);
     const node = at(dir), items = [{ head: dir ? shortDir(dir) + '/' : 'Top level' }];
     if (dir) {
@@ -1660,8 +1680,14 @@
     }
     if (!node) return items.concat({ note: 'None of this review’s files are in it.' });
     const gen = new Set(m.generated.map((f) => f.p));
-    // Generated files have no changes to review: their mark is a ring.
-    const markOf = (files) => { const own = files.filter((f) => !gen.has(f.p)); const st = own.length ? stats(own.flatMap((f) => f.blocks)) : null; return { icon: st ? markHtml(st) : '<i class="mk gen"></i>', key: st && st.open ? String(st.open) : '', words: st ? leftWords(st) : 'generated, not reviewed' }; };
+    // Generated files have no changes to review: their mark is a ring. The repository's other
+    // files have none.
+    const markOf = (files) => {
+      const own = files.filter((f) => !f.out && !gen.has(f.p));
+      if (!own.length) return files.some((f) => gen.has(f.p)) ? { icon: '<i class="mk gen"></i>', key: '', words: 'generated, not reviewed' } : { icon: '', key: '', words: 'no changes in this review' };
+      const st = stats(own.flatMap((f) => f.blocks));
+      return { icon: markHtml(st), key: st.open ? String(st.open) : '', words: leftWords(st) };
+    };
     [...node.dirs.values()].sort((x, y) => byName(x.name, y.name)).forEach((d) => {
       let name = d.name;
       while (d.dirs.size === 1 && !d.files.length) { d = [...d.dirs.values()][0]; name += '/' + d.name; }
@@ -1670,7 +1696,7 @@
     });
     node.files.slice().sort((x, y) => byName(fileName(x.p), fileName(y.p))).forEach((f) => {
       const k = markOf([f]);
-      items.push({ label: fileName(f.p), mono: true, icon: k.icon, key: k.key, current: f.p === path, title: `${f.p}: ${k.words}`, data: { open: f.p } });
+      items.push({ label: fileName(f.p), mono: true, icon: k.icon, key: k.key, current: f.p === path, title: `${f.p}: ${k.words}`, data: f.out ? { act: 'open-source', side: 'head', p: f.p } : { open: f.p } });
     });
     return items;
   }
@@ -1717,6 +1743,14 @@
     el.style.top = `${r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
   }
   function toggleMenu(kind) {
+    // A breadcrumb's folder opens once untangle has said what else is in it: asked as the
+    // breadcrumb first showed, that's at once. A second click while it's asked cancels.
+    if (kind.startsWith('crumb:') && MENU.open !== kind && CONFIG.served && !REPO.files) {
+      MENU.want = MENU.want === kind ? null : kind;
+      repoFiles().then(() => { if (MENU.want === kind) { MENU.want = null; toggleMenu(kind); } });
+      return;
+    }
+    MENU.want = null;
     MENU.open = MENU.open === kind ? null : kind;
     MENU.html = '';
     MENU.crumb = null;
@@ -1724,14 +1758,18 @@
     renderMenu();
     // A menu's current item takes the focus, else its first; "Changes from" the scope it has; the
     // marks' panel takes none (its one button resets).
-    const first = MENU.open && (MENU.open === 'lens' ? MENU.el.querySelector('[aria-pressed="true"]') || MENU.el.querySelector('button') : MENU.el.querySelector('.mi[aria-current="true"]') || MENU.el.querySelector('.mi'));
-    if (first) {
-      first.focus({ preventScroll: true });
-      const list = first.closest('.lp-list');
-      if (list) list.scrollTop = first.offsetTop - list.clientHeight / 3;
-    }
+    menuFocus(MENU.open && (MENU.open === 'lens' ? MENU.el.querySelector('[aria-pressed="true"]') || MENU.el.querySelector('button') : MENU.el.querySelector('.mi[aria-current="true"]') || MENU.el.querySelector('.mi')));
   }
-  function closeMenu() { if (MENU.open) { MENU.open = null; renderMenu(); } }
+  // An item of the open menu takes the focus: in "Changes from"'s list, a third of the way down;
+  // in a menu longer than it can show, there too when it's off it.
+  function menuFocus(it) {
+    if (!it) return;
+    it.focus({ preventScroll: true });
+    const list = it.closest('.lp-list'), el = MENU.el;
+    if (list) list.scrollTop = it.offsetTop - list.clientHeight / 3;
+    else if (it.offsetTop < el.scrollTop || it.offsetTop + it.offsetHeight > el.scrollTop + el.clientHeight) el.scrollTop = it.offsetTop - el.clientHeight / 3;
+  }
+  function closeMenu() { MENU.want = null; if (MENU.open) { MENU.open = null; renderMenu(); } }
   const sources = new Map();
   const srcKey = (v) => (v.commit ? 'commit:' + v.commit + ':' + v.path : v.ext != null ? 'ext:' + v.ext : v.side + ':' + v.path);
   let pendingLine = null;
@@ -3120,10 +3158,12 @@
     while (parts.length && out.length + parts[parts.length - 1].length < 40) out = parts.pop() + '/' + out;
     return '…/' + out;
   }
-  // A file's folders, each a button listing the review's files in it, as a folder of GitHub's
-  // breadcrumbs opens. The first ones, when they're long, fold into "…": the deepest of them.
-  // Squeezed, the farthest give way first, each before the next (--far).
+  // A file's folders, each a button listing the files in it, as a folder of GitHub's breadcrumbs
+  // opens. The first ones, when they're long, fold into "…": the deepest of them. Squeezed, the
+  // farthest give way first, each before the next (--far). The repository's files are asked for
+  // as they show, to be there when a folder opens.
   const fileCrumbs = (p) => {
+    repoFiles();
     const dirs = p.split('/').slice(0, -1), short = shortDir(dirs.join('/'));
     const hide = short.startsWith('…/') ? dirs.length - short.split('/').length + 1 : 0;
     const crumb = (k, label) => `<button type="button" data-act="menu" data-menu="crumb:${k}" aria-haspopup="menu" aria-expanded="${MENU.open === 'crumb:' + k}" ${label === '…' ? 'class="fold"' : `style="--far:${10 ** Math.min(6, dirs.length - 1 - k)}"`} title="${esc(dirs.slice(0, k + 1).join('/'))}/: the files in it">${esc(label)}</button>`;
@@ -6512,11 +6552,12 @@
       MENU.crumb = to;
       MENU.html = '';
       renderMenu();
+      MENU.el.scrollTop = 0;
       // Up, the folder it came from takes the focus; down, what leads to the file open, else the first.
       const items = [...MENU.el.querySelectorAll('.mi:not([data-up])')];
       const up = !to || was.startsWith(to + '/');
       const back = up && items.find((x) => x.dataset.folder != null && ((was + '/').startsWith(x.dataset.folder + '/') || (x.dataset.folder + '/').startsWith(was + '/')));
-      (back || items.find((x) => x.getAttribute('aria-current') === 'true') || items[0] || MENU.el.querySelector('.mi'))?.focus({ preventScroll: true });
+      menuFocus(back || items.find((x) => x.getAttribute('aria-current') === 'true') || items[0] || MENU.el.querySelector('.mi'));
       return;
     }
     if (d.compare) {

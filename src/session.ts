@@ -301,6 +301,7 @@ export class ReviewSession {
       const out = this.live.search(side, term);
       return { data: { ...out, results: out.results.map((r) => ({ ...r, generated: this.generatedRx.some((rx) => rx.test(r.p)) })) } };
     }
+    if (route === 'files' && method === 'GET') return { data: { files: this.live.files() } };
     if (route === 'symbols' && method === 'GET') {
       const term = (q.get('q') || '').trim();
       if (term.length < 2) return { data: { symbols: [] } };
