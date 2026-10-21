@@ -55,7 +55,7 @@ export function usage(version: string): string {
     'usage:',
     '  untangle [flags] [directory]',
     '  untangle [flags] <pr-url>',
-    '  untangle watch | reply | note | notes | stop | skill ...',
+    '  untangle watch | reply | note | notes | stop | skill | upgrade ...',
     '',
     'A directory reviews its branch’s pull request, or else what the branch adds to the default branch.',
     'A pull request URL is cloned into the cache first. The review opens in your browser.',
@@ -70,6 +70,9 @@ export function usage(version: string): string {
     '',
     'untangle skill -install teaches Claude and Codex those commands, so asking for a review in their',
     'chat is enough: “review this in untangle”.',
+    '',
+    'untangle upgrade pulls the latest untangle into a clone in the cache, builds it and links it on',
+    'PATH, then updates the skill where it’s installed.',
     '',
     'flags:',
     ...flagLines(FLAGS),
@@ -182,7 +185,10 @@ const REPLY_FLAGS: Flag[] = [AGENT, { name: 'resolve', type: 'bool', usage: 'res
 const NOTE_FLAGS: Flag[] = [AGENT, { name: 'removed', type: 'bool', usage: 'the lines are ones the change removed, numbered as on the base' }, REVIEW];
 const NOTES_FLAGS: Flag[] = [AGENT, { name: 'all', type: 'bool', usage: 'the resolved notes too' }, REVIEW];
 const STOP_FLAGS: Flag[] = [REVIEW];
-const SKILL_FLAGS: Flag[] = [{ name: 'install', type: 'bool', usage: 'put it where Claude and Codex read skills, and let untangle run outside Codex’s sandbox' }];
+const SKILL_FLAGS: Flag[] = [
+  { name: 'install', type: 'bool', usage: 'put it where Claude and Codex read skills, and let untangle run outside Codex’s sandbox' },
+  { name: 'update', type: 'bool', usage: 'rewrite it where it’s installed, and only there' },
+];
 
 export type Command =
   | { cmd: 'review'; opts: Options }
@@ -194,10 +200,11 @@ export type Command =
   | { cmd: 'note'; review: string | null; agent: string | null; removed: boolean; path: string; line: number | null; startLine: number | null; text: string }
   | { cmd: 'notes'; review: string | null; agent: string | null; all: boolean }
   | { cmd: 'stop'; review: string | null }
-  | { cmd: 'skill'; install: boolean };
+  | { cmd: 'skill'; install: boolean; update: boolean }
+  | { cmd: 'upgrade' };
 
 const commandUsage = (name: string, what: string, line: string, about: string[], flags: Flag[], more: string[] = []) => [
-  `untangle ${name} - ${what}`, '', 'usage:', `  untangle ${name} ${line}`, '', ...about, '', 'flags:', ...flagLines(flags), ...more,
+  `untangle ${name} - ${what}`, '', 'usage:', `  untangle ${name}${line ? ` ${line}` : ''}`, '', ...about, ...(flags.length ? ['', 'flags:', ...flagLines(flags)] : []), ...more,
 ].join('\n') + '\n';
 
 export const watchUsage = () => commandUsage('watch', 'hold a review as a coding agent', '[flags] [directory | pr-url]', [
@@ -220,8 +227,14 @@ export const skillUsage = () => commandUsage('skill', 'teach Claude and Codex to
   'Prints the untangle skill: how an agent holds a review with watch, reply, notes and stop. With',
   '-install, it goes where each agent on this machine reads skills (~/.claude/skills for Claude,',
   '~/.agents/skills for Codex), with a rule in ~/.codex/rules that lets untangle run outside Codex’s',
-  'sandbox. Then asking for a review in their chat is enough: “review this in untangle”.',
+  'sandbox. Then asking for a review in their chat is enough: “review this in untangle”. With',
+  '-update, it’s rewritten only where it’s installed, as untangle upgrade does.',
 ], SKILL_FLAGS);
+export const upgradeUsage = () => commandUsage('upgrade', 'bring the latest untangle, from GitHub', '', [
+  'Pulls the latest untangle into its clone in the cache (the first upgrade clones it), installs its',
+  'packages when they changed, builds it, and links it with npm, so the untangle command runs it.',
+  'Then the new untangle rewrites its skill where it’s installed, as untangle skill -update does.',
+], []);
 
 /** The command line: a review, or one of the agent's commands (its first word). */
 export function parseCommand(argv: string[]): Command {
@@ -273,7 +286,13 @@ export function parseCommand(argv: string[]): Command {
     const { values, rest } = readFlags(more, SKILL_FLAGS, true);
     if (values.get('help')) return { cmd: 'help', text: skillUsage() };
     if (rest.length) throw new UsageError(`untangle skill takes no arguments (got ${rest.join(' ')})`);
-    return { cmd: 'skill', install: values.get('install') === true };
+    return { cmd: 'skill', install: values.get('install') === true, update: values.get('update') === true };
+  }
+  if (first === 'upgrade') {
+    const { values, rest } = readFlags(more, [], true);
+    if (values.get('help')) return { cmd: 'help', text: upgradeUsage() };
+    if (rest.length) throw new UsageError(`untangle upgrade takes no arguments (got ${rest.join(' ')})`);
+    return { cmd: 'upgrade' };
   }
   return { cmd: 'review', opts: parseArgs(argv) };
 }

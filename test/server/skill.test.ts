@@ -59,6 +59,63 @@ describe('Given a home where Claude and Codex keep their folders, ', () => {
   );
 
   it(
+    'when Claude’s skill is from another untangle, '
+    + 'then -update rewrites it, for both agents, without telling again of Codex’s rule or how to ask for a review.',
+    async () => {
+      fs.writeFileSync(path.join(home, '.claude/skills/untangle/SKILL.md'), 'An older skill\n');
+      const r = await run(['-update']);
+      const skill = (await run([])).out;
+      assert.deepEqual([r.code, r.out.split('\n'), fs.readFileSync(path.join(home, '.claude/skills/untangle/SKILL.md'), 'utf8') === skill], [0, [
+        'untangle: updated the untangle skill, for both agents:',
+        '  ~/.claude/skills/untangle/SKILL.md   Claude: /untangle, or ask for a review in untangle',
+        '  ~/.agents/skills/untangle/SKILL.md   Codex: $untangle, or ask the same',
+        '',
+      ], true]);
+    },
+  );
+
+  it(
+    'when Codex’s rule is gone, '
+    + 'then -update writes it again, and tells of it.',
+    async () => {
+      fs.rmSync(path.join(home, '.codex/rules/untangle.rules'));
+      const r = await run(['-update']);
+      assert.deepEqual(r.out.split('\n').slice(3), [
+        'untangle: Codex’s sandbox can’t write untangle’s cache or serve its page, so untangle runs outside it:',
+        '  ~/.codex/rules/untangle.rules   prefix_rule(pattern=["untangle"], decision="allow")',
+        '',
+      ]);
+    },
+  );
+
+  it(
+    'when only Claude has the skill, though Codex is here too, '
+    + 'then -update rewrites Claude’s, and leaves Codex without it.',
+    async () => {
+      const at = fresh('.claude/skills/untangle', '.codex');
+      homes.push(at);
+      fs.writeFileSync(path.join(at, '.claude/skills/untangle/SKILL.md'), 'An older skill\n');
+      const r = await run(['-update'], at);
+      assert.deepEqual([r.code, r.out.split('\n'), fs.existsSync(path.join(at, '.agents')), fs.readdirSync(path.join(at, '.codex'))], [0, [
+        'untangle: updated the untangle skill, for Claude:',
+        '  ~/.claude/skills/untangle/SKILL.md   Claude: /untangle, or ask for a review in untangle',
+        '',
+      ], false, []]);
+    },
+  );
+
+  it(
+    'when no agent has the skill, '
+    + 'then -update says it isn’t installed, and writes nothing.',
+    async () => {
+      const at = fresh('.claude', '.codex');
+      homes.push(at);
+      const r = await run(['-update'], at);
+      assert.deepEqual([r.code, r.out, fs.readdirSync(path.join(at, '.claude')), fs.readdirSync(path.join(at, '.codex'))], [0, 'untangle: the untangle skill isn’t installed: untangle skill -install installs it.\n', [], []]);
+    },
+  );
+
+  it(
     'when Claude’s skills folder links to the one Codex reads, '
     + 'then one file serves both.',
     async () => {

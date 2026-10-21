@@ -1,6 +1,7 @@
 // The untangle skill: what Claude and Codex read to hold a review when you ask for one in their
 // chat. `untangle skill` prints it, and `untangle skill -install` puts it where each agent on this
-// machine reads skills, with the rule that lets untangle run outside Codex's sandbox.
+// machine reads skills, with the rule that lets untangle run outside Codex's sandbox. `-update`
+// rewrites it only where it's installed: untangle upgrade has the new untangle run it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -107,17 +108,21 @@ function put(file: string, text: string): 'new' | 'changed' | 'same' {
   return was === null ? 'new' : 'changed';
 }
 
-export function skill(o: { install: boolean }): number {
-  if (!o.install) {
+export function skill(o: { install: boolean; update: boolean }): number {
+  if (!o.install && !o.update) {
     process.stdout.write(SKILL);
     return 0;
   }
   const files = skillFiles();
-  const found = {
-    claude: has('claude') || !!process.env.CLAUDE_CONFIG_DIR || fs.existsSync(claudeDir()),
-    codex: has('codex') || !!process.env.CODEX_HOME || fs.existsSync(codexDir()),
-  };
-  if (!found.claude && !found.codex) throw new Error('found neither Claude nor Codex here: untangle skill prints the skill, to put where your agent reads skills');
+  // Installing, for each agent on this machine; updating, for each agent that has the skill.
+  const found = o.install
+    ? { claude: has('claude') || !!process.env.CLAUDE_CONFIG_DIR || fs.existsSync(claudeDir()), codex: has('codex') || !!process.env.CODEX_HOME || fs.existsSync(codexDir()) }
+    : { claude: fs.existsSync(files.claude), codex: fs.existsSync(files.codex) };
+  if (!found.claude && !found.codex) {
+    if (o.install) throw new Error('found neither Claude nor Codex here: untangle skill prints the skill, to put where your agent reads skills');
+    say('the untangle skill isn’t installed: untangle skill -install installs it.');
+    return 0;
+  }
   // Where skills are shared between agents, one folder links to the other: one file serves both.
   const real = (file: string) => {
     try {
@@ -141,11 +146,12 @@ export function skill(o: { install: boolean }): number {
   const verb = done.includes('new') ? 'installed the untangle skill' : done.includes('changed') ? 'updated the untangle skill' : 'the untangle skill is up to date';
   say(`${verb}${shared ? ', one SKILL.md for both agents' : found.claude && found.codex ? ', for both agents' : found.claude ? ', for Claude' : ', for Codex'}:`);
   rows.forEach(([f, what]) => process.stdout.write(`  ${tilde(f).padEnd(width)}   ${what}\n`));
-  if (found.codex) {
-    put(files.rule, RULE);
+  // An update tells of the rule only when it changed, and leaves out how to ask for a review.
+  const rule = found.codex ? put(files.rule, RULE) : null;
+  if (rule && (o.install || rule !== 'same')) {
     say('Codex’s sandbox can’t write untangle’s cache or serve its page, so untangle runs outside it:');
     process.stdout.write(`  ${tilde(files.rule)}   ${RULE.trim().split('\n').pop()}\n`);
   }
-  say(`ask for a review in ${found.claude && found.codex ? 'either chat' : 'its chat'}: “review this in untangle”.`);
+  if (o.install) say(`ask for a review in ${found.claude && found.codex ? 'either chat' : 'its chat'}: “review this in untangle”.`);
   return 0;
 }

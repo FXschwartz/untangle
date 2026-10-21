@@ -221,7 +221,35 @@ describe('Given the agent’s commands, ', () => {
     'when skill is given -install, or nothing, '
     + 'then it installs the skill, or prints it.',
     () => {
-      assert.deepEqual([parseCommand(['skill', '-install']), parseCommand(['skill'])], [{ cmd: 'skill', install: true }, { cmd: 'skill', install: false }]);
+      assert.deepEqual([parseCommand(['skill', '-install']), parseCommand(['skill'])], [{ cmd: 'skill', install: true, update: false }, { cmd: 'skill', install: false, update: false }]);
+    },
+  );
+
+  it(
+    'when skill is given -update, '
+    + 'then it rewrites the skill where it’s installed.',
+    () => {
+      assert.deepEqual(parseCommand(['skill', '-update']), { cmd: 'skill', install: false, update: true });
+    },
+  );
+
+  it(
+    'when upgrade is given, alone, with -h, or with an argument, '
+    + 'then it upgrades untangle, shows its usage, or is refused.',
+    () => {
+      const help = parseCommand(['upgrade', '-h']);
+      assert.deepEqual([parseCommand(['upgrade']), help.cmd === 'help' && help.text.split('\n')], [{ cmd: 'upgrade' }, [
+        'untangle upgrade - bring the latest untangle, from GitHub',
+        '',
+        'usage:',
+        '  untangle upgrade',
+        '',
+        'Pulls the latest untangle into its clone in the cache (the first upgrade clones it), installs its',
+        'packages when they changed, builds it, and links it with npm, so the untangle command runs it.',
+        'Then the new untangle rewrites its skill where it’s installed, as untangle skill -update does.',
+        '',
+      ]]);
+      assert.throws(() => parseCommand(['upgrade', 'now']), (error: unknown) => error instanceof UsageError && error.message === 'untangle upgrade takes no arguments (got now)');
     },
   );
 

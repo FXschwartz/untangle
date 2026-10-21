@@ -34,6 +34,7 @@ Dart, and opens in your browser.
     - [Where it opens](#where-it-opens)
     - [Generated code](#generated-code)
     - [With a coding agent](#with-a-coding-agent)
+    - [Upgrading](#upgrading)
     - [Keys](#keys)
     - [Flags](#flags)
   - [How it works](#how-it-works)
@@ -188,7 +189,8 @@ npm link        # puts `untangle` on PATH
 ```
 
 The build compiles the Dart extractor into `dist/dart-analyzer`. Rebuild after changing platforms
-or upgrading the Dart SDK.
+or upgrading the Dart SDK. Later, `untangle upgrade` brings the latest `untangle` and builds it:
+see [Upgrading](#upgrading).
 
 ### 3. Open a review
 
@@ -213,7 +215,7 @@ and `untangle` stops.
 ```
 untangle [flags] [directory]
 untangle [flags] <pr-url>
-untangle watch | reply | note | notes | stop | skill ...
+untangle watch | reply | note | notes | stop | skill | upgrade ...
 ```
 
 ### What it reviews
@@ -258,9 +260,10 @@ adapters:
 
 ### With a coding agent
 
-Install the skill once, for Claude and Codex, with `untangle skill -install`. It also adds a rule
-that lets Codex run `untangle` outside its sandbox, and `untangle skill` prints the skill for
-other agents. Then "review this in untangle" in the agent's chat is enough. The agent runs:
+Install the skill once, for Claude and Codex, with `untangle skill -install`, and `untangle upgrade`
+keeps it up to date. It also adds a rule that lets Codex run `untangle` outside its sandbox, and
+`untangle skill` prints the skill for other agents. Then "review this in untangle" in the agent's
+chat is enough. The agent runs:
 
 | Command                                         |                                                                            |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
@@ -273,6 +276,18 @@ other agents. Then "review this in untangle" in the agent's chat is enough. The 
 Claude runs `watch` in the background, and its end wakes the chat. Codex's `watch` returns at
 once, and untangle puts a line in its chat when there's something new. The review runs on its
 own, so a watch or a chat that ends never closes the page.
+
+### Upgrading
+
+`untangle upgrade` brings the latest `untangle` from GitHub. It keeps a clone of its own in the
+cache: the first upgrade clones it, and later ones pull the new commits. Then it installs the
+packages when they changed, builds it and links it with `npm link`, so `untangle` runs it from
+then on. Last, the new `untangle` updates the skill where it's installed (`untangle skill -update`).
+
+The build compiles the Dart extractor again when the Dart SDK changed, so an upgrade also follows a
+new Dart. After the first upgrade, the clone you built in [Getting started](#2-build-untangle) is
+no longer the one on `PATH`, and you can delete it. Reviews already running keep the version they
+started with until you start them again.
 
 ### Keys
 
@@ -357,6 +372,8 @@ plus every change you marked, so `git diff untangle/pr-<number> HEAD` shows what
   change.
   - `notes/`: your notes, per review like its branch (`notes/github.com/<owner>/<repo>/pr-<number>.json`).
   - `run/`: the port and token of each review running now, for the agent's commands.
+  - `untangle/`: `untangle`'s own clone, which `untangle upgrade` pulls, builds and links. Once
+  upgraded, the `untangle` command runs from it, so keep it when you clear the cache.
 
 ## Development
 
@@ -370,6 +387,9 @@ npm run check         # type-check the program and the tests
 
 The tests use Node's runner (`node:test`) and need Node 22.18 or later. They stay offline,
 with a stand-in for `gh`. A missing `dart` or Chromium skips the tests that need it.
+
+`untangle upgrade` links its own clone in place of yours. In a clone you work on, `npm link` puts
+yours back on `PATH`.
 
 
 | Path        |                                                                                        |

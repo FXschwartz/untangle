@@ -3,11 +3,11 @@
 //
 //   untangle [flags] [directory]
 //   untangle [flags] <pr-url>
-//   untangle watch | reply | note | notes | stop | skill ...
+//   untangle watch | reply | note | notes | stop | skill | upgrade ...
 import fs from 'node:fs';
 import path from 'node:path';
 import * as agent from './agent.js';
-import { noteUsage, notesUsage, parseCommand, replyUsage, skillUsage, stopUsage, usage, UsageError, watchUsage, type Options } from './args.js';
+import { noteUsage, notesUsage, parseCommand, replyUsage, skillUsage, stopUsage, upgradeUsage, usage, UsageError, watchUsage, type Options } from './args.js';
 import { buildReview, buildSteps, type ReviewData } from './build.js';
 import { reviewDir, worktreeDir } from './cache.js';
 import { chatFrom } from './chats.js';
@@ -23,6 +23,7 @@ import { ReviewServer } from './server.js';
 import { editorFrom, ReviewSession } from './session.js';
 import { skill } from './skill.js';
 import { isPrUrl, latestHead, resolveDirectory, resolveUrl, type Target } from './target.js';
+import { upgrade } from './upgrade.js';
 import { VERSION } from './version.js';
 
 // After its last page closes, untangle waits this long for a page to open again (a reload)
@@ -38,7 +39,7 @@ async function main(): Promise<number> {
     command = parseCommand(process.argv.slice(2));
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
-    const help = { watch: watchUsage, reply: replyUsage, note: noteUsage, notes: notesUsage, stop: stopUsage, skill: skillUsage }[process.argv[2]];
+    const help = { watch: watchUsage, reply: replyUsage, note: noteUsage, notes: notesUsage, stop: stopUsage, skill: skillUsage, upgrade: upgradeUsage }[process.argv[2]];
     process.stderr.write(`${e.message}\n${help ? help() : usage(VERSION)}`);
     return 2;
   }
@@ -52,6 +53,7 @@ async function main(): Promise<number> {
   if (command.cmd === 'notes') return agent.notes(command);
   if (command.cmd === 'stop') return agent.stop(command);
   if (command.cmd === 'skill') return skill(command);
+  if (command.cmd === 'upgrade') return upgrade();
   return review(command.opts);
 }
 
