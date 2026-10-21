@@ -1576,7 +1576,7 @@
     const showing = () => {
       items.push({ label: 'Side by side', checked: state.layout === 'split', data: { act: 'layout' } });
       items.push({ label: 'Diffs of reviewed code', checked: state.showReviewedDiff, data: { act: 'revdiff' } });
-      items.push({ label: 'Minimap', checked: UI.minimap, data: { act: 'minimap' } });
+      if (v.kind !== 'tests') items.push({ label: 'Minimap', checked: UI.minimap, data: { act: 'minimap' } });
     };
     const fileItems = (f, gen) => {
       const firstAdd = !gen && f.blocks.find((b) => b.adds);
@@ -7036,7 +7036,9 @@
     const cv = $('#vw-mini');
     const SCALE = 2 / 20.625;
     let rows = [], stale = true, raf = 0, drag = null, hover = false, settle = 0, measured = 0;
-    const on = () => !!cv && UI.minimap && window.innerWidth > 960 && !!main.querySelector('.code');
+    // Not in the Tests view, nor for a test's code opened under its sentence in a chain: coming
+    // and going with it, the minimap would narrow the page and move the sentences.
+    const on = () => !!cv && UI.minimap && window.innerWidth > 960 && state.view.kind !== 'tests' && !!main.querySelector('.code:not(.ol-sec .code)');
     // Where each row is in the pane, and what it is.
     function build() {
       stale = false;

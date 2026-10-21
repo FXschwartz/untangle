@@ -470,6 +470,38 @@ describe('Given a served review by commit: a discount with its tests, more tests
     });
   });
 
+  describe('when a then opens in the Tests view, then in the chain of the commit that only adds tests, ', () => {
+    let shown = '';
+
+    before(async () => {
+      // After the frame the minimap draws in.
+      const look = `new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done((document.querySelector('#vw-mini').hidden ? 'no minimap' : 'a minimap') + ', ' + document.querySelector('#vw-main').clientWidth + ' px wide'))))`;
+      const seen: string[] = [];
+      const open = async (title: string) => {
+        const row = await rowSelector(page!, title);
+        seen.push(await read(page!, look));
+        await page!.click(row);
+        await page!.until(`!!document.querySelector('#vw-main .ol-code')`);
+        seen.push(await read(page!, look));
+        await page!.click(row);
+        await page!.until(`!document.querySelector('#vw-main .ol-code')`);
+      };
+      await rest(page!);
+      await page!.click('[data-tab="chains"]');
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file')`);
+      await open('then it is positive.');
+      await openChain(page!, 'Cover more totals');
+      await open('then it is positive.');
+      shown = seen.join('\n');
+    });
+
+    it('then no minimap comes with its code, and the page keeps its width.', () => {
+      const [width] = /\d+ px/.exec(shown) ?? [''];
+      assert.equal(shown, Array(4).fill(`no minimap, ${width} wide`).join('\n'));
+    });
+  });
+
   describe('when a then opens and closes with motion on, ', () => {
     let opening = '';
     let closing = '';
