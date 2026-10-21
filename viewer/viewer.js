@@ -3115,7 +3115,7 @@
   // (the header's arrow, the browser's, Alt ←, a mouse's back button) brings back the view before,
   // scrolled where it was, with its sidebar tab. Without the browser's history, the steps are the
   // page's alone.
-  const NAV = { stack: [], at: -1, hist: true, dir: 0, saveT: 0 };
+  const NAV = { stack: [], at: -1, hist: true, saveT: 0 };
   const BACK_KEY = /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘[' : 'Alt ←';
   const navKey = (v) => [v.kind, v.id, v.path, v.family, v.side, v.ext, v.commit].join('|');
   const navState = (e) => ({ untangle: 1, at: e.at, view: e.view, tab: e.tab, top: e.top, name: e.name });
@@ -3164,14 +3164,12 @@
   }
   function navGo(st) {
     const v = navView(st);
-    NAV.dir = st.at < NAV.at ? -1 : 1;
     const cur = NAV.stack[NAV.at];
     if (cur) cur.top = main.scrollTop;
     NAV.at = st.at;
     if (v) { state.view = v; state.peek = null; state.focus = null; if (st.tab) state.tab = st.tab; }
     NAV.stack[st.at] = { key: navKey(state.view), at: st.at, view: state.view, tab: state.tab, top: st.top || 0, name: st.name };
     render(v ? { scroll: st.top || 0 } : {});
-    NAV.dir = 0;
   }
   function navBack() {
     if (NAV.at <= 0) return;
@@ -5169,6 +5167,8 @@
     const h = motionNext;
     motionNext = null;
     if (!moving()) return null;
+    // Another view (the state names it already): nothing on screen moves into it.
+    if (GD.view !== viewKey()) return null;
     const box = main.getBoundingClientRect();
     const seen = (top, bottom) => bottom > box.top && top < box.bottom;
     const snap = { hint: h, view: viewKey(), peek: null, detail: null, threads: new Map(), sections: [] };
@@ -5382,16 +5382,8 @@
   }
   // After a render: the same things, moved.
   function motionAfter(snap) {
-    if (!snap) { shownPeek = state.peek; return; }
-    if (snap.view !== viewKey()) {
-      // Another view fades in from a little below; the breadcrumb's last part slides in.
-      const dir = NAV.dir < 0 ? -1 : 1;
-      main.animate([{ opacity: 0, transform: `translateY(${8 * dir}px)` }, { opacity: 1, transform: 'none' }], { duration: 160, easing: EASE });
-      const last = main.querySelector('.crumbs > :last-child');
-      if (last) last.animate([{ opacity: 0, transform: `translateX(${8 * dir}px)` }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE });
-      shownPeek = state.peek;
-      return;
-    }
+    // Another view, as drawing it took one (a chain that's gone): nothing moves either.
+    if (!snap || snap.view !== viewKey()) { shownPeek = state.peek; return; }
     snap.sections.forEach(sectionMotion);
     if (snap.hint && snap.hint.mark) {
       const ids = new Set(snap.hint.mark);
@@ -5639,12 +5631,14 @@
     viewer.classList.toggle('split', state.layout === 'split');
     if (opts.line) {
       const el = main.querySelector(`[data-n="${opts.line}"]`);
-      if (el) { placeRow(el, headH() + 60); el.classList.add('flash'); } else main.scrollTop = opts.top ? 0 : keep;
-      // A line still loading, or lines loading above it: shown again once they're there.
+      if (el) placeRow(el, headH() + 60); else main.scrollTop = opts.top ? 0 : keep;
+      // A line still loading, or lines loading above it: shown again once they're there, and
+      // marked then.
       pendingLine = !el || main.querySelector('.ln.loading') ? { view: state.view, line: opts.line } : null;
+      if (el && !pendingLine) arrive(el, 'arrive');
     } else if (opts.section != null) {
       const el = main.querySelector('#sec-' + opts.section);
-      if (el) { placeRow(el, headH() + 8); el.classList.add('flash-sec'); }
+      if (el) { placeRow(el, headH() + 8); arrive(el, 'flash-sec'); }
     } else if (opts.scroll != null) main.scrollTop = opts.scroll;
     else if (opts.top) main.scrollTop = 0;
     else main.scrollTop = keep;
@@ -5810,6 +5804,12 @@
     if (navAt) { const el = open.find((x) => markId(x) === navAt); if (el && seen(el)) return el; }
     const first = open[firstWhere(open, (el) => rowOf(el).getBoundingClientRect().bottom > top)];
     return first && seen(first) ? first : null;
+  }
+  // Where a jump landed, marked from the start (a mark of the kind elsewhere ends).
+  function arrive(el, cls) {
+    main.querySelectorAll('.' + cls).forEach((x) => x.classList.remove(cls));
+    void el.offsetWidth;
+    el.classList.add(cls);
   }
   function flashRow(row) {
     main.querySelectorAll('.flash').forEach((x) => x.classList.remove('flash'));

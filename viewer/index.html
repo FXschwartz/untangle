@@ -797,8 +797,9 @@ button.sb-group:hover { color: var(--text-2); }
 .ctx-row .linkish { color: var(--text-2); }
 .gen-tag { font: 500 11px/1 var(--ui); color: var(--text-3); background: var(--raised); border-radius: 4px; padding: 2px 6px; margin-left: 6px; }
 div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; color: var(--text-3); font-size: 13.5px; }
-.flash-sec .sec-h { animation: flashsec 1.4s var(--ease) 1; }
-@keyframes flashsec { 0% { background: rgba(255, 255, 255, .05); } 100% { background: transparent; } }
+/* A member reached from the graph: its header tinted, held a moment, then fading. */
+.flash-sec .sec-h { animation: flashsec 1.8s var(--ease) 1; }
+@keyframes flashsec { 0%, 30% { background: rgba(233, 180, 76, .2); box-shadow: inset 3px 0 0 var(--accent); } 100% { background: transparent; box-shadow: inset 3px 0 0 transparent; } }
 
 /* ---- Code. A whole file has thousands of rows: the ones off screen skip layout and paint until
    scrolled to. That clips what overflows a row, so focus rings inside rows are drawn inward. A
@@ -871,6 +872,11 @@ div.empty { position: sticky; left: 0; max-width: 700px; padding: 28px 22px; col
 .tick.on:hover::after { border-color: var(--ground); }
 .ln.flash .g, .sl.flash .g { animation: flash 1.2s var(--ease) 1; }
 @keyframes flash { 0% { box-shadow: inset 3px 0 0 var(--accent); } 100% { box-shadow: inset 3px 0 0 transparent; } }
+/* Where a jump lands (Go to it in this diff, a line shown in its file): the whole line tinted, held
+   a moment, then fading. The next change, glided to, keeps the gutter's mark above. */
+.ln.arrive, .sl.arrive { position: relative; }
+.ln.arrive::after, .sl.arrive::after { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; background: rgba(233, 180, 76, .2); box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px rgba(233, 180, 76, .55); animation: arrive 1.8s var(--ease) 1; }
+@keyframes arrive { 0%, 30% { opacity: 1; } 100% { opacity: 0; } }
 .t-kw { color: var(--syn-kw); } .t-ty { color: var(--syn-ty); } .t-str { color: var(--syn-str); } .t-num { color: var(--syn-num); }
 .t-com { color: var(--syn-com); font-style: italic; } .t-ann { color: var(--syn-ann); } .t-op { color: var(--syn-op); } .t-key { color: var(--syn-id); }
 .t-id { color: var(--syn-id); } .t-fn { color: var(--syn-fn); } .t-md { color: var(--text); }

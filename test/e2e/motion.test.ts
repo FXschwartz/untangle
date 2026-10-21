@@ -36,7 +36,8 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
     repo.commit({ subject: 'Start', author, committer: author });
     repo.branch('feature');
     repo.write('lib/notes.dart', afterNotes);
-    repo.write('lib/end.dart', ['// top', ...pads, "void tail() {\n  print('b');\n}\n"].join('\n'));
+    // And a call to tail after it, in the same change: its peek offers to go to tail in the diff.
+    repo.write('lib/end.dart', ['// top', ...pads, "void tail() {\n  print('b');\n}\n\nvoid again() {\n  tail();\n}\n"].join('\n'));
     repo.write('lib/far.dart', far('b'));
     repo.commit({ subject: 'Change', author: later, committer: later });
     cache = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-cache-'));
@@ -178,6 +179,32 @@ describe('Given a served review with motion left on, ', { skip, timeout: 180_000
 
     it('then the line is followed by the next one, and no peek is left.', () => {
       assert.equal(afterClose, 'no peek, line 83 followed by line 84');
+    });
+  });
+
+  describe('when a peek\'s Go to it in this diff is clicked, ', () => {
+    let landed: string;
+
+    before(async () => {
+      await rest(page!);
+      await page!.goto(url);
+      await page!.until(`!!document.querySelector('.t-head')`, 30_000);
+      // The changes not in a chain, end.dart's among them: the peek is under one of its lines.
+      await page!.click('[data-tab="chains"]');
+      await page!.click('.sb-row[data-standalone]');
+      await page!.until(`!!document.querySelector('#vw-main .code[data-p="lib/end.dart"]')`);
+      await page!.clickIn('.code[data-p="lib/end.dart"] .ref', 'tail', 'tail();');
+      await page!.until(`!!document.querySelector('.peek .pk-foot [data-line]') && document.getAnimations().length === 0`);
+      await page!.click('.peek .pk-foot [data-line]');
+      landed = await read(page!, `[
+        document.querySelector('.fv-head .crumbs b')?.textContent,
+        'line ' + ([...document.querySelectorAll('#vw-main .arrive')].map((el) => el.dataset.n).join(', ') || 'none') + ' marked',
+        document.querySelectorAll('#vw-main .ghost').length + ' stand-ins',
+      ].join(' · ')`);
+    });
+
+    it('then its file opens on the line, marked as it lands, with nothing from the page before moving in it.', () => {
+      assert.equal(landed, 'end.dart · line 82 marked · 0 stand-ins');
     });
   });
 
