@@ -12,6 +12,11 @@ const INK = '#FF6B5E';
 const BAR = '#34343C';
 // GitHub answers a longer new-issue link with 414.
 const WEB_MAX = 6000;
+// Motion, as the page's: what changes moves from where it was to where it goes, easing out, fast
+// enough not to wait for. With "reduce motion" set, it's instant.
+const EASE = 'cubic-bezier(.2, 0, 0, 1)';
+const MOVE_MS = 280;
+const moving = () => !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) && typeof Element.prototype.animate === 'function';
 
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const ICON = {
@@ -26,7 +31,7 @@ const TOOLS = [['arrow', 'Arrow'], ['box', 'Box'], ['pen', 'Pen'], ['hide', 'Hid
 
 const STYLE = `
 .fbk-scrim { position: fixed; inset: 0; z-index: 900; background: rgba(5, 5, 7, .62); }
-.fbk { position: fixed; z-index: 901; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: grid; grid-template-rows: auto minmax(0, 1fr); border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--hair-2), 0 24px 64px rgba(0, 0, 0, .7); color: var(--text); font: 400 13px/1.45 var(--ui); -webkit-font-smoothing: antialiased; }
+.fbk { position: fixed; z-index: 901; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(1180px, calc(100vw - 32px)); height: min(640px, calc(100vh - 32px)); display: grid; grid-template-rows: auto minmax(0, 1fr); border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--hair-2), 0 24px 64px rgba(0, 0, 0, .7); color: var(--text); font: 400 13px/1.45 var(--ui); -webkit-font-smoothing: antialiased; }
 .fbk[hidden], .fbk-scrim[hidden], .fbk-take[hidden] { display: none; }
 .fbk-h { display: flex; align-items: center; gap: 14px; padding: 12px 12px 12px 20px; }
 .fbk-h > b { font: 600 14px/1.2 var(--ui); }
@@ -39,6 +44,7 @@ const STYLE = `
 .fbk-x svg { width: 14px; height: 14px; }
 .fbk-b, .fbk-c { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 20px; padding: 0 20px 20px; min-height: 0; overflow: auto; }
 .fbk-b[hidden], .fbk-c[hidden] { display: none; }
+.fbk-ghost { position: absolute; z-index: -1; margin: 0; overflow: hidden; pointer-events: none; }
 .fbk-pic { display: grid; gap: 8px; align-content: start; min-width: 0; }
 .fbk-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .fbk-tools button { appearance: none; border: 0; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 7px; background: none; color: var(--text-2); font: 600 12px/1 var(--ui); cursor: pointer; white-space: nowrap; }
@@ -577,16 +583,67 @@ async function open(host) {
       + `<li>It files a <b>public issue</b> on <b>${esc(repo)}</b>, as ${who}${pic ? ', that shows the picture' : ''}.</li>`
       + (pic ? '<li>The gist stays yours: <code>untangle feedback -list</code> lists them, and you can delete one any time. Its issue then shows a broken picture.</li>' : '')
       + `</ul><div class="fbk-acts"><button type="button" class="fbk-link" data-fb="back">Back</button><button type="button" class="fbk-send" data-fb="approve">${pic ? 'Upload the picture and file it' : 'File the issue'}</button></div>`;
-    showIssue();
-    stepWrite.hidden = true;
-    stepCheck.hidden = false;
-    stepCheck.scrollTop = 0;
-    ok.querySelector('[data-fb="approve"]').focus();
+    turn(() => {
+      showIssue();
+      stepWrite.hidden = true;
+      stepCheck.hidden = false;
+      stepCheck.scrollTop = 0;
+    });
+    ok.querySelector('[data-fb="approve"]').focus({ preventScroll: true });
   }
   function back() {
-    stepCheck.hidden = true;
-    stepWrite.hidden = false;
-    issue.innerHTML = ok.innerHTML = '';
+    turn(() => {
+      stepCheck.hidden = true;
+      stepWrite.hidden = false;
+      issue.innerHTML = ok.innerHTML = '';
+    });
+  }
+  // From your words to the issue, and back: the picture moves between the board and the issue, a
+  // stand-in of the step left fades out where it was, and the other step comes in around the
+  // picture. The dialog keeps its size.
+  let ghost = null;
+  function turn(update) {
+    if (ghost) { ghost.remove(); ghost = null; }
+    if (!moving()) return update();
+    const toCheck = stepCheck.hidden, leaving = toCheck ? stepWrite : stepCheck;
+    const flyer = toCheck ? board : issue.querySelector('.fbk-shot');
+    const from = flyer && flyer.getBoundingClientRect(), box = leaving.getBoundingClientRect(), frame = el.getBoundingClientRect();
+    // The stand-in: the step as it was, its pictures drawn again, nothing in it to find or press.
+    const g = leaving.cloneNode(true);
+    const drawn = leaving.querySelectorAll('canvas');
+    g.querySelectorAll('canvas').forEach((c, i) => { if (drawn[i] && drawn[i].width) c.getContext('2d').drawImage(drawn[i], 0, 0); });
+    const marks = ['id', 'for', 'data-fb', 'data-go', 'data-tool', 'data-kind'];
+    g.querySelectorAll(marks.map((m) => `[${m}]`).join()).forEach((n) => marks.forEach((m) => n.removeAttribute(m)));
+    g.classList.add('fbk-ghost');
+    g.inert = true;
+    g.setAttribute('aria-hidden', 'true');
+    g.style.cssText = `left: ${box.left - frame.left}px; top: ${box.top - frame.top}px; width: ${box.width}px; height: ${box.height}px`;
+    const top = leaving.scrollTop;
+    update();
+    el.append(g);
+    g.scrollTop = top;
+    ghost = g;
+    g.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${toCheck ? -12 : 12}px)` }], { duration: 180, easing: EASE, fill: 'forwards' })
+      .finished.then(() => { g.remove(); if (ghost === g) ghost = null; }, () => {});
+    const into = toCheck ? issue.querySelector('.fbk-shot') : board;
+    const to = into && into.getBoundingClientRect();
+    const rise = (n, delay) => n && n.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 220, delay, easing: EASE, fill: 'backwards' });
+    if (from && to && to.width && to.height) {
+      g.querySelector(toCheck ? '.fbk-board' : '.fbk-shot').style.visibility = 'hidden';
+      into.animate([{ transformOrigin: '0 0', transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})` }, { transformOrigin: '0 0', transform: 'none' }], { duration: MOVE_MS, easing: EASE });
+    } else if (!toCheck) rise(board, 30);
+    const slide = (n, dx) => n && n.animate([{ opacity: 0, transform: `translateX(${dx}px)` }, { opacity: 1, transform: 'none' }], { duration: MOVE_MS, delay: 40, easing: EASE, fill: 'backwards' });
+    if (toCheck) {
+      // The issue's frame comes up around the picture, its words rising in order.
+      const card = issue.querySelector('.fbk-card'), cs = getComputedStyle(card);
+      card.animate([{ backgroundColor: 'rgba(0, 0, 0, 0)', boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0)' }, { backgroundColor: cs.backgroundColor, boxShadow: cs.boxShadow }], { duration: MOVE_MS, easing: EASE });
+      [...card.children].filter((n) => !n.matches('.fbk-shot')).forEach((n, i) => rise(n, 60 + i * 30));
+      slide(ok, 14);
+    } else {
+      rise(stepWrite.querySelector('.fbk-tools'), 60);
+      rise(stepWrite.querySelector('.fbk-hint'), 90);
+      slide(stepWrite.querySelector('.fbk-form'), -14);
+    }
   }
   // The issue as GitHub will show it: its title and labels, your words, the picture with its
   // marks, and what untangle adds, open.

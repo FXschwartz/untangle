@@ -99,6 +99,26 @@ async function openPanel(page: Browser): Promise<void> {
 }
 const write = (title: string, text: string) => `(() => { for (const [sel, value] of [['#fbk-title', ${JSON.stringify(title)}], ['.fbk textarea', ${JSON.stringify(text)}]]) { const t = document.querySelector(sel); t.value = value; t.dispatchEvent(new Event('input', { bubbles: true })); } })()`;
 const report = ['Space skips the change under a folded section', 'I folded Outside the tests and pressed Space from the top.'] as const;
+const size = `(() => { const r = document.querySelector('.fbk').getBoundingClientRect(); return Math.round(r.width) + '×' + Math.round(r.height); })()`;
+// What moves as a button turns the panel from your words to the issue, or back, read the moment
+// it's pressed, and whether the dialog keeps its size.
+const turn = (button: string) => `(() => {
+  const before = ${size};
+  document.querySelector('.fbk [data-fb="${button}"]').click();
+  const moves = (sel) => (document.querySelector(sel)?.getAnimations() ?? []).some((a) => /translate.*scale/.test(a.effect.getKeyframes()[0].transform || ''));
+  const fades = (sel) => (document.querySelector(sel)?.getAnimations() ?? []).some((a) => a.effect.getKeyframes()[0].opacity != null);
+  const seen = [];
+  if (moves('.fbk-shot')) seen.push('the picture moves from the board into the issue');
+  if (moves('.fbk-b:not(.fbk-ghost) .fbk-board')) seen.push('the picture moves back to the board');
+  if (fades('.fbk-ghost.fbk-b')) seen.push('a stand-in of the words fades out');
+  if (fades('.fbk-ghost.fbk-c')) seen.push('a stand-in of the issue fades out');
+  if (fades('.fbk-card h3')) seen.push('the issue rises around it');
+  if (fades('.fbk-c:not(.fbk-ghost) .fbk-ok')) seen.push('what Send does slides in');
+  if (fades('.fbk-b:not(.fbk-ghost) .fbk-form')) seen.push('the words slide back in');
+  seen.push(${size} === before ? 'the dialog stays ' + before : 'the dialog goes from ' + before + ' to ' + ${size});
+  return seen.join('; ');
+})()`;
+const still = `!document.querySelector('.fbk-ghost') && !document.querySelector('.fbk').getAnimations({ subtree: true }).length`;
 
 describe('Given a served review, with gh signed in as octocat, and the gist and the issue kept on this machine, ', { skip, timeout: 240_000 }, () => {
   let s: Served | undefined;
@@ -136,18 +156,33 @@ describe('Given a served review, with gh signed in as octocat, and the gist and 
     let issue = '';
     let log = '';
     let back = '';
+    let sizes = '';
+    let forth = '';
+    let home = '';
     let calls = '';
 
     before(async () => {
       await s!.page.eval(write(...report));
+      const writing = await read(s!.page, size);
       await s!.page.click('.fbk [data-fb="send"]');
       await s!.page.until(`!!document.querySelector('.fbk-c:not([hidden])')`);
       asked = await read(s!.page, `document.querySelector('.fbk-ok').innerText`);
       issue = await read(s!.page, `(() => { const c = document.querySelector('.fbk-card'); return [c.querySelector('h3').textContent, c.querySelector('.fbk-meta').textContent, c.querySelector('.fbk-desc').textContent, c.querySelector('.fbk-shot canvas') ? 'the picture' : 'no picture', [...c.querySelectorAll('.fbk-more dt')].map((d) => d.textContent).join(', ')].join(' | '); })()`);
       // The log's lines wrap: nothing in the panel scrolls sideways.
       log = await read(s!.page, `(() => { const lines = [...document.querySelectorAll('.fbk-ll')], step = document.querySelector('.fbk-c'), said = /the last (\\d+) lines/.exec(document.querySelector('.fbk-goes').textContent); return [lines.length === Number(said && said[1]) ? 'every line of its log' : lines.length + ' lines of ' + (said && said[1]), lines.every((l) => l.scrollWidth <= l.clientWidth) && step.scrollWidth <= step.clientWidth ? 'wrapped' : 'too wide'].join(', '); })()`);
+      const checking = await read(s!.page, `${size} + (document.querySelector('.fbk-c').scrollHeight > document.querySelector('.fbk-c').clientHeight ? ', scrolling inside' : ', all in view')`);
       await s!.page.key('Escape');
       back = await read(s!.page, `[document.querySelector('.fbk') ? 'the panel open' : 'the panel closed', document.querySelector('.fbk-b').hidden ? 'not on the words' : 'on the words', document.querySelector('#fbk-title').value].join(', ')`);
+      sizes = [writing, checking, await read(s!.page, size)].join(' | ');
+      await s!.page.reducedMotion(false);
+      try {
+        forth = await read(s!.page, turn('send'));
+        await s!.page.until(still);
+        home = await read(s!.page, turn('back'));
+        await s!.page.until(still);
+      } finally {
+        await s!.page.reducedMotion(true);
+      }
       await s!.page.click('.fbk [data-fb="send"]');
       await s!.page.until(`!!document.querySelector('.fbk-c:not([hidden])')`);
       calls = s!.gh.calls().map((c) => c.args.slice(0, 2).join(' ')).filter((c) => /^(gist|issue)/.test(c)).join(', ');
@@ -160,6 +195,15 @@ describe('Given a served review, with gh signed in as octocat, and the gist and 
 
     it('then Esc goes back to the words, and the panel stays open.', () => {
       assert.equal(back, 'the panel open, on the words, Space skips the change under a folded section');
+    });
+
+    it('then the dialog keeps its size on the words, on the issue, which scrolls inside it, and back.', () => {
+      assert.equal(sizes, '1180×640 | 1180×640, scrolling inside | 1180×640');
+    });
+
+    it('with motion, then the picture moves from the board into the issue, which rises around it, and back to the board, each step fading out where it was.', () => {
+      assert.equal(forth, 'the picture moves from the board into the issue; a stand-in of the words fades out; the issue rises around it; what Send does slides in; the dialog stays 1180×640');
+      assert.equal(home, 'the picture moves back to the board; a stand-in of the issue fades out; the words slide back in; the dialog stays 1180×640');
     });
 
     it('then it says what it will upload and file, as octocat, and gh has made nothing yet.', () => {
