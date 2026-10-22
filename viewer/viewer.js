@@ -4957,14 +4957,14 @@
     const ck = facts && facts.checks[c.sha] && CHECK[facts.checks[c.sha]];
     const reviews = new Map();
     (facts ? facts.reviews : []).forEach((r) => { if (r.sha !== c.sha) return; const k = r.author.login + ' ' + r.state; if (!reviews.has(k)) reviews.set(k, { ...r, n: 0 }); reviews.get(k).n++; });
-    const rv = [...reviews.values()].map((r) => `<a class="hs-rev ${r.state === 'APPROVED' ? 'ok' : r.state === 'CHANGES_REQUESTED' ? 'bad' : ''}" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" title="${esc(r.author.login)} ${REVIEW_WORD[r.state] || r.state.toLowerCase()} on this commit${r.n > 1 ? `, ${r.n} times` : ''}">${r.author.avatar ? `<img src="${esc(r.author.avatar)}&s=32" alt="" width="16" height="16">` : ''}${esc(r.author.login)} ${REVIEW_WORD[r.state] || ''}${r.n > 1 ? ` ×${r.n}` : ''}</a>`).join('');
+    const rv = [...reviews.values()].map((r) => `<a class="hs-rev ${r.state === 'APPROVED' ? 'ok' : r.state === 'CHANGES_REQUESTED' ? 'bad' : ''}" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" title="${esc(r.author.login)} ${REVIEW_WORD[r.state] || r.state.toLowerCase()} on this commit${r.n > 1 ? `, ${r.n} times` : ''}">${r.author.avatar ? `<img src="${esc(r.author.avatar)}&s=32" alt="" width="16" height="16">` : ''}<span>${esc(`${r.author.login} ${REVIEW_WORD[r.state] || ''}${r.n > 1 ? ` ×${r.n}` : ''}`.trim())}</span></a>`).join('');
     const what = c.brought ? `brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : st.total ? `${plural(st.total, 'change')} ${perChain.size ? 'in ' + plural(perChain.size, 'chain') : 'outside chains'}` : 'nothing of it left at the head';
     const meta = `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${esc(c.author)} · ${dayOf(c.at)} · ${what}`;
     const cnt = st.state === 'left' ? `<span class="hs-n left" title="${st.open} of its changes to review">${st.open}</span>` : st.state === 'done' ? `<span class="hs-n ok" title="All of it reviewed">${ICON.check}</span>` : '<span class="hs-n">—</span>';
     const open = HX.open.has(c.sha), shown = HX.detail === c.sha;
     const more = c.brought && CONFIG.served ? `<button type="button" class="btn xs" data-act="brought" data-sha="${c.sha}" aria-expanded="${open}">${open ? 'Hide them' : 'Show them'}</button>` : '';
     return `<div class="hs-row${on ? ' in' : ''}${shown ? ' open' : ''}${st.state === 'gone' ? ' gone' : ''}"><button type="button" class="hs-main" data-detail="${c.sha}" aria-expanded="${shown}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n\nClick for its details; Shift-click for the changes of the commits from the last one clicked to this one.`)}">${svg}<span class="hs-s">${esc(sub.text)}</span><span class="hs-m">${meta}</span></button>`
-      + `<span class="hs-x">${rv}${more}${chips}</span><span class="hs-ci${ck ? ' ' + ck[0] : ''}"${ck ? ` title="${ck[1]}"` : ''}>${ck ? (ck[0] === 'ok' ? ICON.check : ck[0] === 'bad' ? ICON.close : '•') : ''}</span>${cnt}</div>`;
+      + `<span class="hs-x">${more}${rv}${chips}</span><span class="hs-ci${ck ? ' ' + ck[0] : ''}"${ck ? ` title="${ck[1]}"` : ''}>${ck ? (ck[0] === 'ok' ? ICON.check : ck[0] === 'bad' ? ICON.close : '•') : ''}</span>${cnt}</div>`;
   }
   // The commits a merge brought from the base's branch, under it.
   function broughtHtml(vm, g) {

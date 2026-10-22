@@ -607,13 +607,17 @@ button.sb-group:hover { color: var(--text-2); }
 .hs-s { align-self: end; padding-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hs-m { align-self: start; padding-top: 3px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hs-row.gone .hs-s, .hs-row.old-head .hs-s { color: var(--text-3); }
-.hs-x { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: min(520px, 48cqw); overflow: hidden; }
+/* A commit's tags, on one line: a merge's button, its reviews, then its chains. Those that don't
+   fit wrap out of sight, whole, from the last. */
+.hs-x { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: min(520px, 48cqw); height: 24px; overflow: hidden; }
 .hs-chip { appearance: none; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--raised); color: var(--text-2); font: 500 11.5px/1 var(--code); white-space: nowrap; cursor: pointer; }
 .hs-chip:hover { background: var(--hover); color: var(--text); }
 .hs-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .hs-chip i.ok { background: var(--done); }
 .hs-chip em { font: 500 11px/1 var(--ui); font-style: normal; color: var(--text-3); }
-.hs-rev { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 3px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(92, 157, 248, .45); color: var(--gh); font: 600 11px/1 var(--ui); white-space: nowrap; text-decoration: none; }
+.hs-rev { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0 8px 0 3px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(92, 157, 248, .45); color: var(--gh); font: 600 11px/1 var(--ui); white-space: nowrap; text-decoration: none; }
+/* Wider than the row's tags on its own, a review's words end in an ellipsis. */
+.hs-rev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .hs-rev img { width: 16px; height: 16px; border-radius: 50%; }
 .hs-rev.ok { box-shadow: inset 0 0 0 1px rgba(88, 197, 151, .5); color: var(--done); }
 .hs-rev.bad { box-shadow: inset 0 0 0 1px rgba(255, 155, 149, .5); color: var(--del-ink); }

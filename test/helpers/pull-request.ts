@@ -20,6 +20,8 @@ export interface PullRequestAnswers {
   head: string;
   headSha: string;
   pushes?: ForcePush[];
+  /** Reviews GitHub has, each on the commit it was made on. */
+  reviews?: Array<{ login: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; sha: string }>;
 }
 
 /** `pr view` for the branch, and `api graphql` for the conversation and the commit facts. */
@@ -85,7 +87,15 @@ function commits(pr: PullRequestAnswers) {
       repository: {
         pullRequest: {
           commits: { nodes: [{ commit: { oid: pr.headSha, statusCheckRollup: { state: 'SUCCESS' } } }] },
-          reviews: { nodes: [] },
+          reviews: {
+            nodes: (pr.reviews ?? []).map((r, i) => ({
+              state: r.state,
+              submittedAt: '2020-01-07T15:00:00Z',
+              url: `${pr.url}#pullrequestreview-${i + 1}`,
+              author: { login: r.login, avatarUrl: `https://example.test/${r.login}`, url: `https://github.com/${r.login}` },
+              commit: { oid: r.sha },
+            })),
+          },
           timelineItems: {
             nodes: (pr.pushes ?? []).map((push) => ({
               createdAt: push.at,
