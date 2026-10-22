@@ -37,7 +37,8 @@ const STYLE = `
 .fbk-x { appearance: none; border: 0; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 7px; background: none; color: var(--text-2); cursor: pointer; }
 .fbk-x:hover { background: var(--hover); color: var(--text); }
 .fbk-x svg { width: 14px; height: 14px; }
-.fbk-b { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 20px; padding: 0 20px 20px; min-height: 0; overflow: auto; }
+.fbk-b, .fbk-c { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 20px; padding: 0 20px 20px; min-height: 0; overflow: auto; }
+.fbk-b[hidden], .fbk-c[hidden] { display: none; }
 .fbk-pic { display: grid; gap: 8px; align-content: start; min-width: 0; }
 .fbk-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .fbk-tools button { appearance: none; border: 0; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 7px; background: none; color: var(--text-2); font: 600 12px/1 var(--ui); cursor: pointer; white-space: nowrap; }
@@ -55,8 +56,10 @@ const STYLE = `
 .fbk-form { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .fbk-lab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font: 600 12.5px/1.3 var(--ui); }
 .fbk-lab span { font-weight: 400; font-size: 11.5px; color: var(--text-3); }
-.fbk-form textarea { flex: 0 1 176px; min-height: 96px; width: 100%; resize: vertical; padding: 10px 12px; border: 0; border-radius: 8px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair-2); color: var(--text); font: 400 13px/1.5 var(--ui); outline: none; }
-.fbk-form textarea:focus { box-shadow: inset 0 0 0 1px var(--text-3); }
+.fbk-in, .fbk-form textarea { width: 100%; padding: 9px 12px; border: 0; border-radius: 8px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair-2); color: var(--text); font: 400 13px/1.5 var(--ui); outline: none; }
+.fbk-in { font-weight: 500; }
+.fbk-form textarea { flex: 0 1 150px; min-height: 88px; resize: vertical; padding: 10px 12px; }
+.fbk-in:focus, .fbk-form textarea:focus { box-shadow: inset 0 0 0 1px var(--text-3); }
 .fbk-chk { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 8px; align-items: start; font: 500 12.5px/1.35 var(--ui); cursor: pointer; }
 .fbk-chk input { margin: 1px 0 0; width: 14px; height: 14px; accent-color: ${INK}; }
 .fbk-chk small { grid-column: 2; font-size: 11.5px; font-weight: 400; line-height: 1.4; color: var(--text-3); }
@@ -68,9 +71,6 @@ const STYLE = `
 .fbk-goes label b { font-weight: 600; color: var(--text); }
 .fbk-goes label span { overflow-wrap: anywhere; }
 .fbk-goes input { margin: 1px 0 0; width: 13px; height: 13px; accent-color: ${INK}; }
-.fbk-log { margin: 4px 0 0 98px; }
-.fbk-log summary { cursor: pointer; font-size: 11.5px; color: var(--text-3); }
-.fbk-log pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--ground); color: var(--text-2); font: 400 11px/1.5 var(--code); white-space: pre; overflow-x: auto; }
 .fbk-err { font-size: 12.5px; color: var(--del-ink); }
 .fbk-err[hidden] { display: none; }
 .fbk-dest { font-size: 11.5px; line-height: 1.45; color: var(--text-3); }
@@ -80,12 +80,30 @@ const STYLE = `
 .fbk-link:hover, .fbk-link.on { color: var(--text); }
 .fbk-send { appearance: none; border: 0; height: 32px; padding: 0 18px; border-radius: 8px; background: var(--text); color: var(--ground); font: 600 13px/1 var(--ui); cursor: pointer; }
 .fbk-send:disabled { opacity: .45; cursor: default; }
-.fbk-ok { display: grid; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair-2); }
-.fbk-ok[hidden], .fbk-acts[hidden], .fbk-dest[hidden] { display: none; }
-.fbk-ok > b { font: 600 13px/1.3 var(--ui); }
-.fbk-ok ul { margin: 0; padding: 0 0 0 18px; display: grid; gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.fbk-link:disabled { opacity: .45; cursor: default; }
+.fbk-issue { display: grid; align-content: start; min-width: 0; }
+.fbk-card { display: grid; gap: 12px; min-width: 0; padding: 16px 18px; border-radius: 10px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair-2); }
+.fbk-eye { margin: 0 0 -4px; font: 600 11px/1.2 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.fbk-card h3 { margin: 0; font: 600 17px/1.3 var(--ui); overflow-wrap: anywhere; }
+.fbk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 0; font-size: 12px; color: var(--text-3); }
+.fbk-meta b { font-weight: 600; color: var(--text-2); }
+.fbk-chip { padding: 3px 8px; border-radius: 999px; background: var(--hover); color: var(--text-2); font: 600 11px/1 var(--ui); white-space: nowrap; }
+.fbk-desc { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.fbk-shot canvas { display: block; width: 100%; height: auto; border-radius: 6px; box-shadow: 0 0 0 1px var(--hair-2); }
+.fbk-more summary { cursor: pointer; font: 500 12.5px/1.4 var(--ui); color: var(--text-2); overflow-wrap: anywhere; }
+.fbk-more dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px; margin: 10px 0 0; font-size: 12px; line-height: 1.45; }
+.fbk-more dt { font-weight: 600; color: var(--text); }
+.fbk-more dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.fbk-logv { margin: 12px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--ground); color: var(--text-2); font: 400 11.5px/1.55 var(--code); }
+.fbk-ll { padding-left: calc(var(--i, 0) * 1ch + 2ch); text-indent: -2ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fbk-ll .ok { color: var(--add-ink); }
+.fbk-ll .no, .fbk-ll.bad { color: var(--del-ink); }
+.fbk-ll .run { color: var(--text-3); }
+.fbk-ok { position: sticky; top: 0; align-self: start; display: grid; gap: 12px; padding: 16px 18px; border-radius: 10px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair-2); }
+.fbk-ok > b { font: 600 14px/1.3 var(--ui); }
+.fbk-ok ul { margin: 0; padding: 0 0 0 18px; display: grid; gap: 8px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
 .fbk-ok li b { color: var(--text); font-weight: 600; }
-.fbk-ok code { font: 500 11.5px/1 var(--code); color: var(--text); background: var(--hover); padding: .15em .35em; border-radius: 4px; }
+.fbk-ok code { font: 500 12px/1 var(--code); color: var(--text); background: var(--hover); padding: .15em .35em; border-radius: 4px; }
 .fbk-take { position: fixed; z-index: 901; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 8px 0 16px; border-radius: 999px; background: var(--raised); box-shadow: 0 0 0 1px var(--hair-2), 0 12px 32px rgba(0, 0, 0, .55); color: var(--text-2); font: 500 12.5px/1 var(--ui); white-space: nowrap; }
 .fbk-take button { appearance: none; border: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--hover); color: var(--text); font: 600 12.5px/1 var(--ui); cursor: pointer; }
 .fbk-take button.go { background: var(--text); color: var(--ground); }
@@ -93,11 +111,12 @@ const STYLE = `
 .fbk-toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .fbk-toast a { color: var(--text); margin-left: 8px; }
 @media (max-width: 960px) {
-  .fbk-b { grid-template-columns: minmax(0, 1fr); }
+  .fbk-b, .fbk-c { grid-template-columns: minmax(0, 1fr); }
+  .fbk-ok { position: static; order: -1; }
 }
 @media (max-width: 560px) {
   .fbk { left: 0; top: 0; transform: none; width: 100%; height: 100%; max-height: none; border-radius: 0; }
-  .fbk-b { padding: 0 16px 16px; }
+  .fbk-b, .fbk-c { padding: 0 16px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .fbk-toast { transition: none; } }
 `;
@@ -222,6 +241,16 @@ function drawShape(c, s, w, h, unit) {
 
 const cell = (t) => String(t).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 const age = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`);
+// A draft's text: its first line is the title, the rest its description.
+const split = (t) => { const lines = String(t).replace(/\r/g, '').split('\n'); return { title: (lines.shift() || '').trim(), rest: lines.join('\n').trim() }; };
+
+// A line of untangle's log, wrapped under its own indent, a step's mark in its color.
+function logLine(line) {
+  const [, lead, rest] = /^(\s*)(.*)$/.exec(line);
+  const m = /^([✓✗…])(.*)$/.exec(rest);
+  const html = m ? `<span class="${{ '✓': 'ok', '✗': 'no', '…': 'run' }[m[1]]}">${m[1]}</span>${esc(m[2])}` : esc(rest);
+  return `<div class="fbk-ll${/^error:/.test(rest) ? ' bad' : ''}" style="--i:${lead.length}">${html || '&#8203;'}</div>`;
+}
 
 // The browser, as its user agent names it.
 function browser() {
@@ -233,7 +262,7 @@ function browser() {
 
 // ---------- The panel
 
-let kept = { text: '', kind: 'bug' };
+let kept = { title: '', text: '', kind: 'bug' };
 let current = null, opening = false;
 let toastTimer = 0;
 
@@ -303,24 +332,28 @@ async function open(host) {
     + '<div class="fbk-board"><canvas class="pic"></canvas><canvas class="ink" aria-label="Draw on the picture"></canvas><div class="fbk-wait">Taking the picture…</div></div>'
     + '<p class="fbk-hint">Drawing on it checks Include the picture. Paste or drop an image to send your own instead.</p>'
     + '</div><div class="fbk-form">'
-    + '<label class="fbk-lab" for="fbk-text">What happened <span>The first line is the issue’s title</span></label>'
-    + '<textarea id="fbk-text" spellcheck="true" placeholder="What you did, what you saw, and what you expected"></textarea>'
+    + '<label class="fbk-lab" for="fbk-title">Title</label>'
+    + '<input id="fbk-title" class="fbk-in" type="text" maxlength="256" autocomplete="off" spellcheck="true">'
+    + '<label class="fbk-lab" for="fbk-text">Description</label>'
+    + '<textarea id="fbk-text" spellcheck="true"></textarea>'
     + '<label class="fbk-chk"><input type="checkbox" data-fb="include"><span>Include the picture</span></label>'
     + `<label class="fbk-chk"><input type="checkbox" data-fb="hidden"><span>Hide the repository’s text</span><small>Every name, path, message and line of code becomes a bar, in the picture and in what untangle adds. ${reviewNote} Your words go as you write them.</small></label>`
     + '<details class="fbk-goes"><summary>Goes with it <span></span></summary><ul></ul></details>'
     + '<p class="fbk-err" role="alert" hidden></p>'
     + '<span class="fbk-sp"></span>'
-    + `<p class="fbk-dest">An issue on <b>${esc(repo)}</b>, which is public, filed as you through gh${login ? ` (${esc(login)})` : ''}. Send shows what it uploads, and waits for your yes.</p>`
-    + '<div class="fbk-ok" role="group" aria-label="What Send does" hidden></div>'
+    + `<p class="fbk-dest">An issue on <b>${esc(repo)}</b>, which is public, filed as you through gh${login ? ` (${esc(login)})` : ''}. Send shows it as it will read, and waits for your yes.</p>`
     + '<div class="fbk-acts"><button type="button" class="fbk-link" data-fb="web">Open on GitHub instead</button><button type="button" class="fbk-send" data-fb="send">Send</button></div>'
-    + '</div></div>';
+    + '</div></div>'
+    + '<div class="fbk-c" hidden><div class="fbk-issue"></div><div class="fbk-ok" role="group" aria-label="What Send does"></div></div>';
   document.body.append(scrim, el, take);
 
   const $ = (sel) => el.querySelector(sel);
-  const text = $('textarea'), board = $('.fbk-board'), pic = $('canvas.pic'), ink = $('canvas.ink'), wait = $('.fbk-wait');
-  const err = $('.fbk-err'), sendBtn = $('[data-fb="send"]'), webBtn = $('[data-fb="web"]'), goes = $('.fbk-goes');
-  const ok = $('.fbk-ok'), acts = $('.fbk-acts'), dest = $('.fbk-dest');
-  text.value = draft && draft.text ? draft.text : kept.text;
+  const titleIn = $('#fbk-title'), text = $('textarea'), board = $('.fbk-board'), pic = $('canvas.pic'), ink = $('canvas.ink'), wait = $('.fbk-wait');
+  const err = $('.fbk-err'), sendBtn = $('[data-fb="send"]'), webBtn = $('[data-fb="web"]');
+  const stepWrite = $('.fbk-b'), stepCheck = $('.fbk-c'), issue = $('.fbk-issue'), ok = $('.fbk-ok');
+  const drafted = draft && draft.text ? split(draft.text) : null;
+  titleIn.value = drafted ? drafted.title : kept.title;
+  text.value = drafted ? drafted.rest : kept.text;
   if (draft) api('api/feedback/draft', { method: 'DELETE' }).catch(() => {});
 
   // The picture on the board: the page's, hidden or not, or your own.
@@ -388,9 +421,7 @@ async function open(host) {
   }
   function renderGoes() {
     const items = goesItems();
-    // The log goes as it shows here, line by line.
-    const log = logLines();
-    $('.fbk-goes ul').innerHTML = items.map((g) => `<li><label><input type="checkbox" data-go="${esc(g.id)}"${st.off.has(g.id) ? '' : ' checked'}><b>${esc(g.k)}</b><span>${esc(g.v)}</span></label>${g.id === 'log' ? `<details class="fbk-log"><summary>Show them</summary><pre>${esc(log.join('\n'))}</pre></details>` : ''}</li>`).join('');
+    $('.fbk-goes ul').innerHTML = items.map((g) => `<li><label><input type="checkbox" data-go="${esc(g.id)}"${st.off.has(g.id) ? '' : ' checked'}><b>${esc(g.k)}</b><span>${esc(g.v)}</span></label></li>`).join('');
     $('.fbk-goes summary span').textContent = `· ${items.filter((g) => !st.off.has(g.id)).length} of ${items.length}`;
   }
 
@@ -403,10 +434,12 @@ async function open(host) {
     hid.disabled = !!st.custom;
     $('[data-fb="undo"]').disabled = !st.shapes.length;
     $('[data-fb="clear"]').disabled = !st.shapes.length;
-    const words = text.value.trim();
-    sendBtn.disabled = st.sending || !words || !ctx || !(ctx.gh && ctx.gh.ready);
+    const titled = !!words().title;
+    titleIn.placeholder = st.kind === 'idea' ? 'What you’d like, in a line' : 'What went wrong, in a line';
+    text.placeholder = st.kind === 'idea' ? 'What it would let you do' : 'What you did, what you saw, and what you expected';
+    sendBtn.disabled = st.sending || !titled || !ctx || !(ctx.gh && ctx.gh.ready);
     sendBtn.textContent = st.sending ? 'Sending…' : 'Send';
-    sendBtn.title = !ctx ? 'untangle isn’t answering: open it on GitHub instead' : !(ctx.gh && ctx.gh.ready) ? 'gh isn’t signed in: open it on GitHub instead' : !words ? 'Say what happened first' : 'File it as an issue, as you, through gh';
+    sendBtn.title = !ctx ? 'untangle isn’t answering: open it on GitHub instead' : !(ctx.gh && ctx.gh.ready) ? 'gh isn’t signed in: open it on GitHub instead' : !titled ? 'Give it a title first' : 'See the issue as it will read, then file it as you, through gh';
     webBtn.classList.toggle('on', !ctx || !(ctx.gh && ctx.gh.ready));
     renderGoes();
     paint();
@@ -479,20 +512,21 @@ async function open(host) {
     st.shapes.forEach((s) => drawShape(x, s, c.width, c.height, unitOf(p)));
     return c;
   }
-  const words = () => {
-    const lines = text.value.replace(/\r/g, '').split('\n');
-    const title = (lines.shift() || '').trim();
-    return { title: title.slice(0, 256), rest: lines.join('\n').trim() };
-  };
+  const words = () => ({ title: titleIn.value.replace(/\s+/g, ' ').trim().slice(0, 256), rest: text.value.replace(/\r/g, '').trim() });
+  // What goes with your words: what untangle adds, its summary, and its log.
+  function going() {
+    const items = goesItems().filter((g) => !st.off.has(g.id) && g.id !== 'log');
+    const sum = items.filter((g) => ['version', 'system', 'browser', 'view'].includes(g.id)).map((g) => (g.id === 'version' ? `untangle ${g.v}` : g.v.split(' · ')[0])).join(' · ') || 'What untangle adds';
+    return { items, sum, log: st.off.has('log') ? [] : logLines() };
+  }
   // What untangle adds, as a table, and its log.
   function details(forWeb) {
-    const items = goesItems().filter((g) => !st.off.has(g.id) && g.id !== 'log');
-    const sum = items.filter((g) => ['version', 'system', 'browser', 'view'].includes(g.id)).map((g) => (g.id === 'version' ? `untangle ${g.v}` : g.id === 'system' ? g.v.split(' · ')[0] : g.v.split(' · ')[0])).join(' · ') || 'What untangle adds';
+    const { items, sum, log } = going();
     const rows = items.map((g) => `| ${cell(g.k)} | ${cell(g.v)} |`).join('\n');
-    const log = st.off.has('log') ? [] : logLines();
     const table = rows ? `| | |\n| --- | --- |\n${rows}` : '';
     const fence = log.length ? '```\n' + log.join('\n').replace(/```/g, "'''") + '\n```' : '';
     if (forWeb) return { table, fence };
+    if (!table && !fence) return '';
     return `<details><summary>${esc(sum)}</summary>\n\n${table}${fence ? '\n\n' + fence : ''}\n\n</details>`;
   }
   function body() {
@@ -512,7 +546,7 @@ async function open(host) {
   }
 
   function close() {
-    kept = { text: text.value, kind: st.kind };
+    kept = { title: titleIn.value, text: text.value, kind: st.kind };
     current = null;
     removeEventListener('keydown', onKey, true);
     scrim.remove();
@@ -525,12 +559,15 @@ async function open(host) {
     e.preventDefault();
     e.stopPropagation();
     if (!take.hidden) { take.hidden = true; el.hidden = scrim.hidden = false; return; }
+    // Checking the issue, Esc goes back to it; sending, it waits for the answer.
+    if (!stepCheck.hidden) { if (!st.sending) { back(); sendBtn.focus(); } return; }
     close();
   };
   addEventListener('keydown', onKey, true);
 
-  // Send says what will happen, and nothing leaves until you say yes: with a picture, a new secret
-  // gist in your account, which anyone with its link can open, and the public issue that shows it.
+  // Send shows the issue as it will read and says what will happen, and nothing leaves until you
+  // say yes: with a picture, a new secret gist in your account, which anyone with its link can
+  // open, and the public issue that shows it.
   function ask() {
     if (!words().title || st.sending) return;
     const who = login ? `<b>${esc(login)}</b>` : 'your GitHub account';
@@ -540,30 +577,50 @@ async function open(host) {
       + `<li>It files a <b>public issue</b> on <b>${esc(repo)}</b>, as ${who}${pic ? ', that shows the picture' : ''}.</li>`
       + (pic ? '<li>The gist stays yours: <code>untangle feedback -list</code> lists them, and you can delete one any time. Its issue then shows a broken picture.</li>' : '')
       + `</ul><div class="fbk-acts"><button type="button" class="fbk-link" data-fb="back">Back</button><button type="button" class="fbk-send" data-fb="approve">${pic ? 'Upload the picture and file it' : 'File the issue'}</button></div>`;
-    ok.hidden = false;
-    acts.hidden = dest.hidden = true;
+    showIssue();
+    stepWrite.hidden = true;
+    stepCheck.hidden = false;
+    stepCheck.scrollTop = 0;
     ok.querySelector('[data-fb="approve"]').focus();
   }
   function back() {
-    ok.hidden = true;
-    ok.innerHTML = '';
-    acts.hidden = dest.hidden = false;
+    stepCheck.hidden = true;
+    stepWrite.hidden = false;
+    issue.innerHTML = ok.innerHTML = '';
+  }
+  // The issue as GitHub will show it: its title and labels, your words, the picture with its
+  // marks, and what untangle adds, open.
+  function showIssue() {
+    const { title, rest } = words();
+    const { items, sum, log } = going();
+    const c = composite();
+    issue.innerHTML = '<div class="fbk-card"><p class="fbk-eye">The issue, as it will read</p>'
+      + `<h3>${esc(title)}</h3>`
+      + `<p class="fbk-meta"><span class="fbk-chip">${st.kind}</span><span class="fbk-chip">from untangle</span><span>on <b>${esc(repo)}</b>, by <b>${esc(login || 'you')}</b></span></p>`
+      + (rest ? `<p class="fbk-desc">${esc(rest)}</p>` : '')
+      + (c ? '<div class="fbk-shot"></div>' : '')
+      + (items.length || log.length ? `<details class="fbk-more" open><summary>${esc(sum)}</summary>`
+        + (items.length ? `<dl>${items.map((g) => `<dt>${esc(g.k)}</dt><dd>${esc(g.v)}</dd>`).join('')}</dl>` : '')
+        + (log.length ? `<div class="fbk-logv">${log.map(logLine).join('')}</div>` : '')
+        + '</details>' : '')
+      + '</div>';
+    if (c) issue.querySelector('.fbk-shot').append(c);
   }
   async function send() {
     const { title } = words();
     if (!title || st.sending) return;
     st.sending = true;
     err.hidden = true;
-    const yes = ok.querySelector('[data-fb="approve"]');
+    const yes = ok.querySelector('[data-fb="approve"]'), no = ok.querySelector('[data-fb="back"]');
     if (yes) { yes.disabled = true; yes.textContent = 'Sending…'; }
+    if (no) no.disabled = true;
     sync();
     const c = composite();
     try {
       const r = await api('api/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: st.kind, title, body: body(), picture: c ? c.toDataURL('image/png') : null, approved: true }) });
       const out = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(out.error || `untangle answered ${r.status}.`);
-      kept = { text: '', kind: 'bug' };
-      text.value = '';
+      titleIn.value = text.value = '';
       close();
       toast(`Filed as #${esc(out.number)} on ${esc(repo)}<a href="${esc(out.url)}" target="_blank" rel="noopener noreferrer">Open the issue</a>${out.gist ? `<a href="${esc(out.gist)}" target="_blank" rel="noopener noreferrer">The picture’s gist</a>` : ''}`);
     } catch (e) {
@@ -620,7 +677,7 @@ async function open(host) {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.tool) { st.tool = b.dataset.tool; return sync(); }
-    if (b.dataset.kind) { st.kind = b.dataset.kind; return sync(); }
+    if (b.dataset.kind) { st.kind = b.dataset.kind; sync(); if (!stepCheck.hidden) showIssue(); return; }
     const act = b.dataset.fb;
     if (act === 'close') close();
     else if (act === 'undo') { st.shapes.pop(); sync(); }
@@ -628,7 +685,7 @@ async function open(host) {
     else if (act === 'retake') retake();
     else if (act === 'send') ask();
     else if (act === 'approve') send();
-    else if (act === 'back') back();
+    else if (act === 'back') { back(); sendBtn.focus(); }
     else if (act === 'web') web();
   });
   take.addEventListener('click', (e) => {
@@ -639,18 +696,21 @@ async function open(host) {
   });
   el.addEventListener('change', (e) => {
     const t = e.target;
-    if (!ok.hidden) back();
     if (t.dataset.fb === 'include') st.include = t.checked;
     else if (t.dataset.fb === 'hidden') st.hidden = t.checked;
     else if (t.dataset.go) { if (t.checked) st.off.delete(t.dataset.go); else st.off.add(t.dataset.go); }
     sync();
   });
-  text.addEventListener('input', () => { if (!ok.hidden) back(); sync(); });
-  scrim.addEventListener('click', () => text.focus());
+  titleIn.addEventListener('input', sync);
+  text.addEventListener('input', sync);
+  // Enter in the title goes on to the description.
+  titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); text.focus(); } });
+  const typing = () => (titleIn.value.trim() ? text : titleIn);
+  scrim.addEventListener('click', () => typing().focus());
 
-  current = { focus: () => text.focus() };
+  current = { focus: () => typing().focus() };
   sync();
-  text.focus();
+  typing().focus();
   takeBoth();
 }
 

@@ -97,8 +97,8 @@ async function openPanel(page: Browser): Promise<void> {
   await page.click('#vw-fb');
   await page.until(`!!document.querySelector('.fbk') && document.querySelector('.fbk .fbk-wait').hidden && document.querySelector('.fbk canvas.pic').width > 0`, 30_000);
 }
-const write = (text: string) => `(() => { const t = document.querySelector('.fbk textarea'); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event('input', { bubbles: true })); })()`;
-const report = 'Space skips the change under a folded section\n\nI folded Outside the tests and pressed Space from the top.';
+const write = (title: string, text: string) => `(() => { for (const [sel, value] of [['#fbk-title', ${JSON.stringify(title)}], ['.fbk textarea', ${JSON.stringify(text)}]]) { const t = document.querySelector(sel); t.value = value; t.dispatchEvent(new Event('input', { bubbles: true })); } })()`;
+const report = ['Space skips the change under a folded section', 'I folded Outside the tests and pressed Space from the top.'] as const;
 
 describe('Given a served review, with gh signed in as octocat, and the gist and the issue kept on this machine, ', { skip, timeout: 240_000 }, () => {
   let s: Served | undefined;
@@ -123,7 +123,7 @@ describe('Given a served review, with gh signed in as octocat, and the gist and 
     });
 
     it('then the panel opens on a picture of the page, its text hidden, as untangle can’t tell this repository is public.', () => {
-      assert.equal(shown, 'the picture included · its text hidden · An issue on fixture/feedback, which is public, filed as you through gh (octocat). Send shows what it uploads, and waits for your yes.');
+      assert.equal(shown, 'the picture included · its text hidden · An issue on fixture/feedback, which is public, filed as you through gh (octocat). Send shows it as it will read, and waits for your yes.');
     });
 
     it('then what goes with it is untangle, the system, the browser, the review, the view, the page’s errors and untangle’s log.', () => {
@@ -133,14 +133,33 @@ describe('Given a served review, with gh signed in as octocat, and the gist and 
 
   describe('when the report is written and Send is pressed, ', () => {
     let asked = '';
+    let issue = '';
+    let log = '';
+    let back = '';
     let calls = '';
 
     before(async () => {
-      await s!.page.eval(write(report));
+      await s!.page.eval(write(...report));
       await s!.page.click('.fbk [data-fb="send"]');
-      await s!.page.until(`!!document.querySelector('.fbk-ok:not([hidden])')`);
+      await s!.page.until(`!!document.querySelector('.fbk-c:not([hidden])')`);
       asked = await read(s!.page, `document.querySelector('.fbk-ok').innerText`);
+      issue = await read(s!.page, `(() => { const c = document.querySelector('.fbk-card'); return [c.querySelector('h3').textContent, c.querySelector('.fbk-meta').textContent, c.querySelector('.fbk-desc').textContent, c.querySelector('.fbk-shot canvas') ? 'the picture' : 'no picture', [...c.querySelectorAll('.fbk-more dt')].map((d) => d.textContent).join(', ')].join(' | '); })()`);
+      // The log's lines wrap: nothing in the panel scrolls sideways.
+      log = await read(s!.page, `(() => { const lines = [...document.querySelectorAll('.fbk-ll')], step = document.querySelector('.fbk-c'), said = /the last (\\d+) lines/.exec(document.querySelector('.fbk-goes').textContent); return [lines.length === Number(said && said[1]) ? 'every line of its log' : lines.length + ' lines of ' + (said && said[1]), lines.every((l) => l.scrollWidth <= l.clientWidth) && step.scrollWidth <= step.clientWidth ? 'wrapped' : 'too wide'].join(', '); })()`);
+      await s!.page.key('Escape');
+      back = await read(s!.page, `[document.querySelector('.fbk') ? 'the panel open' : 'the panel closed', document.querySelector('.fbk-b').hidden ? 'not on the words' : 'on the words', document.querySelector('#fbk-title').value].join(', ')`);
+      await s!.page.click('.fbk [data-fb="send"]');
+      await s!.page.until(`!!document.querySelector('.fbk-c:not([hidden])')`);
       calls = s!.gh.calls().map((c) => c.args.slice(0, 2).join(' ')).filter((c) => /^(gist|issue)/.test(c)).join(', ');
+    });
+
+    it('then it shows the issue as it will read: the title, its labels, the words, the picture, what untangle adds, and every line of its log, wrapped.', () => {
+      assert.equal(issue, 'Space skips the change under a folded section | bugfrom untangleon fixture/feedback, by octocat | I folded Outside the tests and pressed Space from the top. | the picture | untangle, System, Browser, The review, The view, Errors');
+      assert.equal(log, 'every line of its log, wrapped');
+    });
+
+    it('then Esc goes back to the words, and the panel stays open.', () => {
+      assert.equal(back, 'the panel open, on the words, Space skips the change under a folded section');
     });
 
     it('then it says what it will upload and file, as octocat, and gh has made nothing yet.', () => {
@@ -197,7 +216,7 @@ describe('Given a served review whose gh isn’t signed in, ', { skip, timeout: 
   before(async () => {
     s = await served(signedOut);
     await openPanel(s.page);
-    await s.page.eval(write(report));
+    await s.page.eval(write(...report));
     send = await read(s.page, `(() => { const b = document.querySelector('.fbk [data-fb="send"]'); return (b.disabled ? 'Send off: ' : 'Send on: ') + b.title; })()`);
     await s.page.click('.fbk [data-fb="web"]');
     const opened = String(await s.page.eval(`window.__opened || ''`));
@@ -246,16 +265,16 @@ describe('Given a served review, signed in to gh, ', { skip, timeout: 240_000 },
       await s!.page.until(`!document.querySelector('#vw-alarm').hidden`, 10_000);
       alarm = await read(s!.page, `document.querySelector('#vw-alarm').textContent`);
       await s!.page.click('#vw-alarm button');
-      await s!.page.until(`!!document.querySelector('.fbk textarea') && document.querySelector('.fbk textarea').value`, 30_000);
-      words = await read(s!.page, `document.querySelector('.fbk textarea').value`);
+      await s!.page.until(`!!document.querySelector('#fbk-title') && document.querySelector('#fbk-title').value`, 30_000);
+      words = await read(s!.page, `document.querySelector('#fbk-title').value + ' | ' + document.querySelector('.fbk textarea').value`);
       await s!.page.key('Escape');
       await s!.page.until(`!document.querySelector('.fbk')`);
     });
 
-    it('then the command says the report is on the page, the bar offers it, and it opens with the agent’s words.', () => {
+    it('then the command says the report is on the page, the bar offers it, and it opens with the agent’s words as its title.', () => {
       assert.equal(said, 'untangle: the report is on the review’s page, for you to check and send.');
       assert.equal(alarm, 'A report is drafted · for you to checkOpen it');
-      assert.equal(words, 'untangle note hangs: no answer in 5 minutes');
+      assert.equal(words, 'untangle note hangs: no answer in 5 minutes | ');
     });
   });
 
