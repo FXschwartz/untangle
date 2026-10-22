@@ -4,6 +4,7 @@
 (function () {
   'use strict';
   const C = window.ReviewCore;
+  const { nList, agentLabel } = C;
   const $ = (sel, el) => (el || document).querySelector(sel);
   // served: the server keeps marks and answers on demand. key: this review, for browser storage.
   const CONFIG = JSON.parse(($('#d-config') || { textContent: '{}' }).textContent || '{}');
@@ -1802,9 +1803,10 @@
     const crumb = !!MENU.open && MENU.open.startsWith('crumb:');
     const anchors = MENU.open ? [...viewer.querySelectorAll(`[data-menu="${MENU.open}"]`)] : [];
     const anchor = anchors.find((a) => a.getClientRects().length) || anchors[0];
-    const items = !anchor || lens ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'more' ? moreMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
+    const revs = MENU.open === 'reviews';
+    const items = !anchor || lens || revs ? [] : MENU.open === 'view' ? viewMenuItems() : MENU.open === 'more' ? moreMenuItems() : MENU.open === 'side' ? sideMenuItems() : MENU.open === 'also' ? alsoMenuItems() : crumb ? crumbMenuItems() : MENU.open.startsWith('cm:') ? cmMenuItems(anchor) : chainsMenuItems();
     const sheet = compact();
-    const html = !anchor ? '' : (sheet ? SHEET_HANDLE : '') + (lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '');
+    const html = !anchor ? '' : (sheet ? SHEET_HANDLE : '') + (revs ? revsPopHtml() : lens ? (hxOn() ? lensPopHtml() : '') : items.length ? menuHtml(items) : '');
     if (!html || html === SHEET_HANDLE) {
       MENU.open = null;
       MENU.html = '';
@@ -1815,9 +1817,10 @@
       return;
     }
     // The marks' panel says something and has one button, and "Changes from" holds a list: dialogs.
-    el.setAttribute('role', MENU.open === 'side' || lens ? 'dialog' : 'menu');
-    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'more' ? 'More' : lens ? 'Changes from' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
+    el.setAttribute('role', MENU.open === 'side' || lens || revs ? 'dialog' : 'menu');
+    el.setAttribute('aria-label', MENU.open === 'side' ? 'Marks' : MENU.open === 'more' ? 'More' : lens ? 'Changes from' : revs ? 'Your reviews' : MENU.open === 'chains' || MENU.open === 'also' ? 'Chains' : crumb ? 'The files in a folder' : 'More');
     el.classList.toggle('panel', MENU.open === 'side');
+    el.classList.toggle('revs-pop', revs);
     el.classList.toggle('lens-pop', lens);
     el.classList.toggle('sheet', sheet);
     if (html !== MENU.html) {
@@ -1838,7 +1841,7 @@
       return;
     }
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
-    const left = Math.max(8, Math.min(MENU.open === 'side' || MENU.open === 'chains' || lens || crumb ? r.left : r.right - w, window.innerWidth - w - 8));
+    const left = Math.max(8, Math.min(MENU.open === 'side' || MENU.open === 'chains' || lens || crumb || revs ? r.left : r.right - w, window.innerWidth - w - 8));
     const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
@@ -1863,6 +1866,7 @@
     MENU.html = '';
     MENU.crumb = null;
     if (MENU.open === 'lens') loadCommits();
+    if (MENU.open === 'reviews') rvLoad();
     renderMenu();
     // A menu's current item takes the focus, else its first; "Changes from" the scope it has; the
     // marks' panel takes none (its one button resets).
@@ -2205,20 +2209,6 @@
   const agentsNow = () => (NT.data ? NT.data.agents : []);
   // The one a note just written goes to: the first that hears it, else the first.
   const agentFirst = () => { const l = agentsNow(); return l.find((a) => a.state !== 'deaf' && a.state !== 'left') || l[0] || null; };
-  // Note numbers as words: N4, N2 and N4, N1–N3, N1, N3 and N5.
-  function nList(ns) {
-    const runs = [];
-    [...ns].sort((a, b) => a - b).forEach((n) => { const r = runs[runs.length - 1]; if (r && n === r[1] + 1) r[1] = n; else runs.push([n, n]); });
-    const parts = runs.flatMap(([a, b]) => (b - a >= 2 ? [`N${a}–N${b}`] : a === b ? [`N${a}`] : [`N${a}`, `N${b}`]));
-    return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0] || '';
-  }
-  function agentLabel(a) {
-    if (a.state === 'listening') return `${a.name} is listening`;
-    if (a.state === 'working') return `${a.name} is working${a.on.length ? ' on ' + nList(a.on) : ''}`;
-    if (a.state === 'queued') return a.on.length ? `${nList(a.on)} ${a.on.length === 1 ? 'waits' : 'wait'} for ${a.name}’s turn` : `untangle’s line waits for ${a.name}’s turn`;
-    if (a.state === 'deaf') return `${a.name} isn’t listening`;
-    return `${a.name} left`;
-  }
 
   function ntSet(d) {
     const was = NT.data;
@@ -3080,6 +3070,35 @@
     if (again) again.focus({ preventScroll: true });
   }
   let toastTimer = null;
+  // ---------- Reviews: the others on this machine, from this one. untangle reads them as its
+  // manager lists them; a click brings one's tab to the front.
+  const RV = { list: null, self: null, said: new Set(), timer: 0 };
+  const revsEl = $('#vw-revs');
+  const rvName = (r) => r.name.replace(/^[^#]*#/, '#');
+  function revsPopHtml() {
+    const list = RV.list || [];
+    const items = list.map((r) => `<button type="button" class="rv-it" data-act="rv-open" data-id="${esc(r.id)}"${r.status === 'running' ? '' : ' title="Paused: it starts again from the manager"'}><i class="dot${r.status === 'paused' ? ' paused' : r.need ? ' need' : ''}"></i><span class="num">${esc(rvName(r))}</span><span class="t">${esc(r.title)}</span><small class="${r.need ? 'need' : ''}">${esc(r.need || (r.twin ? 'open twice' : r.status === 'paused' ? 'paused' : r.agents[0] ? r.agents[0].label : r.build ? 'building' : r.older ? 'older untangle' : ''))}</small></button>`).join('');
+    return `<div class="rv-h">Your reviews<button type="button" class="linkish" data-act="rv-manager">Open the manager</button></div>${RV.list ? items || '<p class="rv-none">No other reviews: this one is the only one.</p>' : '<p class="rv-none">Asking untangle…</p>'}<button type="button" class="rv-new" data-act="rv-new"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Start a review</button>`;
+  }
+  function rvLoad() {
+    clearTimeout(RV.timer);
+    if (document.visibilityState === 'hidden') return;
+    api('reviews').then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d) return;
+      const first = !RV.list;
+      RV.self = d.self;
+      RV.list = d.reviews.filter((r) => r.id !== d.self && r.status !== 'closed');
+      // A review that needs you, newly: said once, unless it's what the page found as it opened.
+      RV.list.forEach((r) => { if (r.need && !RV.said.has(r.id + r.need)) { RV.said.add(r.id + r.need); if (!first) toast(`${r.need} on ${rvName(r)}`); } });
+      const need = RV.list.filter((r) => r.status === 'running' && r.need).length;
+      const n = $('#vw-revs-n');
+      n.hidden = !need;
+      n.textContent = need;
+      revsEl.title = need ? `Your other reviews: ${need} need${need === 1 ? 's' : ''} you` : 'Your other reviews';
+      if (MENU.open === 'reviews') renderMenu();
+    }).catch(() => {}).finally(() => { RV.timer = setTimeout(rvLoad, MENU.open === 'reviews' ? 3000 : 15000); });
+  }
+
   function toast(msg) {
     let el = $('#vw-toast');
     if (!el) { el = document.createElement('div'); el.id = 'vw-toast'; el.className = 'toast'; el.setAttribute('role', 'status'); viewer.appendChild(el); }
@@ -7307,6 +7326,12 @@
       return;
     }
     if (act === 'refresh') return startRefresh();
+    if (act === 'rv-open' || act === 'rv-manager' || act === 'rv-new') {
+      closeMenu();
+      const go = act === 'rv-open' ? api('reviews/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: t.dataset.id }) }) : api('reviews/manager', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ palette: act === 'rv-new' }) });
+      go.then((r) => r.json().then((j) => { if (!r.ok) toast(j.error || 'untangle couldn’t open it'); })).catch(() => toast('untangle couldn’t open it'));
+      return;
+    }
     if (act === 'lsp-restart') {
       t.disabled = true;
       api('lsp/restart', { method: 'POST' }).catch(() => {}).then(pollMetrics);
@@ -7753,6 +7778,11 @@
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then((m) => { metricsMisses = 0; showMetrics(m); metricsTimer = setTimeout(pollMetrics, 2000); })
       .catch(() => { if (++metricsMisses >= 3) return showMetrics(null); metricsTimer = setTimeout(pollMetrics, 2000); });
+  }
+  if (CONFIG.served && revsEl) {
+    revsEl.hidden = false;
+    rvLoad();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') rvLoad(); });
   }
   if (CONFIG.served && lspEl) {
     lspEl.hidden = false;

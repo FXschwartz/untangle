@@ -4,15 +4,14 @@
 // background, as Claude does. A watch from Codex returns at once instead: untangle puts a line in
 // its chat when there's news. `reply` answers in a note’s thread, `note` writes a note of the
 // agent's own, `notes` prints the open notes, and `stop` closes the review.
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { chatOf, type Chat } from './chats.js';
+import { launch, logTail } from './launcher.js';
+import { call, failed, Gone } from './client.js';
 import { isPrUrl } from './target.js';
 import { openBrowser } from './open.js';
-import { findRun, listRuns, pidAlive, prKey, removeRun, runDir, wantedDir, type RunInfo, type Wanted } from './runs.js';
+import { findRun, listRuns, pidAlive, removeRun, wantedDir, wantedUrl, type RunInfo, type Wanted } from './runs.js';
 import { outdatedSkill } from './skill.js';
 
 // The server answers a wait at least this often, so no connection sits idle for long; the command
@@ -35,8 +34,8 @@ const sh = (s: string) => (/^[\w./:@%+=-]+$/.test(s) ? s : `'${s.replace(/'/g, `
 
 /** What a command's -review (or watch's argument) stands for. */
 function wanted(target: string): Wanted {
-  const m = /github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/pull\/(\d+)/.exec(target);
-  if (isPrUrl(target) && m) return { pr: prKey(m[1], m[2], Number(m[3])), dir: null, repoKey: `github.com/${m[1]}/${m[2]}`, branch: null };
+  const byUrl = isPrUrl(target) ? wantedUrl(target) : null;
+  if (byUrl) return byUrl;
   if (!fs.existsSync(target)) throw new Error(`${target} does not exist`);
   const dir = fs.statSync(target).isDirectory() ? target : path.dirname(target);
   const w = wantedDir(dir);
@@ -44,36 +43,6 @@ function wanted(target: string): Wanted {
   return w;
 }
 
-class Gone extends Error {}
-
-/** A call to a running review, with its token. Rejects with Gone when the review isn't there. */
-function call(run: RunInfo, method: string, route: string, opts: { query?: Record<string, string>; body?: unknown; signal?: AbortSignal } = {}): Promise<{ status: number; data: Record<string, unknown> }> {
-  const url = new URL(run.url);
-  const base = url.pathname.endsWith('/') ? url.pathname : url.pathname + '/';
-  const query = opts.query ? '?' + new URLSearchParams(opts.query).toString() : '';
-  const body = opts.body === undefined ? undefined : JSON.stringify(opts.body);
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      host: url.hostname, port: url.port, method, path: `${base}api/${route}${query}`, signal: opts.signal,
-      headers: { 'x-untangle-token': run.token, ...(body !== undefined ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}) },
-    }, (res) => {
-      let text = '';
-      res.setEncoding('utf8').on('data', (d: string) => { text += d; }).on('end', () => {
-        let data: Record<string, unknown> = {};
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = { error: text.trim() || `untangle answered ${res.statusCode}` };
-        }
-        resolve({ status: res.statusCode || 0, data });
-      }).on('error', () => reject(new Gone()));
-    });
-    req.on('error', (e) => reject((e as Error).name === 'AbortError' ? e : new Gone()));
-    req.end(body);
-  });
-}
-
-const failed = (r: { status: number; data: Record<string, unknown> }) => (r.status >= 400 ? String(r.data.error || `untangle answered ${r.status}`) : null);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid: number) => listRuns().some((r) => r.pid === pid);
 // What a command run from a chat that no longer holds the review hears.
@@ -104,54 +73,44 @@ async function running(review: string | null): Promise<RunInfo> {
   return run;
 }
 
-/** The last lines a review that didn't start printed. */
-const tail = (file: string) => {
-  try {
-    return fs.readFileSync(file, 'utf8').replace(/\x1b\[[0-9;]*m/g, '').trim().split('\n').slice(-6).join('\n');
-  } catch {
-    return '';
-  }
-};
-
 /**
  * Starts a review in the background, as `untangle [flags] <target>` would, and finds its run file.
- * A launcher starts it and exits, so the review isn't this watch's child: an agent that stops the
- * watch ends everything under it.
+ * The launcher starts it, so the review isn't this watch's child: an agent that stops the watch
+ * ends everything under it.
  */
-async function start(target: string, flags: string[]): Promise<{ run: RunInfo; log: string }> {
-  fs.mkdirSync(runDir(), { recursive: true, mode: 0o700 });
-  // Logs of reviews started a day ago or more are no longer read.
-  for (const name of fs.readdirSync(runDir())) {
-    const file = path.join(runDir(), name);
-    if (/^start-.*\.log$/.test(name) && Date.now() - fs.statSync(file).mtimeMs > 86_400_000) fs.rmSync(file, { force: true });
-  }
-  const log = path.join(runDir(), `start-${Date.now()}-${process.pid}.log`);
-  const at = (name: string) => fileURLToPath(new URL(name, import.meta.url));
-  const launched = spawnSync(process.execPath, [at('./launch.js'), log, at('./cli.js'), ...flags, '--', target], { cwd: process.cwd(), env: { ...process.env, UNTANGLE_FROM_AGENT: '1' }, encoding: 'utf8', windowsHide: true });
-  const pid = Number(launched.stdout?.trim());
+async function start(target: string, flags: string[]): Promise<{ run: RunInfo; log: string | null }> {
+  const { pid, log } = launch([...flags, '--', target], { ...process.env, UNTANGLE_FROM_AGENT: '1' });
   for (let i = 0; pid > 0 && i < 600; i++) {
     const run = listRuns().find((r) => r.pid === pid);
     if (run) return { run, log };
     if (!pidAlive(pid)) break;
     await sleep(100);
   }
-  throw new Error(`the review didn’t start${tail(log) ? ':\n' + tail(log) : ''}`);
+  // Another untangle started it meanwhile, and this one gave way: that one.
+  const other = await find(target);
+  if (other) return { run: other, log: null };
+  throw new Error(`the review didn’t start${logTail(log) ? ':\n' + logTail(log) : ''}`);
 }
 
-/** Waits until the review is built: until then it answers 503. */
-async function ready(run: RunInfo, agent: string, log: string | null): Promise<Record<string, unknown>> {
+/**
+ * Waits until the review is built: until then it answers 503. One that gave way to another
+ * untangle of the review, started at the same moment, leads to that one.
+ */
+async function ready(run: RunInfo, agent: string, log: string | null, target: string): Promise<{ run: RunInfo; hello: Record<string, unknown>; log: string | null }> {
   for (;;) {
     let r;
     try {
       r = await call(run, 'GET', 'notes/hello', { query: { agent } });
     } catch (e) {
-      if (!(e instanceof Gone) || !alive(run.pid)) throw new Error(`the review stopped before it was ready${log && tail(log) ? ':\n' + tail(log) : ''}`);
+      const other = e instanceof Gone && !alive(run.pid) ? await find(target) : null;
+      if (other && other.pid !== run.pid) { run = other; log = null; continue; }
+      if (!(e instanceof Gone) || !alive(run.pid)) throw new Error(`the review stopped before it was ready${log && logTail(log) ? ':\n' + logTail(log) : ''}`);
       r = { status: 503, data: {} };
     }
     if (r.status !== 503) {
       const err = failed(r);
       if (err) throw new Error(err);
-      return r.data;
+      return { run, hello: r.data, log };
     }
     await sleep(400);
   }
@@ -169,7 +128,8 @@ export async function watch(o: { target: string; given: boolean; forward: string
     say(`starting the review of ${o.given ? o.target : 'this directory'}…`);
     ({ run, log } = await start(o.target, o.forward));
   }
-  const hello = await ready(run, agent, log);
+  let hello: Record<string, unknown>;
+  ({ run, hello, log } = await ready(run, agent, log, o.target));
   // Already running, with no page open: one opens, so the person can write the notes.
   let opened = log ? (hello.opened as string | null) : null;
   if (!log && !hello.pages) opened = await openBrowser(run.url);
@@ -200,7 +160,9 @@ export async function watch(o: { target: string; given: boolean; forward: string
     if (err) throw new Error(err);
     const a = r.data;
     if (a.closed) {
-      say(`the review of ${hello.title} is closed (its page closed, or untangle stop ran): there’s nothing more to watch.`);
+      say(a.paused
+        ? `the review of ${hello.title} paused: its notes and this chat are kept. Resume, in untangle reviews, brings it back and says so here; there’s nothing more to watch until then.`
+        : `the review of ${hello.title} is closed (its page closed, or untangle stop ran): there’s nothing more to watch.`);
       return 0;
     }
     if (a.taken) {

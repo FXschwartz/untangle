@@ -6,7 +6,7 @@ import fs from 'node:fs';
 const linux = process.platform === 'linux';
 
 /** Resident memory of a process, in bytes. */
-function rss(pid: number): number | null {
+export function rss(pid: number): number | null {
   try {
     if (linux) {
       const kb = /^VmRSS:\s+(\d+) kB/m.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'));
@@ -15,6 +15,16 @@ function rss(pid: number): number | null {
     return Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim()) * 1024 || null;
   } catch {
     return null;
+  }
+}
+
+/** A process's children: a review's language server, for one that can't say its memory itself. */
+export function childPids(pid: number): number[] {
+  try {
+    const text = linux ? fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8') : execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
+    return text.split(/\s+/).filter(Boolean).map(Number);
+  } catch {
+    return [];
   }
 }
 

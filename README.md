@@ -24,6 +24,8 @@ Dart, and opens in your browser.
     - [The commits, as a lens](#the-commits-as-a-lens)
     - [The pull request's conversation](#the-pull-requests-conversation)
     - [Review with your agent](#review-with-your-agent)
+    - [Every review on one page](#every-review-on-one-page)
+    - [Start a review with its agent](#start-a-review-with-its-agent)
     - [And more](#and-more)
   - [Getting started](#getting-started)
     - [1. Install the requirements](#1-install-the-requirements)
@@ -34,6 +36,7 @@ Dart, and opens in your browser.
     - [Where it opens](#where-it-opens)
     - [Generated code](#generated-code)
     - [With a coding agent](#with-a-coding-agent)
+    - [Your reviews](#your-reviews)
     - [Upgrading](#upgrading)
     - [Keys](#keys)
     - [Flags](#flags)
@@ -151,6 +154,27 @@ Claude and Codex, and *Copy for agent* takes the notes to any other chat.
 
 ![Notes on #168's sync_streams.dart: Claude listening, its answers in the threads, a note changed since the head it was written on, and one it resolved](docs/images/notes.png)
 
+### Every review on one page
+
+`untangle reviews` opens a page with every review on your machine: running, paused or closed,
+each with its progress, its agent, and what waits for you. Open a row to read the agent's last
+steps and the notes it left you, and Space opens the next review that needs you. Pause a review to
+give its memory back, and Resume brings it back with its chat. Closed reviews show the space they
+hold, and free it in a click. Inside a review, Reviews lists the others and says when one needs
+you.
+
+![The reviews page: #168 open, with Claude listening, its last steps and the note it answered; #170 with no agent; and #142 paused, its chat kept](docs/images/reviews.png)
+
+### Start a review with its agent
+
+New review lists the pull requests GitHub asks you to review and your own. Pick one, or paste any
+pull request's link, and choose Claude or Codex: the review opens, and the agent's chat starts
+next to it, already holding the review. Ask for an initial review, and the agent's findings come
+in as notes on the lines they're about. Inside Orca, the reviews and their chats share a
+workspace of their own.
+
+![New review: #125 picked, to start with Claude in a new chat, with an initial review requested](docs/images/new-review.png)
+
 ### And more
 
 - **Refresh in place.** When the pull request gets new commits, a banner offers to refresh. Marks
@@ -217,7 +241,7 @@ and `untangle` stops.
 ```
 untangle [flags] [directory]
 untangle [flags] <pr-url>
-untangle watch | reply | note | notes | stop | skill | upgrade ...
+untangle watch | reply | note | notes | stop | skill | upgrade | reviews ...
 ```
 
 ### What it reviews
@@ -235,6 +259,9 @@ default browser. `BROWSER` overrides both. The link carries a token, as Jupyter'
 
 Closing the review's page stops `untangle` five seconds later, so you can launch, review, close
 and move on. A reload keeps it serving, and so does `-autoclose=false`.
+
+Run `untangle` on a review that's open already, and its page comes to the front instead of a
+second one starting.
 
 ### Generated code
 
@@ -278,6 +305,34 @@ chat is enough. The agent runs:
 Claude runs `watch` in the background, and its end wakes the chat. Codex's `watch` returns at
 once, and untangle puts a line in its chat when there's something new. The review runs on its
 own, so a watch or a chat that ends never closes the page.
+
+### Your reviews
+
+`untangle reviews` opens the reviews page, and `untangle reviews -list` prints the same reviews in
+the terminal. A click opens a row and another closes it, and as many stay open as you like.
+
+| Key                          |                                                 |
+| ---------------------------- | ----------------------------------------------- |
+| <kbd>Ctrl</kbd> <kbd>K</kbd> | start a review: New review                      |
+| <kbd>↑</kbd> <kbd>↓</kbd>    | previous and next review                        |
+| <kbd>→</kbd> <kbd>←</kbd>    | open and close its row                          |
+| <kbd>Enter</kbd>             | bring the review's page to the front            |
+| <kbd>c</kbd>                 | bring its agent's chat to the front, in Orca    |
+| <kbd>p</kbd> <kbd>r</kbd>    | pause the review, or resume a paused one        |
+| <kbd>Space</kbd>             | open the next review that needs you             |
+
+- **New review** starts the review with Claude, Codex or no agent, in a new chat or in one that
+held a review before. *Request an initial review* fills the first message with a template you can
+change, and *Advanced* shows the flags the agent starts with, kept for the next time. A review
+running without an agent gets one the same way, from its row.
+- **Pause** gives a review's memory back and keeps its notes, its marks and its chat. It waits for
+the agent's turn to end, so the chat stops at a good place; *Pause now*, in the row's menu,
+doesn't. A review left idle for an hour says so. A paused pull request that's merged or closed on
+GitHub moves to Closed.
+- **Closed** lists the space each review holds. *Free the space* keeps its notes and marks, so
+*Reopen* builds the rest again, and *Forget* asks first, then removes those too. Fourteen days
+after a review closes, its space is freed on its own.
+- **Outside Orca**, the agent's command is copied for you to run in a terminal.
 
 ### Upgrading
 
@@ -378,12 +433,17 @@ versions kept marks on move to it when their review starts.
   - `repos/`: clones made for pull request URLs (bare, blobs on demand).
   - `worktrees/`: checkouts of base and head commits. Each is a repository of its own that borrows
   your repository's objects, so your repository doesn't list it, or a worktree of a clone:
-  untangle's, or a partial clone of yours. Deleting one is safe. Older versions made worktrees of
-  your repository: they become their own when untangle next reviews it.
+  untangle's, or a partial clone of yours. Deleting one is safe, and the reviews page removes the
+  ones no review keeps. Older versions made worktrees of your repository: they become their own
+  when untangle next reviews it.
   - `reviews/`: per pair of commits, the analyzer's facts, the review, and marks on parts of a
   change.
   - `notes/`: your notes, per review, named like its marks (`notes/github.com/<owner>/<repo>/pr-<number>.json`).
-  - `run/`: the port and token of each review running now, for the agent's commands.
+  - `run/`: the port and token of each review running now, for the agent's commands, and of the
+  reviews page.
+  - `sessions/`: a record of each review, for the reviews page: what it reviews, how far you are,
+  its agent's chats, and what it holds on disk.
+  - `chats/`: where the chats New review starts run, and the flags each agent last started with.
   - `untangle/`: `untangle`'s own clone, which `untangle upgrade` pulls, builds and links. Once
   upgraded, the `untangle` command runs from it, so keep it when you clear the cache.
   - `upgrade.json`: GitHub's `main` as last looked up, kept a day, to say when an upgrade brings a

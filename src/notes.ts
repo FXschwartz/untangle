@@ -135,7 +135,7 @@ export interface AgentView {
 export type WatchAnswer =
   | { text: string; notes: number; replies: number; first: boolean }
   | { idle: true; first: boolean }
-  | { closed: true }
+  | { closed: true; paused?: true }
   | { taken: true };
 
 /** An agent holding the review in this run: the chat it holds it from, and what it read last. */
@@ -256,6 +256,8 @@ export class Notes {
   // Bumped on every change, the agents' coming and going included: pages ask again when it moves.
   private rev = 0;
   private closed = false;
+  // Closed by a pause: its chats hear it'll be back.
+  private paused = false;
   private lastSent = 0;
   private readonly waiters = new Set<() => void>();
   // The agents holding the review in this run, and the watches waiting now (each from a chat).
@@ -529,6 +531,24 @@ export class Notes {
     });
   }
 
+  /** The chats holding the review in this run, with the name each one's agent answers as. */
+  chats(): Array<{ agent: string; chat: Chat }> {
+    return [...this.holders].flatMap(([agent, h]) => (h.chat ? [{ agent, chat: h.chat }] : []));
+  }
+
+  /** The open notes an agent had the last word on: where they are, who, and whether it wrote them. */
+  waiting(): Array<{ n: number; path: string; line: number | null; by: string; wrote: boolean }> {
+    return this.data.notes
+      .filter((n) => !n.resolved && n.comments[n.comments.length - 1].by !== null)
+      .map((n) => ({ n: n.n, path: n.path, line: n.line, by: n.comments[n.comments.length - 1].by!, wrote: n.comments[0].by !== null }));
+  }
+
+  /** Open notes, and those an agent had the last word on: they wait for your answer. */
+  counts(): { open: number; waiting: number } {
+    const open = this.data.notes.filter((n) => !n.resolved);
+    return { open: open.length, waiting: open.filter((n) => n.comments[n.comments.length - 1].by !== null).length };
+  }
+
   /** Whether an agent holds the review now: untangle then looks for its commits more often. */
   watched(): boolean {
     return this.agents().some((a) => a.state === 'listening' || a.state === 'working' || a.state === 'queued');
@@ -780,7 +800,7 @@ export class Notes {
       };
       const idle = (): WatchAnswer => { const first = !a.told; a.told = true; this.save(); return { idle: true, first }; };
       const check = () => {
-        if (this.closed) return done({ closed: true });
+        if (this.closed) return done(this.paused ? { closed: true, paused: true } : { closed: true });
         if (!this.ctx) return;
         if (h.fresh) return done(this.deliver(agent));
         if (!this.unseen(agent).count) { if (opts.brief) done(idle()); return; }
@@ -864,9 +884,10 @@ export class Notes {
     this.pulse.unref();
   }
 
-  /** The review is closing: waiting agents hear so. */
-  close(): void {
+  /** The review is closing, or pausing: waiting agents hear so. */
+  close(paused = false): void {
     this.closed = true;
+    this.paused = paused;
     this.waiters.forEach((w) => w());
     if (this.pulse) clearInterval(this.pulse);
     if (this.ringing) clearTimeout(this.ringing);

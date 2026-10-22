@@ -55,11 +55,14 @@ function untangleEnv(cacheDir: string, gh: GhStub, extra?: NodeJS.ProcessEnv): N
   env.GIT_CONFIG_COUNT = '1';
   env.GIT_CONFIG_KEY_0 = 'url./nonexistent/untangle.git.insteadOf';
   env.GIT_CONFIG_VALUE_0 = 'https://github.com/marcelomendoncasoares/untangle.git';
-  // These tests run inside Orca. A review must not open the person's browser or a real Orca tab.
+  // These tests run inside Orca. A review must not open the person's browser or a real Orca tab,
+  // and untangle must not find Orca's own command on PATH either: the manager would add each
+  // test's cache to the person's Orca as a project. A test that wants Orca passes its stand-in.
   delete env.BROWSER;
   for (const key of Object.keys(env)) {
     if (key.startsWith('ORCA_')) delete env[key];
   }
+  env.UNTANGLE_NO_ORCA = '1';
   // And inside an agent's chat: a watch must not take that chat for the one holding the review.
   for (const key of Object.keys(env)) {
     if (/^(CLAUDE|CODEX_)/.test(key) || ['AI_AGENT', 'GEMINI_CLI', 'UNTANGLE_AGENT'].includes(key)) delete env[key];
@@ -237,10 +240,20 @@ export function runsIn(cacheDir: string): Array<{ pid: number; url: string; toke
   });
 }
 
-/** Stops the reviews running from this cache, and waits until they're gone. */
+/** The manager running from this cache: untangle reviews starts it in the background. */
+export function managerIn(cacheDir: string): { pid: number; url: string; token: string } | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(cacheDir, 'run', 'manager.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Stops the reviews running from this cache, and its manager, and waits until they're gone. */
 export async function stopRuns(cacheDir: string): Promise<void> {
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  for (const { pid } of runsIn(cacheDir)) {
+  const manager = managerIn(cacheDir);
+  for (const { pid } of [...runsIn(cacheDir), ...(manager ? [manager] : [])]) {
     if (pid === process.pid) continue;
     try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
     for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));

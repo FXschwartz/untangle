@@ -55,7 +55,7 @@ export function usage(version: string): string {
     'usage:',
     '  untangle [flags] [directory]',
     '  untangle [flags] <pr-url>',
-    '  untangle watch | reply | note | notes | stop | skill | upgrade ...',
+    '  untangle watch | reply | note | notes | stop | skill | upgrade | reviews ...',
     '',
     'A directory reviews its branch’s pull request, or else what the branch adds to the default branch.',
     'A pull request URL is cloned into the cache first. The review opens in your browser.',
@@ -73,6 +73,9 @@ export function usage(version: string): string {
     '',
     'untangle upgrade pulls the latest untangle into a clone in the cache, builds it and links it on',
     'PATH, then updates the skill where it’s installed.',
+    '',
+    'untangle reviews opens a page with the reviews on this machine: running, paused and closed, with',
+    'their progress, their agents, and what each holds in memory or on disk.',
     '',
     'flags:',
     ...flagLines(FLAGS),
@@ -185,6 +188,12 @@ const REPLY_FLAGS: Flag[] = [AGENT, { name: 'resolve', type: 'bool', usage: 'res
 const NOTE_FLAGS: Flag[] = [AGENT, { name: 'removed', type: 'bool', usage: 'the lines are ones the change removed, numbered as on the base' }, REVIEW];
 const NOTES_FLAGS: Flag[] = [AGENT, { name: 'all', type: 'bool', usage: 'the resolved notes too' }, REVIEW];
 const STOP_FLAGS: Flag[] = [REVIEW];
+const REVIEWS_FLAGS: Flag[] = [
+  { name: 'list', type: 'bool', usage: 'print the reviews in the terminal, instead of opening the page' },
+  { name: 'no-open', type: 'bool', usage: 'do not open the page: print its link' },
+  { name: 'port', type: 'int', usage: 'the port the manager listens on, when it starts (0 picks a free one)', default: 7777 },
+  { name: 'serve', type: 'bool', usage: 'serve the page from this process, in the foreground, until it stops' },
+];
 const SKILL_FLAGS: Flag[] = [
   { name: 'install', type: 'bool', usage: 'put it where Claude and Codex read skills, and let untangle run outside Codex’s sandbox' },
   { name: 'update', type: 'bool', usage: 'rewrite it where it’s installed, and only there' },
@@ -201,7 +210,9 @@ export type Command =
   | { cmd: 'notes'; review: string | null; agent: string | null; all: boolean }
   | { cmd: 'stop'; review: string | null }
   | { cmd: 'skill'; install: boolean; update: boolean }
-  | { cmd: 'upgrade' };
+  | { cmd: 'upgrade' }
+  /** port: null unless it was given. */
+  | { cmd: 'reviews'; list: boolean; open: boolean; port: number | null; serve: boolean };
 
 const commandUsage = (name: string, what: string, line: string, about: string[], flags: Flag[], more: string[] = []) => [
   `untangle ${name} - ${what}`, '', 'usage:', `  untangle ${name}${line ? ` ${line}` : ''}`, '', ...about, ...(flags.length ? ['', 'flags:', ...flagLines(flags)] : []), ...more,
@@ -235,6 +246,14 @@ export const upgradeUsage = () => commandUsage('upgrade', 'bring the latest unta
   'packages when they changed, builds it, and links it with npm, so the untangle command runs it.',
   'Then the new untangle rewrites its skill where it’s installed, as untangle skill -update does.',
 ], []);
+
+export const reviewsUsage = () => commandUsage('reviews', 'the reviews on this machine', '[flags]', [
+  'Opens a page with every review untangle remembers: the ones running, the ones paused (stopped, with',
+  'their notes, marks and chats kept, to pick up again), and the closed ones, with their progress,',
+  'where each one’s agent is, and what each holds in memory or on disk. A small process serves it,',
+  'started the first time and stopped once the page has been closed a while. With -list, the same',
+  'reviews print in the terminal. A directory named reviews is ./reviews.',
+], REVIEWS_FLAGS);
 
 /** The command line: a review, or one of the agent's commands (its first word). */
 export function parseCommand(argv: string[]): Command {
@@ -293,6 +312,14 @@ export function parseCommand(argv: string[]): Command {
     if (values.get('help')) return { cmd: 'help', text: upgradeUsage() };
     if (rest.length) throw new UsageError(`untangle upgrade takes no arguments (got ${rest.join(' ')})`);
     return { cmd: 'upgrade' };
+  }
+  if (first === 'reviews') {
+    const { values, rest } = readFlags(more, REVIEWS_FLAGS, true);
+    if (values.get('help')) return { cmd: 'help', text: reviewsUsage() };
+    if (rest.length) throw new UsageError(`untangle reviews takes no arguments (got ${rest.join(' ')})`);
+    const port = values.has('port') ? Number(values.get('port')) : null;
+    if (port != null && port > 65535) throw new UsageError(`invalid value "${port}" for flag -port: out of range`);
+    return { cmd: 'reviews', list: values.get('list') === true, open: values.get('no-open') !== true, port, serve: values.get('serve') === true };
   }
   return { cmd: 'review', opts: parseArgs(argv) };
 }
