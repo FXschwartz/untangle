@@ -19,6 +19,8 @@ export interface BuiltReview {
   gh: GhStub;
   target: Target;
   data: ReviewData;
+  /** What the build said worth keeping, as the page's steps show it. */
+  notes: string[];
   remove(): void;
 }
 
@@ -82,9 +84,10 @@ export async function buildDartHistory(base: Record<string, string>, commits: Fe
     process.env.PATH = String(gh.env.PATH);
     process.env.UNTANGLE_CACHE = cacheDir;
     const target = await resolveDirectory(repo.dir, 'main', () => {});
-    const built = await buildReview(target, { noCache: true, label: 'main', title: 'feature', chains }, quiet);
+    const notes: string[] = [];
+    const built = await buildReview(target, { noCache: true, label: 'main', title: 'feature', chains }, { ...quiet, note: (text) => notes.push(text) });
     restore();
-    return { repo, cacheDir, gh, target, data: built.data, remove: discard };
+    return { repo, cacheDir, gh, target, data: built.data, notes, remove: discard };
   } catch (error) {
     discard();
     throw error;

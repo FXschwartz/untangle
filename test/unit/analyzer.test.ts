@@ -67,7 +67,7 @@ class Combined extends Base with First, Second {
   describe('when the production extractor resolves the file, ', () => {
     before(async () => {
       analyzer = await Analyzer.start([file]);
-      facts = await analyzer.file(file);
+      facts = (await analyzer.file(file))!;
     });
 
     it('then the object-pattern label resolves to its field.', () => {
@@ -121,12 +121,52 @@ describe('Given a library that imports one file and exports another by its packa
   describe('when the production extractor resolves the file, ', () => {
     before(async () => {
       analyzer = await Analyzer.start([file]);
-      facts = await analyzer.file(file);
+      facts = (await analyzer.file(file))!;
     });
 
     it('then each URI refers to the top of the file it names, and one naming a missing file to nothing.', () => {
       const uris = ['1:7', '2:7', '3:7'].map((at) => facts.references[at]).map((r) => r && `${r.kind} ${path.relative(root, r.target[0])}:${r.target[1]}:${r.target[2]}`);
       assert.deepEqual(uris, ['uri lib/src/a.dart:0:0', 'uri lib/src/b.dart:0:0', undefined]);
+    });
+  });
+});
+
+describe('Given a package whose template folder has a # in its name, as {{#auth}}, ', { skip }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-analyzer-'));
+  const template = path.join(root, 'lib/src/{{#auth}}auth{{!auth}}/endpoint.dart');
+  const plain = path.join(root, 'lib/plain.dart');
+  const log: string[] = [];
+  let analyzer: Analyzer;
+  let facts: Array<FileFacts | null>;
+  let calls: FileFacts['calls'];
+
+  before(() => {
+    fs.mkdirSync(path.dirname(template), { recursive: true });
+    fs.mkdirSync(path.join(root, '.dart_tool'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'pubspec.yaml'), 'name: example\nenvironment:\n  sdk: ">=3.12.0 <4.0.0"\n');
+    fs.writeFileSync(path.join(root, '.dart_tool/package_config.json'), JSON.stringify({ configVersion: 2, packages: [{ name: 'example', rootUri: '../', packageUri: 'lib/', languageVersion: '3.12' }] }));
+    fs.writeFileSync(template, 'class Endpoint {}\n');
+    fs.writeFileSync(plain, 'class Plain {}\n');
+  });
+
+  after(async () => {
+    await analyzer?.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  describe('when the production extractor resolves a file of that folder, then another, ', () => {
+    before(async () => {
+      analyzer = await Analyzer.start([template, plain], (line) => log.push(line));
+      facts = [await analyzer.file(template), await analyzer.file(plain)];
+      calls = await analyzer.calls(template);
+    });
+
+    it('then the analyzer won’t resolve the first, which has neither facts nor calls.', () => {
+      assert.deepEqual([facts[0], calls, log.filter((line) => line.startsWith(template))], [null, {}, [`${template}: the analyzer answered NotPathOfUriResult`, `${template}: the analyzer answered NotPathOfUriResult`]]);
+    });
+
+    it('then the other still resolves.', () => {
+      assert.deepEqual(facts[1]?.declarations.map((declaration) => declaration.name), ['Plain']);
     });
   });
 });
@@ -256,6 +296,29 @@ class Added {
       assert.deepEqual([unit.start, unit.end], [2, 8]);
       assert.ok(changes.every((block: any) => block.unit === unit.id));
       assert.deepEqual(model.chains, []);
+    });
+  });
+});
+
+describe('Given a change to a template file whose folder has a # in its name, beside a plain one, ', { skip }, () => {
+  const template = 'lib/src/{{#auth}}auth{{!auth}}/endpoint.dart';
+  let review: BuiltReview;
+  let model: any;
+
+  describe('when the review is built through the production pipeline, ', () => {
+    before(async () => {
+      review = await buildDartReview({
+        base: { [template]: 'class Endpoint {}\n', 'lib/plain.dart': 'class Plain {}\n' },
+        head: { [template]: 'class Endpoint {\n  int answer() => 42;\n}\n', 'lib/plain.dart': 'class Plain {\n  int answer() => 42;\n}\n' },
+      });
+      model = review.data.model.compares.base;
+    });
+
+    after(() => review?.remove());
+
+    it('then it reviews both files, and says the analyzer can’t resolve the template alone.', () => {
+      assert.deepEqual(model.files.map((file: any) => file.p).sort(), ['lib/plain.dart', template]);
+      assert.deepEqual(review.notes.filter((note) => note.includes('analyzer')), [`the Dart analyzer can't resolve ${template}: no chains or go to definition in it`]);
     });
   });
 });

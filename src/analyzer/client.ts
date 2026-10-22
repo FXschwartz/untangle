@@ -59,6 +59,12 @@ export interface FileFacts extends Structure {
   diagnostics: Array<{ code: string; severity: string; offset: number; message: string }>;
 }
 
+/** A file the analyzer won't resolve, and what it answered instead. */
+interface Refused {
+  path: string;
+  refused: string;
+}
+
 export class Analyzer {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly closed: Promise<void>;
@@ -71,7 +77,7 @@ export class Analyzer {
     this.child.kill('SIGKILL');
   };
 
-  private constructor(executable: string, log: (line: string) => void) {
+  private constructor(executable: string, private readonly log: (line: string) => void) {
     this.child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     process.once('exit', this.kill);
 
@@ -145,14 +151,21 @@ export class Analyzer {
     }
   }
 
-  async file(file: string): Promise<FileFacts> {
-    const [facts] = await this.request<FileFacts[]>('files', { paths: [file] });
-    return facts;
+  /** A file's facts, or null when the analyzer won't resolve it. */
+  async file(file: string): Promise<FileFacts | null> {
+    const [facts] = await this.request<Array<FileFacts | Refused>>('files', { paths: [file] });
+    return this.resolved(facts);
   }
 
   async calls(file: string): Promise<FileFacts['calls']> {
-    const [facts] = await this.request<Array<Pick<FileFacts, 'calls'>>>('files', { paths: [file], callsOnly: true });
-    return facts.calls;
+    const [facts] = await this.request<Array<Pick<FileFacts, 'calls'> | Refused>>('files', { paths: [file], callsOnly: true });
+    return this.resolved(facts)?.calls ?? {};
+  }
+
+  private resolved<T extends object>(facts: T | Refused): T | null {
+    if (!('refused' in facts)) return facts;
+    this.log(`${facts.path}: the analyzer answered ${facts.refused}`);
+    return null;
   }
 
   async stop(): Promise<void> {

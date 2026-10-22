@@ -17,7 +17,7 @@ export interface Extracted {
 const TEST_FILE = /(^|\/)(test|test_[a-z0-9_]+|integration_test)\/|_test\.dart$/;
 
 /** Resolve each changed file once, sharing its facts between chains and definition peeks. */
-export async function extract(diff: Diff, head: string, base: string, progress: { detail(line: string, count?: [number, number]): void; verbose(line: string): void }): Promise<Extracted> {
+export async function extract(diff: Diff, head: string, base: string, progress: { detail(line: string, count?: [number, number]): void; note(line: string): void; verbose(line: string): void }): Promise<Extracted> {
   const files = diff.compares.base.files.filter((file) => file.hunks && file.p.endsWith('.dart'));
   const defs = definitionCollector(head);
   const defsOld = definitionCollector(base);
@@ -34,6 +34,7 @@ export async function extract(diff: Diff, head: string, base: string, progress: 
   const added = new Set<string>();
   const seeds = new Map<string, Location>();
   const callsByFile = new Map<string, FileFacts['calls']>();
+  const refused = new Set<string>();
   const nodeKey = ([file, line, col]: Location) => file.startsWith(head + path.sep) && !file.includes('/generated/')
     ? `${file.slice(head.length + 1)}:${line}:${col}` : null;
 
@@ -67,6 +68,10 @@ export async function extract(diff: Diff, head: string, base: string, progress: 
         if (!fs.existsSync(abs)) continue;
         progress.detail(`Dart files ${++done} of ${paths.length}: ${file.p}`, [done, paths.length]);
         const facts = await analyzer.file(abs);
+        if (!facts) {
+          refused.add(file.p);
+          continue;
+        }
         const lines = current ? headLines : baseLines;
         const collector = current ? defs : defsOld;
         (current ? structure : structureOld)[file.p] = {
@@ -106,6 +111,12 @@ export async function extract(diff: Diff, head: string, base: string, progress: 
         const errors = facts.diagnostics.filter((diagnostic) => diagnostic.severity === 'ERROR');
         if (errors.length) progress.verbose(`${file.p}: ${errors.length} analyzer diagnostics; unresolved references are omitted`);
       }
+    }
+    if (refused.size) {
+      const [first] = refused;
+      progress.note(refused.size === 1
+        ? `the Dart analyzer can't resolve ${first}: no chains or go to definition in it`
+        : `the Dart analyzer can't resolve ${refused.size} files, such as ${first}: no chains or go to definition in them`);
     }
 
     const outgoing = async (target: Location): Promise<Location[] | undefined> => {

@@ -454,7 +454,10 @@ Future<void> main() async {
                 final result = await contexts.first.currentSession
                     .getResolvedUnit(file);
                 if (result is! ResolvedUnitResult) {
-                  throw StateError('$file returned ${result.runtimeType}');
+                  // The analyzer won't resolve some files: a package's file with a # in its
+                  // path, as in a template's {{#auth}} folder, has no package: URI naming it.
+                  files.add({'path': file, 'refused': '${result.runtimeType}'});
+                  continue;
                 }
                 linesByPath[file] = result.lineInfo;
                 final facts = Facts(result);
