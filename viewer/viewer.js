@@ -410,6 +410,14 @@
     s.open = open.size;
     return s;
   }
+  // A fold holding changes to review is a stop for j, k and Space, which open it. It names those
+  // changes as the pill counts them, each once in the view: a change, or a new declaration read as
+  // one (in a same change's group, each place).
+  function foldStop(blocks) {
+    const group = state.view.kind === 'group';
+    const keys = new Set(blocks.filter((b) => b.edits.length && blockIn(b) && !doneL(b)).map((b) => (group ? b.id : b.unit || b.id)));
+    return keys.size ? ` data-nav="1" data-units="${esc([...keys].join(' '))}"` : '';
+  }
   // The same, as if no lens were on.
   function withoutLens(fn) {
     const ln = state.lens, memo = lensMemo;
@@ -1007,8 +1015,7 @@
     const { o, n } = numbersFrom(f, x.collapsed ? S.a : to, S.b);
     const head = S.s0 === 0 && to === S.a && hk.h ? hk.h : '';
     const tip = click ? (click[1] === 'above' ? `Show ${linesWord(click[2])} more above` : `Show ${linesWord(click[2])} more below the code above`) + (hidden > click[2] ? ` (${fmt(hidden)} hidden)` : '') : '';
-    const unit = x.blocks.length && x.blocks.every((block) => block.unit && block.unit === x.blocks[0].unit) ? x.blocks[0].unit : null;
-    let out = `<div class="hh${x.allDone ? ' done' : ''}${P && !hidden ? ' joined' : ''}${click ? ' more' : ''}" data-sec="${esc(S.key)}"${unit ? ` data-unit="${esc(unit)}"` : ''}${x.collapsed && x.open ? ` data-nav="1" data-open="${x.open}"` : ''}${click ? ` ${moreAttrs(...click)} title="${esc(tip)}"` : ''}>`
+    let out = `<div class="hh${x.allDone ? ' done' : ''}${P && !hidden ? ' joined' : ''}${click ? ' more' : ''}" data-sec="${esc(S.key)}"${x.collapsed ? foldStop(x.blocks) : ''}${click ? ` ${moreAttrs(...click)} title="${esc(tip)}"` : ''}>`
       + `<span class="hh-g">${x.folds ? `<button type="button" class="chev" data-act="toggle-hunk" data-key="${esc(S.key)}" aria-expanded="${!x.collapsed}" title="${x.collapsed ? 'Unfold' : 'Fold'}">${x.collapsed ? ICON.chevronRight : ICON.chevronDown}</button>` : ''}</span>`
       + `<span class="hh-at" title="@@ −${o != null ? o : hk.o} +${n != null ? n : hk.n} @@">${n != null ? n : hk.n}</span><span class="hh-tx">${esc(head)}</span>`;
     if (x.collapsed) {
@@ -3960,7 +3967,7 @@
       const key = f.p + '#edited', open = state.olUnfold.has(key);
       const edits = sc.edited.flatMap((n) => sc.st.get(n).own).concat(sc.outside);
       const marks = olFileMarks(sc), st = stats(marks);
-      h += `<div class="ol-file fold${open ? ' open' : ''}${st.total && !st.open ? ' done' : ''}" data-act="ol-unfold" data-key="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span>${olFileTickHtml(sc, marks, st)}</div>`;
+      h += `<div class="ol-file fold${open ? ' open' : ''}${st.total && !st.open ? ' done' : ''}" data-act="ol-unfold" data-key="${esc(key)}"${open ? '' : foldStop(marks)} role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${sc.edited.length ? `${plural(sc.edited.length, 'call')} edited` : 'outside the tests'} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</span>${olFileTickHtml(sc, marks, st)}</div>`;
       if (open) h += olEditedRowsHtml(sc, o) + (sc.outside.length ? olOutsideHtml(sc) : '');
       return h + '</section>';
     }
@@ -3972,7 +3979,7 @@
       const st = stats(marks), all = st.total > 0 && !st.open;
       const folded = state.collapsed.has(fkey) || (all && !state.expanded.has(fkey));
       const said = folded && all ? `<span class="ok-ic" aria-hidden="true">${ICON.check}</span>${olReviewedWhat(c.new + c.reworded + c.regrouped, c.removed, true)}` : (olSaid(c) || 'no sentence changes') + (folded && st.open ? ` · ${st.open} to review` : '');
-      h += `<div class="ol-file ck${all ? ' done' : ''}"><button type="button" class="car" data-act="ol-file" data-key="${esc(fkey)}" aria-expanded="${!folded}" title="${folded ? 'Unfold' : 'Fold'}">${folded ? ICON.chevronRight : ICON.chevronDown}</button><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${said}</span>${olFileTickHtml(sc, marks, st)}</div>`;
+      h += `<div class="ol-file ck${all ? ' done' : ''}" data-key="${esc(fkey)}"${folded ? foldStop(marks) : ''}><button type="button" class="car" data-act="ol-file" data-key="${esc(fkey)}" aria-expanded="${!folded}" title="${folded ? 'Unfold' : 'Fold'}">${folded ? ICON.chevronRight : ICON.chevronDown}</button><button type="button" class="nm linkish" data-open="${esc(f.p)}" title="Open the file">${esc(fileName(f.p))}</button><span class="dir">${esc(dir)}</span><span class="sp"></span><span class="n">${said}</span>${olFileTickHtml(sc, marks, st)}</div>`;
       if (folded) return h + '</section>';
       settle = st.open > 0;
     } else {
@@ -4037,7 +4044,7 @@
     if (filter === 'all' && sc.edited.length) {
       const key = f.p + '#edited', open = olFold(sc, key);
       const edits = sc.edited.flatMap((n) => sc.st.get(n).own);
-      h += `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Code edited under ${plural(sc.edited.length, 'call')} whose sentence${sc.edited.length === 1 ? '' : 's'} stay${sc.edited.length === 1 ? 's' : ''} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</div>`;
+      h += `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}"${open ? '' : foldStop(edits)} role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Code edited under ${plural(sc.edited.length, 'call')} whose sentence${sc.edited.length === 1 ? '' : 's'} stay${sc.edited.length === 1 ? 's' : ''} · ${plusMinus(sumOf(edits, 'adds'), sumOf(edits, 'dels'))}</div>`;
       if (open) h += olEditedRowsHtml(sc, o);
     }
     if (filter === 'all' && sc.outside.length) h += olOutsideHtml(sc);
@@ -4057,7 +4064,7 @@
   function olOutsideHtml(sc) {
     const f = sc.f, key = f.p + '#outside', open = olFold(sc, key);
     const names = [...new Set(sc.outside.map((b) => (b.member || '').split('.')[0]).filter((x) => x && x !== 'main'))];
-    let h = `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Outside the tests${names.length ? `: <code>${esc(names.slice(0, 3).join(', '))}</code>${names.length > 3 ? ` and ${names.length - 3} more` : ''}` : ''} · ${plusMinus(sumOf(sc.outside, 'adds'), sumOf(sc.outside, 'dels'))}</div>`;
+    let h = `<div class="ol-fold cf" data-act="ol-unfold" data-key="${esc(olFoldKey(sc, key))}"${open ? '' : foldStop(sc.outside)} role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>Outside the tests${names.length ? `: <code>${esc(names.slice(0, 3).join(', '))}</code>${names.length > 3 ? ` and ${names.length - 3} more` : ''}` : ''} · ${plusMinus(sumOf(sc.outside, 'adds'), sumOf(sc.outside, 'dels'))}</div>`;
     if (open) h += `<div class="ol-out">${subHunksHtml(sc.outside, { chain: sc.chain || undefined, key: 'olo|' + f.p, tight: true })}</div>`;
     return h;
   }
@@ -4484,7 +4491,7 @@
       // Folded under the sentences; open when it's all there is (a click folds it).
       const key = said.length ? 'tests:code' : 'tests:code:shut', open = said.length ? state.olUnfold.has(key) : !state.olUnfold.has(key);
       const calls = code.reduce((x, sc) => x + sc.edited.length, 0);
-      h += `<div class="ol-sect">Code under sentences that stay</div><div class="ol-fold cf" data-act="ol-unfold" data-key="${key}" role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>${plural(code.length, 'file')} change${code.length === 1 ? 's' : ''} no sentence${calls ? `: ${plural(calls, 'call')} with edited setup or bodies` : ''}</div>`;
+      h += `<div class="ol-sect">Code under sentences that stay</div><div class="ol-fold cf" data-act="ol-unfold" data-key="${key}"${open ? '' : foldStop(code.flatMap(olFileMarks))} role="button" tabindex="0" aria-expanded="${open}"><span class="car">${open ? ICON.chevronDown : ICON.chevronRight}</span>${plural(code.length, 'file')} change${code.length === 1 ? 's' : ''} no sentence${calls ? `: ${plural(calls, 'call')} with edited setup or bodies` : ''}</div>`;
       if (open) h += code.map((sc) => olFileHtml(sc, {})).join('');
     }
     return h;
@@ -6153,13 +6160,13 @@
   const paneFound = new Map();
   const counts = (list) => list.some((m) => !(m.target.closest && m.target.closest('.fv-head, .ol-pinw')));
   const paneChanges = new MutationObserver((list) => { if (counts(list)) paneFound.clear(); });
-  paneChanges.observe(main, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id', 'data-block', 'data-nav', 'data-mark', 'data-unit', 'data-p', 'data-olf', 'data-ol'] });
+  paneChanges.observe(main, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id', 'data-block', 'data-nav', 'data-mark', 'data-units', 'data-p', 'data-olf', 'data-ol'] });
   function paneQuery(key, find) {
     if (counts(paneChanges.takeRecords())) paneFound.clear();
     if (!paneFound.has(key)) paneFound.set(key, find());
     return paneFound.get(key);
   }
-  const rowOf = (el) => el.closest('.ln, .sl, .hh, .ol-row');
+  const rowOf = (el) => el.closest('.ln, .sl, .hh, .ol-row, .ol-fold, .ol-file');
   // The first of some elements in the pane's order for which a test, false before it and true from
   // it on, holds: found by halving, as scrolling asks every frame and a long chain has thousands.
   function firstWhere(list, ok) {
@@ -6167,18 +6174,25 @@
     while (lo < hi) { const mid = (lo + hi) >> 1; if (ok(list[mid])) hi = mid; else lo = mid + 1; }
     return lo;
   }
-  const markId = (el) => el.dataset.block || 'sec:' + el.dataset.sec;
+  const markId = (el) => el.dataset.block || (el.dataset.sec ? 'sec:' + el.dataset.sec : 'fold:' + el.dataset.key);
+  // Folds holding changes to review, which j, k, Space and the pill go through as the changes they
+  // hold: a folded hunk, and an outline's folds.
+  const FOLDS = '.hh[data-nav], .ol-fold[data-nav], .ol-file[data-nav]';
+  // How many changes to review a stop adds to the pill: a fold, those it holds that no stop before
+  // it does.
+  const stopAdds = new WeakMap();
   // A chain shows other chains' changes in its context lines: j, k and the pill skip them.
   const changeMarks = (open) => paneQuery(open ? 'marks open' : 'marks', () => {
     const seen = new Set();
-    return [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .hh[data-nav], .ol-row[data-nav]' : '.tick[data-block]:not(.lens-out), .hh[data-nav], .ol-row[data-mark]')].filter((el) => {
+    return [...main.querySelectorAll(open ? '.tick[data-block]:not(.on):not(.lens-out), .ol-row[data-nav], ' + FOLDS : '.tick[data-block]:not(.lens-out), .ol-row[data-mark], ' + FOLDS)].filter((el) => {
       if (open && el.closest('.other')) return false;
       const block = M().blockById.get(el.dataset.block);
-      const key = state.view.kind === 'group' ? block?.id : el.dataset.unit || block?.unit || block?.id;
-      if (!key) return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+      const keys = el.dataset.units ? el.dataset.units.split(' ') : [state.view.kind === 'group' ? block?.id : block?.unit || block?.id];
+      if (!keys[0]) return true;
+      const fresh = keys.filter((key) => !seen.has(key));
+      fresh.forEach((key) => seen.add(key));
+      if (open) stopAdds.set(el, fresh.length);
+      return fresh.length > 0;
     });
   });
   // Where a change is put when you go to it: a little below the header.
@@ -6213,6 +6227,16 @@
       const band = [...main.querySelectorAll('.hh[data-sec]')].find((x) => x.dataset.sec === key);
       const after = (sel) => band && [...main.querySelectorAll(sel)].find((x) => follows(band, x));
       el = after('.tick[data-block]:not(.on)') || after('.tick[data-block]');
+      if (!el) return false;
+    } else if (el.matches('.ol-fold, .ol-file')) {
+      // An outline's fold opens (a file the Tests view folded, as its button does), on its first
+      // change to review.
+      const key = el.dataset.key;
+      if (el.dataset.act === 'ol-unfold') state.olUnfold.has(key) ? state.olUnfold.delete(key) : state.olUnfold.add(key);
+      else { state.collapsed.delete(key); state.expanded.add(key); }
+      render();
+      const fold = [...main.querySelectorAll('.ol-fold[data-key], .ol-file[data-key]')].find((x) => x.dataset.key === key);
+      el = fold && changeMarks(true).find((x) => follows(fold, x));
       if (!el) return false;
     }
     navAt = markId(el);
@@ -6263,7 +6287,7 @@
   function markAndNext() {
     const el = currentMark();
     if (!el) return gotoChange(1, true);
-    if (el.matches('.hh')) return goToMark(el);
+    if (el.matches(FOLDS)) return goToMark(el);
     if (el.matches('.ol-row')) {
       // An outline's row: its own lines (a test's body, a group's setup).
       const key = el.dataset.ol, blocks = blocksOf(el.dataset.mark.split(' ')).filter((b) => b && b.edits.length);
@@ -6286,7 +6310,7 @@
   function markScope() {
     const el = currentMark();
     if (!el) return gotoChange(1, true);
-    if (el.matches('.hh')) return goToMark(el);
+    if (el.matches(FOLDS)) return goToMark(el);
     if (el.matches('.ol-row')) {
       // An outline's row: everything its mark covers (a group's setup and the calls under it).
       const key = el.dataset.ol, tick = el.querySelector('.ol-tick[data-blocks]');
@@ -6315,7 +6339,7 @@
   function commentHere() {
     if (!canCommentLines()) { if (localMode()) toast('The notes aren’t loaded yet.'); else if (GH.on) toast(GH.stale ? 'GitHub has newer commits: refresh to comment on lines.' : 'Comments aren’t loaded yet.'); return; }
     const el = currentMark();
-    let row = el && !el.matches('.hh') ? rowOf(el) : null;
+    let row = el && !el.matches(FOLDS) ? rowOf(el) : null;
     if (!row) { const ref = readY(); row = [...main.querySelectorAll('.code[data-p] .ln[data-c], .code[data-p] .sl')].find((r) => r.getBoundingClientRect().bottom > ref) || null; }
     if (!row) return;
     const cell = row.matches('[data-c]') ? row : row.querySelector('.half.r[data-c]') || row.querySelector('[data-c]');
@@ -6328,14 +6352,14 @@
   // the most, marking the change and going to the next.
   const PILL_VIEWS = new Set(['chain', 'file', 'standalone', 'group', 'tests']);
   let pillHtml = '';
-  const openIn = (el) => (el.matches('.hh') ? Number(el.dataset.open) || 1 : 1);
+  const openIn = (el) => stopAdds.get(el) || 1;
   function renderPill() {
     const el = $('#vw-pill');
     if (!el) return;
     let h = '';
     el.classList.toggle('pick', !!PICK.path);
     if (PICK.path) h = pickBarHtml();
-    else if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .hh[data-nav], .ol-row[data-mark]')) {
+    else if (PILL_VIEWS.has(state.view.kind) && main.querySelector('.tick[data-block], .ol-row[data-mark], ' + FOLDS)) {
       const marks = changeMarks(true);
       const total = marks.reduce((x, m) => x + openIn(m), 0);
       if (total) {

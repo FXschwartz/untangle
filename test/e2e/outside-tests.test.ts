@@ -13,6 +13,24 @@ import { read, rest } from './page.ts';
 const skip = e2eSkip();
 const ada = (date: string): Person => ({ name: 'Ada Review', email: 'ada@example.com', date });
 
+const count = `document.querySelector('#vw-pill .pill-n')?.textContent || ''`;
+const outsideFold = `[...document.querySelectorAll('#vw-main .ol-fold')].find((el) => el.textContent.startsWith('Outside the tests'))`;
+
+// The stops Space has left in the view (other chains' changes aside), and what a press changes:
+// those stops, and the marks on.
+const left = `[...document.querySelectorAll('#vw-main .tick[data-block]:not(.on), #vw-main [data-nav]')].filter((el) => !el.closest('.other')).length`;
+const marked = `[${left}, document.querySelectorAll('#vw-main .tick.on, #vw-main .ol-row.done').length].join()`;
+
+// Presses Space from the top of the view while it leaves something to review.
+async function spaceThrough(page: Browser): Promise<void> {
+  await page.eval(`document.activeElement.blur(), document.querySelector('#vw-main').scrollTop = 0`);
+  for (let i = 0; i < 12 && Number(await page.eval(left)); i += 1) {
+    const before = await read(page, marked);
+    await page.key(' ');
+    await page.until(`(${marked}) !== ${JSON.stringify(before)}`);
+  }
+}
+
 // A new test file as a formatter writes long titles: each call's title on a line of its own, its
 // tests in a labelled wrapper, and a helper after main. Each change runs on to where the next one
 // starts: main's own lines to the wrapper, and the last test's to the brace that closes main.
@@ -116,6 +134,60 @@ describe('Given a served review of a new test file whose titles sit on lines of 
         '6 ',
         '34 void withCart(String label, void Function(List<int> cart) body) => group(label, () => body([]));',
       ].join('\n'));
+    });
+  });
+
+  describe('when the code outside the tests is folded, and Space reviews the chain from its top, ', () => {
+    let open = '';
+    let folded = '';
+    let after = '';
+
+    before(async () => {
+      open = await read(page!, count);
+      await page!.eval(`${outsideFold}.click()`);
+      await page!.until(`${outsideFold}.getAttribute('aria-expanded') === 'false'`);
+      folded = await read(page!, count);
+      await spaceThrough(page!);
+      await page!.until(`document.querySelector('#vw-pill .pill-msg')?.textContent === 'All reviewed here'`);
+      after = await read(page!, `[
+        ${outsideFold}.getAttribute('aria-expanded') === 'true' ? 'the fold open' : 'the fold shut',
+        ((code) => !!code && !code.querySelector('.tick[data-block]:not(.on), [data-nav]'))(document.querySelector('#vw-main .ol-out')) ? 'its code reviewed' : 'its code to review',
+        document.querySelector('#vw-main .ol-file').classList.contains('done') ? 'the file reviewed' : 'the file to review',
+      ].join(' · ')`);
+    });
+
+    it('then the pill still counts the change the fold holds.', () => {
+      assert.match(open, /^1 of \d+$/);
+      assert.equal(folded, open);
+    });
+
+    it('then Space opens the fold on its change and reviews it too, so the file is reviewed whole.', () => {
+      assert.equal(after, 'the fold open · its code reviewed · the file reviewed');
+    });
+  });
+
+  describe('when the Tests view, which folds the code outside the tests, is reviewed with Space from its top, ', () => {
+    let counted = '';
+    let after = '';
+
+    before(async () => {
+      await page!.click('[data-act="tests-open"]');
+      await page!.until(`!!document.querySelector('#vw-main .ol-file .tick')`);
+      // What the chain reviewed goes back first: the file's mark reviews what's left, then takes it all back.
+      for (let i = 0; i < 2 && (await page!.eval(`!!document.querySelector('#vw-main .ol-file .tick.on, #vw-main .ol-file .tick.part')`)); i += 1) await page!.click('#vw-main .ol-file .tick');
+      await page!.until(`${outsideFold}?.getAttribute('aria-expanded') === 'false' && !!document.querySelector('#vw-main .ol-row[data-nav]')`);
+      counted = await read(page!, `document.querySelectorAll('#vw-main .ol-row[data-nav]').length + ' rows to review · ' + (${count})`);
+      await spaceThrough(page!);
+      await page!.until(`document.querySelector('#vw-pill').hidden`);
+      after = await read(page!, `[...document.querySelectorAll('#vw-main .ol-file')].map((el) => el.querySelector('.nm').textContent + ' · ' + el.querySelector('.n').textContent).join('\\n')`);
+    });
+
+    it('then the pill counts the change outside the tests with its rows.', () => {
+      assert.equal(counted, '4 rows to review · 1 of 5');
+    });
+
+    it('then Space reviews it too, and the file folds away reviewed whole.', () => {
+      assert.equal(after, 'cart_test.dart · 2 tests reviewed');
     });
   });
 });
