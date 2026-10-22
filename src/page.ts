@@ -45,6 +45,8 @@ const built = (name: string) => {
 };
 /** The highlighter bundle (dist/highlight.js), built by `npm run build`. */
 export const highlighter = () => built('highlight.js');
+/** The Feedback panel and picture capture bundle, when it was built. */
+export const feedbackPanel = () => built('feedback-panel.js');
 /** The page's fonts, with their files inlined (dist/fonts.css), built by `npm run build`. */
 export const fonts = () => built('fonts.css');
 const hash = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex').slice(0, 12);

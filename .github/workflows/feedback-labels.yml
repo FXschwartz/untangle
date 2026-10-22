@@ -1,0 +1,31 @@
+name: Label feedback from untangle
+on:
+  issues:
+    types: [opened]
+permissions:
+  issues: write
+jobs:
+  label:
+    if: contains(github.event.issue.body, '<!-- untangle-feedback kind=bug -->') || contains(github.event.issue.body, '<!-- untangle-feedback kind=idea -->')
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    steps:
+      - name: Add the feedback labels
+        shell: bash
+        run: |
+          if [[ "$ISSUE_BODY" == *'<!-- untangle-feedback kind=bug -->'* ]]; then
+            kind=bug
+            color=d73a4a
+          else
+            kind=idea
+            color=a2eeef
+          fi
+
+          gh label create "$kind" --repo "$GH_REPO" --color "$color" --force
+          gh label create 'from untangle' --repo "$GH_REPO" --color 0e8a16 --force
+          gh api --method POST "repos/$GH_REPO/issues/$ISSUE_NUMBER/labels" \
+            -f "labels[]=$kind" -f 'labels[]=from untangle'

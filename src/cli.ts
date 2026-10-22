@@ -7,19 +7,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as agent from './agent.js';
-import { noteUsage, notesUsage, parseCommand, replyUsage, reviewsUsage, skillUsage, stopUsage, upgradeUsage, usage, UsageError, watchUsage, type Options } from './args.js';
+import { feedbackUsage, noteUsage, notesUsage, parseCommand, replyUsage, reviewsUsage, skillUsage, stopUsage, upgradeUsage, usage, UsageError, watchUsage, type Options } from './args.js';
 import { buildReview, buildSteps, type ReviewData } from './build.js';
 import { reviewDir, worktreeDir } from './cache.js';
 import { chatFolder, chatFrom } from './chats.js';
 import { readHistory } from './history.js';
 import { gitMaybe } from './exec.js';
+import { Feedback, feedbackCommand, reviewFeedbackRepo } from './feedback.js';
 import { LiveSession } from './live.js';
 import { rss } from './metrics.js';
 import { Narrator, type Status } from './narrate.js';
 import { NoteError, Notes, notesFile, type NoteAction, type Scope } from './notes.js';
 import { openPage } from './open.js';
 import { showTab } from './orca.js';
-import { fonts, highlighter, progressPage, reviewPage, type PageConfig } from './page.js';
+import { feedbackPanel, fonts, highlighter, progressPage, reviewPage, type PageConfig } from './page.js';
 import { readRecord, recordFile, serves, writeRecord, type ChatRecord, type ReviewRecord, type StopReason } from './records.js';
 import { Manager, openManager } from './manager.js';
 import { reviews, type Summary } from './reviews.js';
@@ -44,7 +45,7 @@ async function main(): Promise<number> {
     command = parseCommand(process.argv.slice(2));
   } catch (e) {
     if (!(e instanceof UsageError)) throw e;
-    const help = { watch: watchUsage, reply: replyUsage, note: noteUsage, notes: notesUsage, stop: stopUsage, skill: skillUsage, upgrade: upgradeUsage, reviews: reviewsUsage }[process.argv[2]];
+    const help = { feedback: feedbackUsage, watch: watchUsage, reply: replyUsage, note: noteUsage, notes: notesUsage, stop: stopUsage, skill: skillUsage, upgrade: upgradeUsage, reviews: reviewsUsage }[process.argv[2]];
     process.stderr.write(`${e.message}\n${help ? help() : usage(VERSION)}`);
     return 2;
   }
@@ -60,6 +61,7 @@ async function main(): Promise<number> {
   if (command.cmd === 'skill') return skill(command);
   if (command.cmd === 'upgrade') return upgrade();
   if (command.cmd === 'reviews') return reviews(command);
+  if (command.cmd === 'feedback') return feedbackCommand(command);
   return review(command.opts);
 }
 
@@ -96,6 +98,12 @@ async function review(opts: Options): Promise<number> {
   let server: ReviewServer | null = null;
   let live: LiveSession | null = null;
   let target: Target | null = null;
+  let buildingTarget: Target | null = null;
+  const feedback = new Feedback({
+    review: () => reviewFeedbackRepo(target ?? buildingTarget, byUrl ? opts.target : dir, opts.base),
+    broadcast: (value) => server?.broadcast(value),
+    pages: () => server?.pageCount ?? 0,
+  });
   let url = '';
   // The review's notes: kept for its branch, they stay through refreshes. Where the page opened.
   let notes: Notes | null = null;
@@ -133,10 +141,11 @@ async function review(opts: Options): Promise<number> {
         // The page comes with the notes, so it opens in the mode they're in.
         page: () => (render && session ? render({ ...session.config(), notes: notes?.view() }) : null),
         asset: (name) => {
-          const body = name === 'highlight.js' ? highlighter() : name === 'fonts.css' ? fonts() : null;
+          const body = name === 'highlight.js' ? highlighter() : name === 'feedback-panel.js' ? feedbackPanel() : name === 'fonts.css' ? fonts() : null;
           return body && { type: name.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', body };
         },
         call: (route, method, query, body, head, signal) => {
+          if (route === 'feedback' || route.startsWith('feedback/')) return feedback.call(route, method, body);
           if (route === 'refresh') return method === 'POST' ? refresh() : check(query.has('check'));
           if (route === 'stop' && method === 'POST') {
             // Paused (kept to pick up again), closed (done with), or just stopped.
@@ -456,6 +465,7 @@ async function review(opts: Options): Promise<number> {
     say.plan([byUrl ? 'pull request' : 'branch', ...buildSteps(opts.chains), 'history']);
     say.step(byUrl ? 'pull request' : 'branch');
     const t = await resolve(say);
+    buildingTarget = t;
     const n = names(t);
     say.finish();
     say.title(n.title, n.where);

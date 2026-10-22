@@ -30,6 +30,8 @@ export interface Target {
   pr: PullRequest | null;
   /** The branch the review compares with, and the commit it starts from (the merge base). */
   baseRef: string;
+  /** The remote whose branch was selected as the base, or null for a local branch. */
+  baseRemote?: string | null;
   baseSha: string;
   headSha: string;
   /** A clean checkout of the head commit that can be used as is: the directory itself. */
@@ -195,12 +197,14 @@ export async function resolveDirectory(dir: string, baseOverride: string | null,
   const repoKey = pr ? `github.com/${pr.owner}/${pr.repo}` : gh ? `github.com/${gh.owner}/${gh.repo}` : `local/${path.basename(repo)}-${crypto.createHash('sha256').update(repo).digest('hex').slice(0, 8)}`;
 
   let baseRef: string, baseTip: string | null = null;
+  let baseRemote: string | null = null;
   if (baseOverride) {
     baseRef = baseOverride;
     baseTip = gitMaybe(repo, 'rev-parse', '--verify', `${baseOverride}^{commit}`)?.trim() || null;
     if (!baseTip) throw new Error(`-base ${baseOverride} is not a commit in ${repo}`);
   } else {
     if (pr) {
+      baseRemote = remote;
       baseRef = pr.baseRefName;
       if (pr.state !== 'OPEN') notes.push(`#${pr.number} is ${pr.state.toLowerCase()}: comparing with ${baseRef} as it was then`);
       if (pr.headRefOid !== headSha) notes.push(`reviewing your checkout at ${headSha.slice(0, 7)}; the pull request’s head is ${pr.headRefOid.slice(0, 7)}`);
@@ -224,6 +228,7 @@ export async function resolveDirectory(dir: string, baseOverride: string | null,
       const others = remotes.filter((r) => r !== remote).sort((a, b) => Number(b === 'upstream') - Number(a === 'upstream'));
       const nearest = nearestCopy(repo, headSha, [own, { ref: branch, tip: tipOf(repo, `refs/heads/${branch}`) }, ...others.map((r) => ({ ref: `${r}/${branch}`, tip: tipOf(repo, `refs/remotes/${r}/${branch}`) }))]);
       baseRef = nearest?.ref ?? branch;
+      baseRemote = nearest === own ? remote : nearest?.ref.includes('/') ? others.find((r) => nearest.ref.startsWith(r + '/')) ?? null : null;
       baseTip = nearest?.tip ?? null;
       notes.push(`no pull request for this branch: comparing with ${baseRef}`);
       if (own && nearest === own && !fetched) notes.push(`could not fetch ${remote}/${branch}; using the local copy`);
@@ -241,5 +246,5 @@ export async function resolveDirectory(dir: string, baseOverride: string | null,
   // The directory itself is the head checkout when nothing in it is uncommitted.
   const dirty = (gitMaybe(repo, 'status', '--porcelain', '--untracked-files=no') || '').trim() !== '';
   if (dirty) notes.push('uncommitted changes are not part of the review');
-  return { repo, repoKey, pr, baseRef, baseSha, headSha, headDir: dirty ? null : repo, notes };
+  return { repo, repoKey, pr, baseRef, baseRemote, baseSha, headSha, headDir: dirty ? null : repo, notes };
 }

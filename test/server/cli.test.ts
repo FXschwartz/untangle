@@ -18,7 +18,7 @@ const usageText = [
   'usage:',
   '  untangle [flags] [directory]',
   '  untangle [flags] <pr-url>',
-  '  untangle watch | reply | note | notes | stop | skill | upgrade | reviews ...',
+  '  untangle watch | reply | note | notes | stop | feedback | skill | upgrade | reviews ...',
   '',
   'A directory reviews its branch’s pull request, or else what the branch adds to the default branch.',
   'A pull request URL is cloned into the cache first. The review opens in your browser.',
@@ -30,6 +30,8 @@ const usageText = [
   '  note <path:line> <text>     write a note of its own, from its review of the change',
   '  notes                       print the open notes, as Copy for agent gives them',
   '  stop                        close the review',
+  '  feedback [text | -] [-idea] [pr-url]  draft a report for the user to check and send',
+  '  feedback -list              list your feedback pictures and how to delete one',
   '',
   'untangle skill -install teaches Claude and Codex those commands, so asking for a review in their',
   'chat is enough: “review this in untangle”.',
@@ -80,6 +82,10 @@ describe('Given the untangle command, ', () => {
 
   it('when -help is asked, then the usage lists the flags.', () => {
     assert.equal(run('-help'), usageText);
+  });
+
+  it('when help is asked, then the usage includes feedback drafts and listing pictures.', () => {
+    assert.equal(run('help'), usageText);
   });
 
   it(

@@ -17,7 +17,7 @@
     "scripts/dart-sdk.dart"
   ],
   "scripts": {
-    "build": "tsc -p . && node scripts/build-analyzer.mjs && esbuild viewer/highlight.js --bundle --format=iife --minify --legal-comments=none --outfile=dist/highlight.js && esbuild viewer/fonts.css --bundle --loader:.woff2=dataurl --minify --legal-comments=inline --outfile=dist/fonts.css",
+    "build": "tsc -p . && node scripts/build-analyzer.mjs && esbuild viewer/highlight.js --bundle --format=iife --minify --legal-comments=none --outfile=dist/highlight.js && esbuild viewer/feedback-panel.js --bundle --format=iife --minify --legal-comments=inline --outfile=dist/feedback-panel.js && esbuild viewer/fonts.css --bundle --loader:.woff2=dataurl --minify --legal-comments=inline --outfile=dist/fonts.css",
     "watch": "tsc -p . --watch",
     "check": "tsc -p . --emitDeclarationOnly && tsc -p test --noEmit",
     "test": "npm run build && node --test --test-force-exit \"test/unit/**/*.test.ts\" \"test/server/**/*.test.ts\"",
@@ -39,6 +39,7 @@
     "@fontsource-variable/schibsted-grotesk": "5.3.0",
     "@types/node": "25.9.9",
     "esbuild": "0.28.2",
+    "modern-screenshot": "4.7.0",
     "shiki": "4.5.0",
     "typescript": "5.9.3"
   }

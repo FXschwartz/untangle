@@ -44,6 +44,8 @@
     chevronRight: path1('M10.072 8.024L5.715 3.667l.618-.62L11 7.716v.618L6.333 13l-.618-.619 4.357-4.357z'),
     chevronDown: path1('M7.976 10.072l4.357-4.357.62.618L8.284 11h-.618L3 6.333l.619-.618 4.357 4.357z'),
     comment: svg('<path d="M14.5 2h-13l-.5.5v9l.5.5H4v2.5l.854.354L7.707 12H14.5l.5-.5v-9l-.5-.5zm-.5 9H7.5l-.354.146L5 13.293V11.5l-.5-.5H2V3h12v8z"/>'),
+    // The comment's bubble, with a mark: a bug or an idea for untangle.
+    feedback: path1('M14.5 2h-13l-.5.5v9l.5.5H4v2.5l.854.354L7.707 12H14.5l.5-.5v-9l-.5-.5zm-.5 9H7.5l-.354.146L5 13.293V11.5l-.5-.5H2V3h12v8zM7.5 4h1v4h-1V4zm0 5h1v1h-1V9z'),
     discussion: path1('M4 11.29l1-1v1.42l-1.15 1.14L3 12.5V10H1.5L1 9.5v-8l.5-.5h12l.5.5V6h-1V2H2v7h1.5l.5.5v1.79zM10.29 13l1.86 1.85.85-.35V13h1.5l.5-.5v-5l-.5-.5h-8l-.5.5v5l.5.5h3.79zm.21-1H7V8h7v4h-1.5l-.5.5v.79l-1.15-1.14-.35-.15z'),
     edit: svg('<path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm3.83-2.06L4.47 9.76l8-8 1.77 1.77-8 8z"/>'),
     copy: svg('<path fill-rule="evenodd" clip-rule="evenodd" d="M4 4l1-1h5.414L14 6.586V14l-1 1H5l-1-1V4zm9 3l-3-3H5v10h8V7z"/><path fill-rule="evenodd" clip-rule="evenodd" d="M3 1L2 2v10l1 1V2h6.414l-1-1H3z"/>'),
@@ -6680,6 +6682,8 @@
         const r = q && fuzzy(label, q);
         if (r) out.chains.push({ score: r.score - 100, icon, ui: true, html: matched(label, r.at), hint: '', go: goView(v, 'chains') });
       });
+      const fb = CONFIG.served && q && fuzzy('Send feedback', q);
+      if (fb) out.chains.push({ score: fb.score - 100, icon: ICON.feedback, ui: true, html: matched('Send feedback', fb.at), hint: 'a bug or an idea', go: () => feedback() });
     }
     if (on('files')) {
       const add = (f, gen) => {
@@ -7355,6 +7359,9 @@
       return;
     }
     if (act === 'refresh') return startRefresh();
+    if (act === 'feedback') { closeMenu(); return feedback(); }
+    if (act === 'fb-report') return feedback();
+    if (act === 'fb-draft') return feedback({ draft: FB.draft });
     if (act === 'rv-open' || act === 'rv-manager' || act === 'rv-new') {
       closeMenu();
       const go = act === 'rv-open' ? api('reviews/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: t.dataset.id }) }) : api('reviews/manager', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ palette: act === 'rv-new' }) });
@@ -7758,6 +7765,87 @@
     };
   })();
 
+  // ---------- Feedback: a bug or an idea, filed on untangle's repository with a picture of the page.
+  // The panel (dist/feedback-panel.js) loads on the first press, or early once the page is idle,
+  // so it's here if untangle stops answering. The page gives it what only the page knows.
+  const FB = { loading: null, quietSince: 0, draft: null, errors: [] };
+  // The repository's text on this page: names, paths, messages, code, test sentences and people.
+  // When the picture hides it, each of its words is a bar.
+  const REPO_TEXT = [
+    '.t-pr', '.t-head > span', '.vw-where', '.sb-pr',
+    '.sb-row:not(.map) .nm', '.sb-row:not(.map) .sn', '.ol-file .nm', 'span.dir', '.pal-r .nm', '.pal-r .hint', '.pal-r .fn', '.pal-in',
+    '.crumbs b', '.fv-here b', '.fv-note', '.cm-note', '.more-row > span',
+    '.cm-s', '.hs-s', '.hs-m', '.hs-sub-s', '.lp-s', '.hs-chip', '.ol-chip', '.hs-rev span', '.hd-msg', '.hd-facts dd',
+    '.g-l1', '.g-l2', '.g-elabel',
+    '.sec-h > b', '.sec-h > span:not(.tag):not(.hov)', '.sec-note', '.sec-file', '.sym-h', '.inst-file', '.pdir', '.pname',
+    '.tx', '.hh-tx', '.pk-code', '.pk-loc', '.pk-use', '.pk-h',
+    '.ol-tt', '.ol-lbl',
+    '.cm-body', '.cm-who', '.th-hunk', '.nt-quote', '.nt-was', '.tl-body', '.conv',
+    '.ag-line', '.ag-l',
+    // The page's own sentences name code in <code>: a member, a file, a commit. Pictures are
+    // people's faces.
+    'code', 'img',
+    'textarea', 'input[type="text"]', 'input[type="search"]', 'input:not([type])',
+  ].join(', ');
+  addEventListener('error', (e) => { FB.errors = [...FB.errors, String(e.message || 'an error').slice(0, 160)].slice(-5); });
+  addEventListener('unhandledrejection', (e) => { FB.errors = [...FB.errors, String((e.reason && e.reason.message) || e.reason || 'a rejection').slice(0, 160)].slice(-5); });
+  // The panel's script, once: given up after a few seconds, as when untangle isn't answering.
+  function fbLoad() {
+    if (window.UntangleFeedback) return Promise.resolve(window.UntangleFeedback);
+    return (FB.loading ??= new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      const give = setTimeout(() => s.onerror(), 4000);
+      s.src = 'assets/feedback-panel.js';
+      s.onload = () => { clearTimeout(give); window.UntangleFeedback ? resolve(window.UntangleFeedback) : s.onerror(); };
+      s.onerror = () => { clearTimeout(give); FB.loading = null; s.remove(); reject(new Error('the Feedback panel didn’t load')); };
+      document.head.appendChild(s);
+    }));
+  }
+  // What only the page knows: the review and the view, without the repository's names when hidden.
+  function fbFacts() {
+    const m = M(), t = stats(m.files.flatMap((f) => f.blocks)), v = state.view;
+    const pr = CONFIG.url && /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(CONFIG.url);
+    const size = `${plural(m.files.length, 'file')} · ${plural(m.chains.length, 'chain')}${m.byCommit ? ', by commit' : ''} · ${plural(t.total, 'change')}, ${t.open} to review`;
+    const kind = { map: 'the chain map', chain: 'a chain', file: 'a file', standalone: 'Not in a chain', group: 'a same change', tests: 'the Tests view', history: 'History', search: 'a search', conversation: 'the conversation', source: 'a file’s source' }[v.kind] || v.kind;
+    // A fold by its label, without the names and counts after it.
+    const folded = [...main.querySelectorAll('.ol-fold[aria-expanded="false"]')].map((el) => `${el.textContent.split(/[:·]/)[0].trim()} folded`);
+    const pill = $('#vw-pill');
+    const said = pill && !pill.hidden ? ((pill.querySelector('.pill-msg') || pill.querySelector('.pill-n') || {}).textContent || '').trim() : '';
+    const view = [kind, state.lens ? 'a lens on some commits' : '', ...folded, said && `the pill: ${said}`].filter(Boolean).join(' · ');
+    return [
+      { id: 'review', k: 'The review', v: `${pr ? `${pr[1]}#${pr[2]}` : M().raw.label || 'a branch'} · ${size}`, hidden: `${pr ? 'a pull request' : 'a branch'} · ${size}` },
+      { id: 'view', k: 'The view', v: view },
+      { id: 'errors', k: 'Errors', v: FB.errors.length ? FB.errors.join('; ') : 'none on the page' },
+    ];
+  }
+  // GitHub's form, from the page alone, for when the panel can't load.
+  function fbWebUrl(why) {
+    const rows = fbFacts().map((f) => `| ${f.k} | ${String(f.hidden !== undefined ? f.hidden : f.v).replace(/\|/g, '\\|')} |`).join('\n');
+    return 'https://github.com/marcelomendoncasoares/untangle/issues/new?' + new URLSearchParams({ template: 'bug.yml', title: why, what: `${why}.`, details: `| | |\n| --- | --- |\n${rows}\n\n<!-- untangle-feedback kind=bug -->` }).toString();
+  }
+  function feedback(opts = {}) {
+    if (!CONFIG.served) return;
+    const offline = !!FB.quietSince;
+    fbLoad().then((F) => F.open({
+      page: 'review',
+      api: (path, init) => fetch(path, { cache: 'no-store', ...init }),
+      facts: fbFacts,
+      repoText: REPO_TEXT,
+      offline,
+      draft: opts.draft || null,
+      onClose: () => { if (opts.draft) { FB.draft = null; fbAlarm(); } },
+    })).catch(() => window.open(fbWebUrl(offline ? 'untangle stopped answering' : 'Feedback from untangle'), '_blank', 'noopener,noreferrer'));
+  }
+  // In the top bar: untangle isn't answering, or a report is drafted, each with what to do.
+  function fbAlarm() {
+    const el = $('#vw-alarm');
+    if (!el) return;
+    const quiet = FB.quietSince ? Math.round((Date.now() - FB.quietSince) / 1000) : 0;
+    if (quiet >= 20) el.innerHTML = `<i></i><span>untangle isn’t answering <em>· ${quiet} s</em></span><button type="button" data-act="fb-report" title="Report it: untangle can’t take the report now, so it opens on GitHub">Report it</button>`;
+    else if (FB.draft) el.innerHTML = `<i></i><span>A report is drafted <em>· for you to check</em></span><button type="button" data-act="fb-draft" title="${esc(FB.draft.text || '')}">Open it</button>`;
+    el.hidden = !(quiet >= 20 || FB.draft);
+  }
+
   // ---------- the language server and untangle's metrics: a dot in the top bar with the memory and
   // CPU that untangle and its language server use together, each one's numbers under it on hover
   // (like px0's). Values change in place, so the popover stays open under the pointer.
@@ -7800,13 +7888,21 @@
     free.hidden = lsp.state !== 'ready';
     free.disabled = false;
   }
+  // An answer that doesn't come in 5 seconds means untangle is stuck, not stopped: the page keeps
+  // asking, and after 20 seconds offers to report it. A refused one means it stopped.
   function pollMetrics() {
     clearTimeout(metricsTimer);
     if (document.visibilityState === 'hidden') return;
-    fetch('api/metrics', { cache: 'no-store' })
+    const ask = new AbortController(), cut = setTimeout(() => ask.abort(), 5000);
+    fetch('api/metrics', { cache: 'no-store', signal: ask.signal })
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then((m) => { metricsMisses = 0; showMetrics(m); metricsTimer = setTimeout(pollMetrics, 2000); })
-      .catch(() => { if (++metricsMisses >= 3) return showMetrics(null); metricsTimer = setTimeout(pollMetrics, 2000); });
+      .then((m) => { metricsMisses = 0; if (FB.quietSince) { FB.quietSince = 0; fbAlarm(); } showMetrics(m); metricsTimer = setTimeout(pollMetrics, 2000); })
+      .catch((e) => {
+        if (e.name === 'AbortError') { FB.quietSince ||= Date.now() - 5000; fbAlarm(); metricsTimer = setTimeout(pollMetrics, 1000); return; }
+        if (++metricsMisses >= 3) return showMetrics(null);
+        metricsTimer = setTimeout(pollMetrics, 2000);
+      })
+      .finally(() => clearTimeout(cut));
   }
   if (CONFIG.served && revsEl) {
     revsEl.hidden = false;
@@ -7840,6 +7936,14 @@
   if (CONFIG.served) {
     setInterval(() => { if (document.visibilityState === 'visible') freshCheck(); }, 120000);
     setTimeout(freshCheck, 5000);
+    $('#vw-fb').hidden = false;
+    // A draft from untangle feedback: said at once to an open page, and asked for by one that opens later.
+    addEventListener('untangle:push', (e) => { const f = e.detail && e.detail.feedback; if (f && f.draft) { FB.draft = f.draft; fbAlarm(); } });
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1));
+    setTimeout(() => idle(() => {
+      fbLoad().catch(() => {});
+      fetch('api/feedback', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((c) => { if (c && c.draft && !FB.draft) { FB.draft = c.draft; fbAlarm(); } }).catch(() => {});
+    }), 3000);
   }
   if (NT.on) {
     // The page comes with the notes; untangle says when they change (an agent answered).

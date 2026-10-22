@@ -1,5 +1,6 @@
 // Narration: what untangle is doing, in the terminal and on the page that waits for the review.
 import type { Progress } from './build.js';
+import { rememberFeedback } from './feedback.js';
 
 export interface StepStatus {
   label: string;
@@ -67,6 +68,7 @@ export class Narrator implements Progress {
   }
 
   private write(line: string) {
+    rememberFeedback(line);
     this.clear();
     process.stderr.write(line + '\n');
     this.draw();
@@ -124,7 +126,7 @@ export class Narrator implements Progress {
       this.draw();
     }, 1000);
     this.ticker.unref();
-    if (!this.tty && !this.opts.quiet) process.stderr.write(`  … ${label}\n`);
+    if (!this.tty && !this.opts.quiet) this.write(`  … ${label}`);
     this.draw();
     this.changed(true);
   }

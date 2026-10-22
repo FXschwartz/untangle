@@ -709,6 +709,32 @@
 
   // ---- Clicks and keys
 
+  // ---- Feedback: the panel (dist/feedback-panel.js) comes on the first press. On this page, the
+  // repository's text is each review's title, repository, author, branch, path and chat lines.
+  const REPO_TEXT = ['.ttl', '.l2', '.num', '.tail', '.who', '.where', '.nr .nm.mono', '.pk-text', '.pal-in', '.pal-list', '.agent small', 'code', 'img', 'textarea', 'input:not([type])', 'input[type="text"]', 'input[type="search"]'].join(', ');
+  let fbLoading = null;
+  function feedback() {
+    const load = window.UntangleFeedback ? Promise.resolve(window.UntangleFeedback) : (fbLoading ??= new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'assets/feedback-panel.js';
+      s.onload = () => (window.UntangleFeedback ? resolve(window.UntangleFeedback) : reject(new Error('no panel')));
+      s.onerror = () => { fbLoading = null; s.remove(); reject(new Error('no panel')); };
+      document.head.appendChild(s);
+    }));
+    load.then((F) => F.open({
+      page: 'reviews',
+      api: (path, init) => fetch(path, { cache: 'no-store', ...init }),
+      facts: () => {
+        const list = open(), run = list.filter((r) => r.status === 'running');
+        return [
+          { id: 'reviews', k: 'The reviews', v: `${plural(list.length, 'open review', 'open reviews')}: ${run.length} running, ${list.length - run.length} paused` },
+          { id: 'view', k: 'The view', v: `the Reviews page, ${S.tab === 'open' ? 'Open' : 'Closed'}${S.filter !== 'all' && !S.filter.startsWith('repo:') ? `, ${S.filter}` : ''}` },
+        ];
+      },
+      repoText: REPO_TEXT,
+    })).catch(() => toast('The Feedback panel didn’t load: reload the page and try again.', true));
+  }
+
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
     const was = S.menu;
@@ -719,6 +745,9 @@
     }
     const key = b.dataset.key, id = b.dataset.id;
     switch (b.dataset.act) {
+      case 'feedback':
+        feedback();
+        break;
       case 'sel':
         S.sel = id;
         if (S.opened.has(id)) { S.opened.delete(id); S.tails.delete(id); }

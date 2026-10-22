@@ -55,7 +55,7 @@ export function usage(version: string): string {
     'usage:',
     '  untangle [flags] [directory]',
     '  untangle [flags] <pr-url>',
-    '  untangle watch | reply | note | notes | stop | skill | upgrade | reviews ...',
+    '  untangle watch | reply | note | notes | stop | feedback | skill | upgrade | reviews ...',
     '',
     'A directory reviews its branch’s pull request, or else what the branch adds to the default branch.',
     'A pull request URL is cloned into the cache first. The review opens in your browser.',
@@ -67,6 +67,8 @@ export function usage(version: string): string {
     '  note <path:line> <text>     write a note of its own, from its review of the change',
     '  notes                       print the open notes, as Copy for agent gives them',
     '  stop                        close the review',
+    '  feedback [text | -] [-idea] [pr-url]  draft a report for the user to check and send',
+    '  feedback -list              list your feedback pictures and how to delete one',
     '',
     'untangle skill -install teaches Claude and Codex those commands, so asking for a review in their',
     'chat is enough: “review this in untangle”.',
@@ -188,6 +190,10 @@ const REPLY_FLAGS: Flag[] = [AGENT, { name: 'resolve', type: 'bool', usage: 'res
 const NOTE_FLAGS: Flag[] = [AGENT, { name: 'removed', type: 'bool', usage: 'the lines are ones the change removed, numbered as on the base' }, REVIEW];
 const NOTES_FLAGS: Flag[] = [AGENT, { name: 'all', type: 'bool', usage: 'the resolved notes too' }, REVIEW];
 const STOP_FLAGS: Flag[] = [REVIEW];
+const FEEDBACK_FLAGS: Flag[] = [
+  { name: 'idea', type: 'bool', usage: 'draft an idea instead of a bug report' },
+  { name: 'list', type: 'bool', usage: 'list your feedback gists and how to delete one, without changing anything' },
+];
 const REVIEWS_FLAGS: Flag[] = [
   { name: 'list', type: 'bool', usage: 'print the reviews in the terminal, instead of opening the page' },
   { name: 'no-open', type: 'bool', usage: 'do not open the page: print its link' },
@@ -211,6 +217,7 @@ export type Command =
   | { cmd: 'stop'; review: string | null }
   | { cmd: 'skill'; install: boolean; update: boolean }
   | { cmd: 'upgrade' }
+  | { cmd: 'feedback'; kind: 'bug' | 'idea'; text: string; target: string | null; list: boolean }
   /** port: null unless it was given. */
   | { cmd: 'reviews'; list: boolean; open: boolean; port: number | null; serve: boolean };
 
@@ -234,6 +241,12 @@ export const noteUsage = () => commandUsage('note', 'write a note of your own, o
 ], NOTE_FLAGS);
 export const notesUsage = () => commandUsage('notes', 'print a review’s notes, as Copy for agent gives them', '[flags]', ['Prints the open notes, with their code and threads.'], NOTES_FLAGS);
 export const stopUsage = () => commandUsage('stop', 'close a review', '[flags]', ['Stops the review: its page closes and a waiting untangle watch says so.'], STOP_FLAGS);
+export const feedbackUsage = () => commandUsage('feedback', 'draft a report for the user to check and send', "['what happened' | -] [-idea] [pr-url]", [
+  'Puts a draft on the running review’s page, with the system and what the review is running.',
+  'With no answer, prints GitHub’s form, filled in. It never files an issue; the user sends it.',
+  'The text is one argument; - reads it from stdin. Without pr-url, finds this directory’s review.',
+  'With -list, lists your feedback gists and how to delete one; it changes nothing.',
+], FEEDBACK_FLAGS);
 export const skillUsage = () => commandUsage('skill', 'teach Claude and Codex to hold a review', '[flags]', [
   'Prints the untangle skill: how an agent holds a review with watch, reply, notes and stop. With',
   '-install, it goes where each agent on this machine reads skills (~/.claude/skills for Claude,',
@@ -258,6 +271,16 @@ export const reviewsUsage = () => commandUsage('reviews', 'the reviews on this m
 /** The command line: a review, or one of the agent's commands (its first word). */
 export function parseCommand(argv: string[]): Command {
   const [first, ...more] = argv;
+  if (first === 'help') return { cmd: 'review', opts: parseArgs(['-h']) };
+  if (first === 'feedback') {
+    const { values, rest } = readFlags(more, FEEDBACK_FLAGS, false);
+    if (values.get('help')) return { cmd: 'help', text: feedbackUsage() };
+    const last = rest.at(-1);
+    const target = last && /^(?:https?:\/\/)?github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+(?:[/?#].*)?$/.test(last) ? rest.pop()! : null;
+    if (rest.length > 1) throw new UsageError('the report text is one argument: quote it, or use - for stdin');
+    if (values.get('list') && (rest.length || target || values.get('idea'))) throw new UsageError('-list takes no report text, pull request or -idea');
+    return { cmd: 'feedback', kind: values.get('idea') ? 'idea' : 'bug', text: rest[0] ?? '', target, list: values.get('list') === true };
+  }
   if (first === 'watch') {
     const both = [...WATCH_FLAGS, ...FLAGS.filter((f) => !['export', 'v', 'version'].includes(f.name))];
     const { values, rest, raw } = readFlags(more, both, false);

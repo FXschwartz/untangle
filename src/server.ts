@@ -264,7 +264,7 @@ export class ReviewServer {
           const text = await readBody(req);
           body = text ? JSON.parse(text) : null;
         } catch {
-          return this.json(res, 400, { error: 'not JSON' });
+          return this.json(res, 400, { error: 'not JSON', ...(route === 'api/feedback' || route.startsWith('api/feedback/') ? { web: true } : {}) });
         }
       }
       if (route === 'api/presence' && req.method === 'POST') {

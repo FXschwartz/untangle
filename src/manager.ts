@@ -15,7 +15,8 @@ import { Narrator } from './narrate.js';
 import { openPage } from './open.js';
 import { newTerminal, orca, orcaCli, reviewsWorkspace, showTab, showTerminal } from './orca.js';
 import { childPids, rss } from './metrics.js';
-import { fonts, managerPage } from './page.js';
+import { feedbackPanel, fonts, managerPage } from './page.js';
+import { Feedback } from './feedback.js';
 import { notesFile } from './notes.js';
 import { dirSizeAsync, listRecords, readRecord, recordFile, recordId, serves, writeRecord, type Listed, type ReviewRecord } from './records.js';
 import { shortName, summaries, titleOf, type Summary } from './reviews.js';
@@ -748,17 +749,19 @@ export async function serveManager(o: { port: number | null; quiet: boolean }): 
   const progress = new Narrator({ quiet: true, verbose: false, color: false });
   let seen = Date.now();
   const page = () => managerPage({ version: VERSION });
+  const feedback: Feedback = new Feedback({ review: null, broadcast: (value) => server.broadcast(value), pages: () => server.pageCount });
   const server = new ReviewServer(
     { host: '127.0.0.1', port: o.port ?? MANAGER_PORT, portExplicit: o.port != null, basePath: '/' },
     progress,
     {
       page,
       asset: (name) => {
-        const css = name === 'fonts.css' ? fonts() : null;
-        return css && { type: 'text/css; charset=utf-8', body: css };
+        const body = name === 'fonts.css' ? fonts() : name === 'feedback-panel.js' ? feedbackPanel() : null;
+        return body && { type: name.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', body };
       },
       call: (route, method, query, body) => {
         seen = Date.now();
+        if (route === 'feedback' || route.startsWith('feedback/')) return feedback.call(route, method, body);
         return manager.call(route, method, query, body);
       },
     },

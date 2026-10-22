@@ -65,6 +65,12 @@ When \`untangle watch\` prints notes, or a line from untangle says there are new
   and stop watching.
 - \`untangle notes\` prints the open notes again.
 - Run \`untangle stop\` only when the user asks to close the review.
+
+## When untangle misbehaves
+
+If an untangle command hangs or fails, run \`untangle feedback '<what you saw>'\`. It drafts
+a bug report with what untangle was running, for the user to check and send. Tell the user, and
+never file the issue yourself.
 `;
 
 export const RULE = `# untangle runs outside Codex's sandbox: it writes its cache, serves the review's page and puts

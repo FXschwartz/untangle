@@ -190,6 +190,12 @@ a.t-pr:hover { text-decoration: underline; text-decoration-color: var(--text-3);
 .lsp-row { display: flex; justify-content: space-between; gap: 12px; }
 .lsp-row b { color: var(--text); font: 500 12px/1.45 var(--code); }
 .vw-review { position: relative; flex: none; }
+/* Feedback, by untangle's own state; and the bar's alarm: untangle isn't answering, or a report is drafted. */
+.vw-fb[hidden], .vw-alarm[hidden] { display: none; }
+.vw-alarm { display: inline-flex; align-items: center; gap: 8px; flex: none; height: 28px; padding: 0 3px 0 10px; border-radius: 999px; background: rgba(255, 107, 94, .14); color: var(--text); font: 500 12px/1 var(--ui); white-space: nowrap; }
+.vw-alarm > i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #FF6B5E; }
+.vw-alarm em { font-style: normal; color: var(--text-2); }
+.vw-alarm button { appearance: none; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--text); color: var(--ground); font: 600 11.5px/1 var(--ui); cursor: pointer; }
 /* The agents holding the review: each one's label says where its chat is (listening, working on
    notes, a line waiting for its turn, not listening, or gone), and opens a menu. */
 .vw-agents { display: inline-flex; align-items: center; gap: 6px; flex: none; }
@@ -1344,6 +1350,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
   .vw-bar { position: relative; z-index: 30; gap: 0; min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(4px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left)); flex-wrap: wrap; box-shadow: 0 1px 0 var(--hair); }
   .vw-bar > .sp, .vw-title, .vw-lsp, .vw-review > .rv-btn, .vw-side-btn { display: none !important; }
   .vw-bar .ib.vw-contents, .vw-bar .ib.vw-more { display: grid; width: 44px; height: 44px; border-radius: 10px; }
+  .vw-bar .ib.vw-fb { width: 44px; height: 44px; border-radius: 10px; }
   .vw-bar .ib svg { width: 18px; height: 18px; }
   .vw-more { position: relative; }
   .vw-more.has::after { content: ""; position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: var(--local); box-shadow: 0 0 0 2px var(--ground); }
@@ -1546,6 +1553,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
     <div class="vw-title" id="vw-title"></div>
     <div class="vw-where" id="vw-where" aria-live="polite"><b></b><small></small></div>
     <div class="vw-fresh" id="vw-fresh" role="status" hidden></div>
+    <div class="vw-alarm" id="vw-alarm" role="status" hidden></div>
     <span class="sp"></span>
     <button type="button" class="vw-jump" id="vw-jump" data-act="jump" aria-keyshortcuts="Control+K" aria-haspopup="dialog"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 11 L15 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Jump to a chain, file or symbol</span><kbd>Ctrl K</kbd></button>
     <span class="sp"></span>
@@ -1561,6 +1569,7 @@ body.dragging, body.dragging * { user-select: none; cursor: grabbing; }
         <button type="button" class="btn sm lsp-free" id="lsp-free" data-act="lsp-restart" title="Start the language server over: it lets go of what it loaded for the definitions you went to. Go to definition waits for it while it starts" hidden>Free its memory</button>
       </span>
     </div>
+    <button type="button" class="ib vw-fb" id="vw-fb" data-act="feedback" title="Feedback: a bug or an idea for untangle, with a picture of the page" aria-label="Feedback" hidden><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.5 2h-13l-.5.5v9l.5.5H4v2.5l.854.354L7.707 12H14.5l.5-.5v-9l-.5-.5zm-.5 9H7.5l-.354.146L5 13.293V11.5l-.5-.5H2V3h12v8zM7.5 4h1v4h-1V4zm0 5h1v1h-1V9z"/></svg></button>
     <div class="vw-agents" id="vw-agent" hidden></div>
     <div class="vw-review" id="vw-review" hidden></div>
     <button type="button" class="ib vw-more" id="vw-more" data-act="menu" data-menu="more" title="More: notes, the commit, the view, the language server" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.25"/><circle cx="8" cy="8" r="1.25"/><circle cx="12.5" cy="8" r="1.25"/></svg></button>

@@ -1,0 +1,20 @@
+name: An idea
+description: Tell us how untangle could be better.
+labels: [idea]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Your idea
+    validations:
+      required: true
+  - type: textarea
+    id: picture
+    attributes:
+      label: Picture
+      description: Paste the picture untangle copied, or drop one here.
+  - type: textarea
+    id: details
+    attributes:
+      label: What untangle adds
+      description: Filled in by untangle's Feedback button. Take out anything you'd rather not share.

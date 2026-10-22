@@ -181,6 +181,11 @@ workspace of their own.
 carry over and unsent comments stay.
 - **A key for every step** of a review: see [Keys](#keys).
 - **Share it read-only:** `-export review.html` writes the review as one HTML file.
+- **Report a bug where you see it.** Feedback, in the top bar, takes a picture of the page for you
+to mark up, and files an issue on untangle's repository through `gh`, as you. When the repository
+you review isn't public, its code and names in the picture turn into bars. Nothing leaves your
+machine before you see what will and say yes; `untangle feedback -list` lists the pictures you
+sent, to delete when you like. Without `gh`, it fills in GitHub's form instead.
 
 ## Getting started
 
@@ -302,6 +307,7 @@ chat is enough. The agent runs:
 | `untangle note <path>[:<line>[-<line>]] <text>` | write a note of its own (`-removed`: on lines the change removed)          |
 | `untangle notes`                                | print the open notes (`-all`: the resolved too)                            |
 | `untangle stop`                                 | close the review                                                           |
+| `untangle feedback <text>`                      | when untangle misbehaves: draft a bug report for you to check and send     |
 
 Claude runs `watch` in the background, and its end wakes the chat. Codex's `watch` returns at
 once, and untangle puts a line in its chat when there's something new. The review runs on its
@@ -485,7 +491,9 @@ Its faces are [Schibsted Grotesk](https://github.com/schibsted/schibsted-grotesk
 [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both under the SIL Open Font
 License 1.1, from [Fontsource](https://fontsource.org). The grammar that colors Serverpod's
 models comes from Serverpod's VS Code extension, under the BSD 3-Clause License
-([viewer/syntaxes/serverpod.LICENSE.txt](viewer/syntaxes/serverpod.LICENSE.txt)).
+([viewer/syntaxes/serverpod.LICENSE.txt](viewer/syntaxes/serverpod.LICENSE.txt)). Feedback's
+picture of the page is drawn by [modern-screenshot](https://github.com/qq15725/modern-screenshot)
+(MIT).
 
 ## License
 
