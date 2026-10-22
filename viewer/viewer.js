@@ -3771,11 +3771,13 @@
     }
     return null;
   }
-  function chainSha(c) {
+  // By commit, the commit a chain is: its sha, its kind, its message.
+  function chainCommit(c) {
     const m = M();
     const fam = m.byCommit && c.kind === 'commit' ? m.families.find((x) => x.id === c.family) : null;
-    return fam && fam.commit ? fam.commit.sha : null;
+    return fam && fam.commit;
   }
+  const chainSha = (c) => chainCommit(c)?.sha ?? null;
   // hover: shown with the row's other details, as in the Tests view, where most rows have one.
   const olChip = (c, key, hover) => { const sha = chainSha(c); return `<button type="button" class="ol-chip${hover ? ' ol-hov' : ''}" data-act="ol-chain" data-chain-id="${c.id}" data-ol="${esc(key)}" title="Written in ${esc(c.name)}: open it there">${sha ? `<code>${esc(shortSha(sha))}</code>` : esc(trunc(c.name, 28))}</button>`; };
   // Whether a fold of an outline is open: code is open by default in a chain (it's the chain's code)
@@ -4745,6 +4747,9 @@
     if (!m || !m[4]) return { text: s, kind: '' };
     return { text: m[4][0].toUpperCase() + m[4].slice(1), kind: m[1] + (m[3] ? `(${m[3]})` : '') };
   }
+  // A commit's kind before its subject in a row, as its chain's header has it: its type alone, as
+  // a row has no room for its scope ("feat(database)").
+  const kindTag = (kind) => (kind ? `<span class="tag kind">${esc(kind.replace(/\(.*$/, ''))}</span> ` : '');
   const thisYear = new Date().getFullYear();
   const dayOf = (sec) => { const d = new Date(sec * 1000); return d.toLocaleDateString('en-US', d.getFullYear() === thisYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }); };
   const whenOf = (sec) => `${dayOf(sec)}, ${new Date(sec * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
@@ -4874,10 +4879,10 @@
     const stub = c.brought ? stubSvg(g) : null;
     const svg = laneSvg(vm, g, dotSvg(st.state), own ? (x, y) => (stub ? stub(x, y) : '') + `<circle class="ring" cx="${x}" cy="${y}" r="8"/>` : stub);
     const cnt = st.state === 'left' ? `<span class="cm-n left">${st.open}</span>` : st.state === 'done' ? `<span class="cm-n ok">${ICON.check}</span>` : '<span class="cm-n">—</span>';
-    const meta = (c.brought ? `<code>${shortSha(c.sha)}</code> · brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${dayOf(c.at)}`) + (w ? ` · <b>${w.changes} here</b>` : '');
+    const meta = (c.brought ? `<code>${shortSha(c.sha)}</code> · brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : `<code>${shortSha(c.sha)}</code> · ${dayOf(c.at)}`) + (w ? ` · <b>${w.changes} here</b>` : '');
     const left = st.total ? `${plural(st.total, 'change')}${st.open ? `, ${st.open} to review` : ', all reviewed'}` : 'Nothing of it is left at the head';
     const here = !chain ? '' : w ? `\n${own ? 'The open chain’s commit. ' : ''}Its lines are in ${w.changes} of the open chain’s changes.` : '\nNone of its lines are in the open chain.';
-    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}${w ? ' mine' : ''}" data-commit="${c.sha}" data-ci="${it.i}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.${here}\n\nClick for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${esc(sub.text)}</span><span class="cm-m">${meta}</span>${commitDiff(c)}${cnt}</button>`;
+    return `<button type="button" class="cm-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}${w ? ' mine' : ''}" data-commit="${c.sha}" data-ci="${it.i}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.${here}\n\nClick for its changes; Shift-click for a range.`)}">${svg}<span class="cm-s">${kindTag(sub.kind)}${esc(sub.text)}</span><span class="cm-m">${meta}</span>${commitDiff(c)}${cnt}</button>`;
   }
   function ghostRowHtml(vm, g, cls) {
     const gh = vm.item.ghost, on = !!state.lens && state.lens.kind === 'since' && state.lens.from === gh.sha;
@@ -4959,11 +4964,11 @@
   function popRowHtml(vm, g) {
     const it = vm.item;
     if (it.ghost) return ghostRowHtml(vm, g, 'lp-row');
-    const c = it.c, st = commitState(it.i), on = commitInLens(it.i);
+    const c = it.c, st = commitState(it.i), sub = subjectOf(c), on = commitInLens(it.i);
     const svg = laneSvg(vm, g, dotSvg(st.state), c.brought ? stubSvg(g) : null);
     const cnt = st.state === 'left' ? `<span class="cm-n left">${st.open}</span>` : st.state === 'done' ? `<span class="cm-n ok">${ICON.check}</span>` : '<span class="cm-n">—</span>';
     const left = st.total ? `${plural(st.total, 'change')}${st.open ? `, ${st.open} to review` : ', all reviewed'}` : 'Nothing of it is left at the head';
-    return `<button type="button" class="lp-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.`)}">${svg}<code>${shortSha(c.sha)}</code><span class="lp-s">${esc(subjectOf(c).text)}</span>${cnt}</button>`;
+    return `<button type="button" class="lp-row${on ? ' in' : ''}${st.state === 'gone' ? ' gone' : ''}" data-commit="${c.sha}" aria-pressed="${on}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n${left}.`)}">${svg}<code>${shortSha(c.sha)}</code><span class="lp-s">${kindTag(sub.kind)}${esc(sub.text)}</span>${cnt}</button>`;
   }
 
   // ---------- the History view: each commit in full, what it touched, its checks and reviews
@@ -4985,11 +4990,11 @@
     (facts ? facts.reviews : []).forEach((r) => { if (r.sha !== c.sha) return; const k = r.author.login + ' ' + r.state; if (!reviews.has(k)) reviews.set(k, { ...r, n: 0 }); reviews.get(k).n++; });
     const rv = [...reviews.values()].map((r) => `<a class="hs-rev ${r.state === 'APPROVED' ? 'ok' : r.state === 'CHANGES_REQUESTED' ? 'bad' : ''}" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" title="${esc(r.author.login)} ${REVIEW_WORD[r.state] || r.state.toLowerCase()} on this commit${r.n > 1 ? `, ${r.n} times` : ''}">${r.author.avatar ? `<img src="${esc(r.author.avatar)}&s=32" alt="" width="16" height="16">` : ''}<span>${esc(`${r.author.login} ${REVIEW_WORD[r.state] || ''}${r.n > 1 ? ` ×${r.n}` : ''}`.trim())}</span></a>`).join('');
     const what = c.brought ? `brings ${plural(c.brought, 'commit')} from ${esc(baseName())}` : st.total ? `${plural(st.total, 'change')} ${perChain.size ? 'in ' + plural(perChain.size, 'chain') : 'outside chains'}` : 'nothing of it left at the head';
-    const meta = `<code>${shortSha(c.sha)}</code>${sub.kind ? ' · ' + esc(sub.kind) : ''} · ${esc(c.author)} · ${dayOf(c.at)} · ${what}`;
+    const meta = `<code>${shortSha(c.sha)}</code> · ${esc(c.author)} · ${dayOf(c.at)} · ${what}`;
     const cnt = st.state === 'left' ? `<span class="hs-n left" title="${st.open} of its changes to review">${st.open}</span>` : st.state === 'done' ? `<span class="hs-n ok" title="All of it reviewed">${ICON.check}</span>` : '<span class="hs-n">—</span>';
     const open = HX.open.has(c.sha), shown = HX.detail === c.sha;
     const more = c.brought && CONFIG.served ? `<button type="button" class="btn xs" data-act="brought" data-sha="${c.sha}" aria-expanded="${open}">${open ? 'Hide them' : 'Show them'}</button>` : '';
-    return `<div class="hs-row${on ? ' in' : ''}${shown ? ' open' : ''}${st.state === 'gone' ? ' gone' : ''}"><button type="button" class="hs-main" data-detail="${c.sha}" aria-expanded="${shown}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n\nClick for its details; Shift-click for the changes of the commits from the last one clicked to this one.`)}">${svg}<span class="hs-s">${esc(sub.text)}</span><span class="hs-m">${meta}</span></button>`
+    return `<div class="hs-row${on ? ' in' : ''}${shown ? ' open' : ''}${st.state === 'gone' ? ' gone' : ''}"><button type="button" class="hs-main" data-detail="${c.sha}" aria-expanded="${shown}" title="${esc(`${c.subject}\n${shortSha(c.sha)} · ${c.author} · ${whenOf(c.at)}\n\nClick for its details; Shift-click for the changes of the commits from the last one clicked to this one.`)}">${svg}<span class="hs-s">${kindTag(sub.kind)}${esc(sub.text)}</span><span class="hs-m">${meta}</span></button>`
       + `<span class="hs-x">${more}${rv}${chips}</span><span class="hs-ci${ck ? ' ' + ck[0] : ''}"${ck ? ` title="${ck[1]}"` : ''}>${ck ? (ck[0] === 'ok' ? ICON.check : ck[0] === 'bad' ? ICON.close : '•') : ''}</span>${cnt}</div>`;
   }
   // The commits a merge brought from the base's branch, under it.
@@ -5232,7 +5237,7 @@
         const st = stats(blocksOf(c.blocks));
         const on = v.kind === 'chain' && v.id === c.id;
         const n = splitName(c.name), d = Math.min(depth, 6);
-        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm${proseName(c) ? ' ui' : ''}">${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span>${sideDiff(c.adds, c.dels)}<span class="cnt">${st.open || ''}</span></button>`;
+        return `<button type="button" class="sb-row chain${st.open ? '' : ' done'}${outOfLens(st) ? ' lens-out' : ''}" data-chain="${c.id}"${on ? ' aria-current="true"' : ''} style="--d:${d}" title="${esc(c.name)}: ${leftWords(st)} · ${c.files} file${c.files > 1 ? 's' : ''} · +${fmt(c.adds)} −${fmt(c.dels)}">${guides(d, Math.min(next, 6))}${markHtml(st)}<span class="nm${proseName(c) ? ' ui' : ''}">${kindTag(chainCommit(c)?.kind)}${n.own ? `<span class="own">${esc(n.own)}</span>` : ''}${esc(n.name)}</span>${sideDiff(c.adds, c.dels)}<span class="cnt">${st.open || ''}</span></button>`;
       };
       const linked = m.byCommit ? m.families : m.families.filter((f) => f.chains.length > 1);
       const lone = m.byCommit ? [] : m.families.filter((f) => f.chains.length === 1).map((f) => f.chains[0]).sort((x, y) => y.blocks.length - x.blocks.length);

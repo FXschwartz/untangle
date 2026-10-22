@@ -48,7 +48,7 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     repo.commit({ subject: 'feat: Double the price', author: second, committer: second });
     repo.write('lib/report.dart', report('sum'));
     const third = ada('2020-08-04T15:00:00Z');
-    labelSha = repo.commit({ subject: 'fix: Label the sum', author: third, committer: third });
+    labelSha = repo.commit({ subject: 'fix(report): Label the sum', author: third, committer: third });
     repo.write('test/price_test.dart', "import 'package:sample/price.dart';\n\nvoid main() {\n  price(1);\n  price(2);\n}\n");
     repo.write('lib/price.dart', 'int price(int amount) => amount * 3;\n');
     const fourth = ada('2020-08-05T15:00:00Z');
@@ -79,8 +79,8 @@ describe('Given a served review that follows four commits: a follow-up of the fi
       listed = await read(page!, `[...document.querySelectorAll('.sb-row[data-chain] .nm')].map((el) => el.textContent).join(', ')`);
     });
 
-    it('then each commit that started changes is one chain, in the order they were made.', () => {
-      assert.equal(listed, 'Add a report, Double the price, Cover the price');
+    it('then each commit that started changes is one chain, in the order they were made, its type before its name.', () => {
+      assert.equal(listed, 'feat Add a report, feat Double the price, test Cover the price');
     });
   });
 
@@ -130,10 +130,10 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     it('then the chain\'s two commits stand out with their changes here, ringed as its own, and the others fade.', () => {
       assert.equal(rows, [
         '2 of 4 in this chain',
-        'Cover the price · faded',
-        'Label the sum · 1 here · ringed',
-        'Double the price · faded',
-        'Add a report · 2 here · ringed',
+        'test Cover the price · faded',
+        'fix Label the sum · 1 here · ringed',
+        'feat Double the price · faded',
+        'feat Add a report · 2 here · ringed',
       ].join('\n'));
     });
   });
@@ -172,7 +172,33 @@ describe('Given a served review that follows four commits: a follow-up of the fi
     });
 
     it('then the Commits tab stays and follows the chain that opens.', () => {
-      assert.equal(followed, 'Commits shown | 2 of 4 in this chain | Cover the price, Double the price');
+      assert.equal(followed, 'Commits shown | 2 of 4 in this chain | test Cover the price, feat Double the price');
+    });
+  });
+
+  describe('when the fix, whose type has a scope, is read in the Commits tab, in History and in the top bar\'s commits, ', () => {
+    let rows = '';
+
+    before(async () => {
+      await rest(page!);
+      await page!.click('[data-tab="commits"]');
+      const tab = await read(page!, `((r) => r.querySelector('.cm-s').textContent + ' | ' + r.querySelector('.cm-m').textContent)(document.querySelector('.cm-row[data-commit="${labelSha}"]'))`);
+      await page!.click('[data-act="history-open"]');
+      await page!.until(`!!document.querySelector('.hs-main[data-detail="${labelSha}"]')`);
+      const history = await read(page!, `((r) => r.querySelector('.hs-s').textContent + ' | ' + r.querySelector('.hs-m').textContent)(document.querySelector('.hs-main[data-detail="${labelSha}"]'))`);
+      await page!.click('[data-menu="lens"]');
+      await page!.until(`!!document.querySelector('.lp-row[data-commit="${labelSha}"]')`);
+      const bar = await read(page!, `document.querySelector('.lp-row[data-commit="${labelSha}"] .lp-s').textContent`);
+      rows = [`Commits tab: ${tab}`, `History: ${history}`, `Top bar: ${bar}`].join('\n');
+    });
+
+    it('then each puts its type before its subject, without the scope, and leaves it out of the line under it.', () => {
+      const sha = labelSha.slice(0, 7);
+      assert.equal(rows, [
+        `Commits tab: fix Label the sum | ${sha} · Aug 4, 2020`,
+        `History: fix Label the sum | ${sha} · Ada Review · Aug 4, 2020 · 1 change in 1 chain`,
+        'Top bar: fix Label the sum',
+      ].join('\n'));
     });
   });
 

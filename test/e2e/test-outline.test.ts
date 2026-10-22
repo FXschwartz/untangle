@@ -629,8 +629,8 @@ describe('Given a served review by commit: a discount with its tests, more tests
     // included), a commit's all it changed.
     it('then each chain, commit, folder and file keeps the lines it adds and removes for its hover.', () => {
       assert.equal(lines, [
-        'Take a discount +9, Cover more totals +9, Name the scenario +1 −1',
-        'Name the scenario +1 −1, Cover more totals +8, Take a discount +10',
+        'feat Take a discount +9, test Cover more totals +9, test Name the scenario +1 −1',
+        'test Name the scenario +1 −1, test Cover more totals +8, feat Take a discount +10',
         'lib +2, cart.dart +2, test +17 −1, cart_test.dart +17 −1',
       ].join('\n'));
     });

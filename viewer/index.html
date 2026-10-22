@@ -115,6 +115,8 @@ mark { background: var(--accent-soft); color: var(--accent-ink); border-radius: 
 .mini-seg button:disabled { cursor: default; opacity: .45; }
 .mini-seg button:disabled:hover { color: var(--text-3); }
 .tag { font: 500 11px/1.4 var(--ui); color: var(--text-2); background: var(--raised); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+/* A commit's kind before its subject in a row: lighter than the row, current, hovered or raised. */
+.tag.kind { display: inline-block; padding: 0 5px; font-size: 10.5px; line-height: 15px; vertical-align: 1px; background: rgba(255, 255, 255, .07); }
 .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .3; } }
