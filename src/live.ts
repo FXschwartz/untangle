@@ -5,7 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { prepareCheckouts, type Checkouts, type Progress } from './build.js';
-import { git, gitMaybe, run } from './exec.js';
+import { git, gitMaybe, inputFile, run } from './exec.js';
 import { diffHunks } from './history.js';
 import { DartServer, type Location } from './lsp/dart.js';
 import type { LspState } from './metrics.js';
@@ -328,10 +328,13 @@ export class LiveSession {
     const list = paths.filter((p) => !p.includes('\n'));
     if (!list.length) return out;
     let buf: Buffer;
+    const input = inputFile(list.map((p) => `${this.target.headSha}:${p}\n`).join(''));
     try {
-      buf = execFileSync('git', ['-C', this.target.repo, 'cat-file', '--batch'], { input: list.map((p) => `${this.target.headSha}:${p}\n`).join(''), maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'ignore'] });
+      buf = execFileSync('git', ['-C', this.target.repo, 'cat-file', '--batch'], { maxBuffer: 1 << 30, stdio: [input.fd, 'pipe', 'ignore'] });
     } catch {
       return out;
+    } finally {
+      input.close();
     }
     // Each answer: "<oid> blob <size>\n<content>\n", or "<name> missing\n".
     let at = 0;

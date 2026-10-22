@@ -1,4 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 export class CommandError extends Error {
   constructor(
@@ -12,11 +15,33 @@ export class CommandError extends Error {
 
 /** Runs a command and returns its stdout. Throws CommandError when it fails. */
 export function run(cmd: string, args: string[], opts: { cwd?: string; input?: string; env?: NodeJS.ProcessEnv } = {}): string {
+  const input = opts.input === undefined ? null : inputFile(opts.input);
   try {
-    return execFileSync(cmd, args, { cwd: opts.cwd, input: opts.input, env: opts.env ? { ...process.env, ...opts.env } : undefined, encoding: 'utf8', maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync(cmd, args, { cwd: opts.cwd, env: opts.env ? { ...process.env, ...opts.env } : undefined, encoding: 'utf8', maxBuffer: 1 << 30, stdio: [input ? input.fd : 'pipe', 'pipe', 'pipe'] });
   } catch (e) {
     const err = e as { status?: number | null; stderr?: string };
     throw new CommandError([cmd, ...args].join(' '), err.status ?? null, String(err.stderr ?? ''));
+  } finally {
+    input?.close();
+  }
+}
+
+/**
+ * The input of a command run synchronously, as a file it reads to its end. Through a pipe, on
+ * macOS, the command can read all of it and then wait for the pipe to close, which it never does,
+ * while untangle waits for the command: everything it serves stops answering.
+ */
+export function inputFile(text: string): { fd: number; close(): void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'untangle-input-'));
+  const remove = () => fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const file = path.join(dir, 'input');
+    fs.writeFileSync(file, text);
+    const fd = fs.openSync(file, 'r');
+    return { fd, close: () => { fs.closeSync(fd); remove(); } };
+  } catch (e) {
+    remove();
+    throw e;
   }
 }
 
