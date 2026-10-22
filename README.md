@@ -247,7 +247,8 @@ untangle watch | reply | note | notes | stop | skill | upgrade | reviews ...
 ### What it reviews
 
 - **A directory** (default `.`) reviews the pull request of its branch, found with `gh`. Without
-one, it reviews what the branch adds to the default branch, or to `-base <branch>`.
+one, it reviews what the branch adds to the default branch (in a fork whose origin is behind,
+upstream's or your own), or to `-base <branch>`.
 - **A pull request URL** (`https://github.com/<owner>/<repo>/pull/<number>`) is cloned into the
 cache first; the next pull request of the same repository only fetches.
 

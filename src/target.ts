@@ -109,6 +109,24 @@ export async function latestHead(t: Target, byUrl: boolean): Promise<string | nu
 }
 
 const hasCommit = (repo: string, sha: string) => gitMaybe(repo, 'cat-file', '-e', `${sha}^{commit}`) !== null;
+const tipOf = (repo: string, ref: string) => gitMaybe(repo, 'rev-parse', '--verify', `${ref}^{commit}`)?.trim() || null;
+
+/**
+ * Of a branch's copies, the one HEAD adds the fewest commits to: the copy HEAD left last. One that
+ * holds HEAD already counts only when all do, and the first wins a tie.
+ */
+function nearestCopy<T extends { tip: string | null }>(repo: string, head: string, copies: Array<T | null>): T | null {
+  let nearest: T | null = null;
+  let fewest = Infinity;
+  for (const copy of copies) {
+    if (!copy?.tip) continue;
+    const adds = Number(gitMaybe(repo, 'rev-list', '--count', `${copy.tip}..${head}`)) || Infinity;
+    if (nearest && adds >= fewest) continue;
+    nearest = copy;
+    fewest = adds;
+  }
+  return nearest;
+}
 
 /**
  * Where the comparison starts for a pull request: an open one compares with its base branch as
@@ -193,14 +211,22 @@ export async function resolveDirectory(dir: string, baseOverride: string | null,
       }
     } else {
       const def = remote && gitMaybe(repo, 'symbolic-ref', '--short', `refs/remotes/${remote}/HEAD`)?.trim();
-      baseRef = def ? def.slice(remote!.length + 1) : ['main', 'master'].find((b) => gitMaybe(repo, 'rev-parse', '--verify', `${b}^{commit}`)) || '';
-      if (!baseRef) throw new Error('no pull request for this branch and no default branch to compare with; pass -base <branch>');
-      notes.push(`no pull request for this branch: comparing with ${baseRef}`);
+      const branch = def ? def.slice(remote!.length + 1) : ['main', 'master'].find((b) => gitMaybe(repo, 'rev-parse', '--verify', `${b}^{commit}`)) || '';
+      if (!branch) throw new Error('no pull request for this branch and no default branch to compare with; pass -base <branch>');
+      let fetched: string | null = null;
       if (remote) {
-        say(`fetching ${remote}/${baseRef}`);
-        baseTip = await fetchBranch(repo, remote, baseRef);
-        if (!baseTip) notes.push(`could not fetch ${remote}/${baseRef}; using the local copy`);
+        say(`fetching ${remote}/${branch}`);
+        fetched = await fetchBranch(repo, remote, branch);
       }
+      // A fork's origin can lag the repository it came from: of origin's main, yours and the other
+      // remotes' (upstream first), compare with the one the branch left last.
+      const own = remote ? { ref: branch, tip: fetched ?? tipOf(repo, `refs/remotes/${remote}/${branch}`) } : null;
+      const others = remotes.filter((r) => r !== remote).sort((a, b) => Number(b === 'upstream') - Number(a === 'upstream'));
+      const nearest = nearestCopy(repo, headSha, [own, { ref: branch, tip: tipOf(repo, `refs/heads/${branch}`) }, ...others.map((r) => ({ ref: `${r}/${branch}`, tip: tipOf(repo, `refs/remotes/${r}/${branch}`) }))]);
+      baseRef = nearest?.ref ?? branch;
+      baseTip = nearest?.tip ?? null;
+      notes.push(`no pull request for this branch: comparing with ${baseRef}`);
+      if (own && nearest === own && !fetched) notes.push(`could not fetch ${remote}/${branch}; using the local copy`);
     }
     baseTip ??= gitMaybe(repo, 'rev-parse', '--verify', `${remote}/${baseRef}^{commit}`)?.trim() || gitMaybe(repo, 'rev-parse', '--verify', `${baseRef}^{commit}`)?.trim() || null;
     if (!baseTip) throw new Error(`cannot find ${baseRef} in ${repo}`);
